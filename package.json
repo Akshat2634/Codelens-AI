@@ -1,0 +1,33 @@
+{
+  "name": "ai-roi",
+  "version": "0.1.0",
+  "description": "Correlate Claude Code token usage with git output to measure AI coding agent ROI",
+  "type": "module",
+  "bin": {
+    "ai-roi": "./src/index.js"
+  },
+  "main": "./src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js --no-open"
+  },
+  "keywords": [
+    "claude",
+    "ai",
+    "roi",
+    "productivity",
+    "tokens",
+    "cost",
+    "git",
+    "dashboard"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "commander": "^13.0.0",
+    "express": "^5.0.0",
+    "open": "^10.0.0"
+  }
+}

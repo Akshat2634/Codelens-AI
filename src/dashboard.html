@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ai-roi — Agent Productivity Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary: #0d1117;
+      --bg-secondary: #161b22;
+      --bg-card: #1c2128;
+      --bg-hover: #262c36;
+      --border: #30363d;
+      --text-primary: #e6edf3;
+      --text-secondary: #8b949e;
+      --text-muted: #6e7681;
+      --accent-green: #3fb950;
+      --accent-red: #f85149;
+      --accent-orange: #d29922;
+      --accent-blue: #58a6ff;
+      --accent-purple: #bc8cff;
+      --accent-cyan: #39d2c0;
+      --grade-a: #3fb950;
+      --grade-b: #58a6ff;
+      --grade-c: #d29922;
+      --grade-d: #f0883e;
+      --grade-f: #f85149;
+      --radius: 12px;
+      --radius-sm: 8px;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    .container { max-width: 1280px; margin: 0 auto; padding: 24px; }
+
+    /* Header */
+    header {
+      text-align: center;
+      padding: 40px 0 32px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 32px;
+    }
+    header h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+    header .tagline {
+      color: var(--text-secondary);
+      font-size: 1.1rem;
+      font-weight: 300;
+    }
+    .meta-info {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      margin-top: 16px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    .meta-info .badge {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 12px;
+    }
+
+    /* Controls bar */
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      padding: 12px 16px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+    .toggle-group {
+      display: flex;
+      background: var(--bg-primary);
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .toggle-btn {
+      padding: 6px 16px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-family: inherit;
+      transition: all 0.2s;
+    }
+    .toggle-btn.active {
+      background: var(--accent-blue);
+      color: #fff;
+    }
+    .share-btn {
+      padding: 6px 16px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-primary);
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.85rem;
+      transition: all 0.2s;
+    }
+    .share-btn:hover { background: var(--bg-hover); }
+
+    /* Hero Stats */
+    .hero-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      text-align: center;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+    .stat-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent-blue);
+    }
+    .stat-card .label {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+    .stat-card .value {
+      font-size: 2rem;
+      font-weight: 700;
+    }
+    .stat-card .sub {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .stat-card.grade .value {
+      font-size: 3rem;
+      line-height: 1;
+    }
+
+    /* Insights */
+    .insights {
+      margin-bottom: 32px;
+    }
+    .insights h2 {
+      font-size: 1.1rem;
+      margin-bottom: 12px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+    .insight-list {
+      display: grid;
+      gap: 8px;
+    }
+    .insight {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px 16px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 0.9rem;
+    }
+    .insight .icon { font-size: 1.1rem; flex-shrink: 0; }
+    .insight.warning .icon { color: var(--accent-orange); }
+    .insight.success .icon { color: var(--accent-green); }
+    .insight.info .icon { color: var(--accent-blue); }
+    .insight.tip .icon { color: var(--accent-purple); }
+
+    /* Charts */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .chart-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .chart-card.full-width {
+      grid-column: 1 / -1;
+    }
+    .chart-card h3 {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+      font-weight: 500;
+    }
+    .chart-container {
+      position: relative;
+      width: 100%;
+      height: 300px;
+    }
+
+    /* Survival bar */
+    .survival-section {
+      margin-bottom: 32px;
+    }
+    .survival-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+    }
+    .survival-card h3 {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .survival-card .tooltip-icon {
+      width: 16px;
+      height: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: var(--bg-hover);
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      cursor: help;
+      position: relative;
+    }
+    .tooltip-icon .tooltip-text {
+      visibility: hidden;
+      width: 260px;
+      background: var(--bg-primary);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 400;
+      position: absolute;
+      bottom: 130%;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      line-height: 1.4;
+    }
+    .tooltip-icon:hover .tooltip-text { visibility: visible; }
+    .survival-bar {
+      height: 24px;
+      background: var(--bg-hover);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .survival-bar .fill {
+      height: 100%;
+      border-radius: 12px;
+      transition: width 0.8s ease;
+    }
+    .survival-stats {
+      display: flex;
+      gap: 24px;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+    }
+    .survival-stats span { color: var(--text-primary); font-weight: 500; }
+
+    /* Heatmap */
+    .heatmap-grid {
+      display: grid;
+      grid-template-columns: 40px repeat(24, 1fr);
+      gap: 2px;
+    }
+    .heatmap-label {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding-right: 6px;
+    }
+    .heatmap-cell {
+      aspect-ratio: 1;
+      border-radius: 3px;
+      min-height: 14px;
+      transition: transform 0.15s;
+      cursor: default;
+    }
+    .heatmap-cell:hover { transform: scale(1.3); }
+    .heatmap-hour-labels {
+      display: grid;
+      grid-template-columns: 40px repeat(24, 1fr);
+      gap: 2px;
+      margin-top: 4px;
+    }
+    .heatmap-hour-label {
+      font-size: 0.6rem;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    /* Sessions table */
+    .sessions-section {
+      margin-bottom: 32px;
+    }
+    .sessions-section h2 {
+      font-size: 1.1rem;
+      margin-bottom: 12px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+    .sessions-table-wrap {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    thead th {
+      padding: 12px 12px;
+      text-align: left;
+      color: var(--text-secondary);
+      font-weight: 500;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    thead th:hover { color: var(--text-primary); }
+    thead th.sorted { color: var(--accent-blue); }
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background 0.15s;
+    }
+    tbody tr:hover { background: var(--bg-hover); }
+    tbody tr:last-child { border-bottom: none; }
+    tbody td {
+      padding: 10px 12px;
+      white-space: nowrap;
+    }
+    .grade-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 0.85rem;
+    }
+    tr.orphaned { background: rgba(210, 153, 34, 0.08); }
+    .expand-row {
+      display: none;
+      background: var(--bg-secondary);
+    }
+    .expand-row.open { display: table-row; }
+    .expand-content {
+      padding: 12px 16px;
+      font-size: 0.8rem;
+    }
+    .expand-content .commit-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .expand-content .commit-item:last-child { border-bottom: none; }
+    .commit-hash {
+      font-family: 'SF Mono', Monaco, monospace;
+      color: var(--accent-blue);
+      font-size: 0.8rem;
+    }
+    .commit-branch {
+      font-size: 0.7rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--bg-hover);
+      color: var(--text-muted);
+    }
+    .main-badge { background: rgba(63, 185, 80, 0.15); color: var(--accent-green); }
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 12px;
+      border-top: 1px solid var(--border);
+    }
+    .pagination button {
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.8rem;
+    }
+    .pagination button:disabled { opacity: 0.4; cursor: default; }
+    .pagination span { font-size: 0.8rem; color: var(--text-muted); }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 32px 0;
+      border-top: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 0.8rem;
+    }
+    footer a { color: var(--accent-blue); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* Loading */
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 80px 0;
+      color: var(--text-secondary);
+    }
+    .spinner {
+      width: 24px;
+      height: 24px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent-blue);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .hero-stats { grid-template-columns: repeat(2, 1fr); }
+      .charts-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 600px) {
+      .hero-stats { grid-template-columns: 1fr; }
+      .container { padding: 16px; }
+      header h1 { font-size: 1.8rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>ai-roi</h1>
+      <p class="tagline">Is your AI agent actually shipping code?</p>
+      <div class="meta-info">
+        <span class="badge" id="date-range"></span>
+        <span class="badge">All data stays local</span>
+      </div>
+    </header>
+
+    <div id="app">
+      <div class="loading">
+        <div class="spinner"></div>
+        Loading dashboard data...
+      </div>
+    </div>
+
+    <footer>
+      Built with <strong>ai-roi</strong> &mdash; <a href="https://github.com/YOUR_USERNAME/ai-roi">GitHub</a>
+    </footer>
+  </div>
+
+<script>
+const GRADE_COLORS = { A: '#3fb950', B: '#58a6ff', C: '#d29922', D: '#f0883e', F: '#f85149' };
+const INSIGHT_ICONS = { warning: '!', success: '+', info: 'i', tip: '*' };
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+let DATA = null;
+let mainOnly = false;
+let currentPage = 1;
+let sortCol = 'startTime';
+let sortOrder = -1;
+
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    const res = await fetch('/api/all');
+    DATA = await res.json();
+    render();
+  } catch (err) {
+    document.getElementById('app').innerHTML = `
+      <div class="loading" style="color: var(--accent-red);">
+        Failed to load data: ${err.message}
+      </div>`;
+  }
+});
+
+function render() {
+  const d = DATA;
+  document.getElementById('date-range').textContent = `Last ${d.meta.daysAnalyzed} days`;
+
+  document.getElementById('app').innerHTML = `
+    ${renderControls()}
+    ${renderHeroStats(d.summary)}
+    ${renderInsights(d.insights)}
+    <div class="charts-grid">
+      <div class="chart-card full-width">
+        <h3>Cost vs Output Over Time</h3>
+        <div class="chart-container"><canvas id="chart-timeline"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Model Cost Breakdown</h3>
+        <div class="chart-container"><canvas id="chart-models"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Tool Usage Distribution</h3>
+        <div class="chart-container"><canvas id="chart-tools"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Session Length vs Efficiency</h3>
+        <div class="chart-container"><canvas id="chart-buckets"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Productivity Heatmap (commits by hour & day)</h3>
+        <div id="heatmap-container"></div>
+      </div>
+    </div>
+    ${renderSurvival(d.lineSurvival)}
+    ${renderSessionsTable(d.sessions)}
+  `;
+
+  initCharts();
+  initHeatmap();
+  bindEvents();
+}
+
+function renderControls() {
+  return `<div class="controls">
+    <div class="toggle-group">
+      <button class="toggle-btn ${!mainOnly ? 'active' : ''}" onclick="setMainOnly(false)">All Branches</button>
+      <button class="toggle-btn ${mainOnly ? 'active' : ''}" onclick="setMainOnly(true)">Main Only</button>
+    </div>
+    <button class="share-btn" onclick="shareReport()">Copy Summary</button>
+  </div>`;
+}
+
+function renderHeroStats(s) {
+  const gradeColor = GRADE_COLORS[s.overallGrade] || GRADE_COLORS.F;
+  return `<div class="hero-stats">
+    <div class="stat-card">
+      <div class="label">Total AI Cost</div>
+      <div class="value" style="color: var(--accent-orange);">$${s.totalCost.toFixed(2)}</div>
+      <div class="sub">${s.totalSessions} sessions</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Commits Shipped</div>
+      <div class="value" style="color: var(--accent-green);">${s.totalCommits}</div>
+      <div class="sub">${mainOnly ? s.totalCommitsOnMain + ' on main' : s.totalLinesAdded.toLocaleString() + ' lines added'}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Avg Cost / Commit</div>
+      <div class="value" style="color: var(--accent-blue);">${s.avgCostPerCommit !== null ? '$' + s.avgCostPerCommit.toFixed(2) : 'N/A'}</div>
+      <div class="sub">${s.mainBranchPct}% landed on main</div>
+    </div>
+    <div class="stat-card grade">
+      <div class="label">ROI Grade</div>
+      <div class="value" style="color: ${gradeColor};">${s.overallGrade}</div>
+      <div class="sub">${s.orphanedSessionRate}% sessions orphaned</div>
+    </div>
+  </div>`;
+}
+
+function renderInsights(insights) {
+  if (!insights.length) return '';
+  return `<div class="insights">
+    <h2>Insights</h2>
+    <div class="insight-list">
+      ${insights.map(i => `
+        <div class="insight ${i.type}">
+          <span class="icon">${INSIGHT_ICONS[i.type] || 'i'}</span>
+          <span>${i.text}</span>
+        </div>
+      `).join('')}
+    </div>
+  </div>`;
+}
+
+function renderSurvival(s) {
+  const pct = s.survivalRate;
+  const color = pct >= 80 ? 'var(--accent-green)' : pct >= 50 ? 'var(--accent-orange)' : 'var(--accent-red)';
+  return `<div class="survival-section">
+    <div class="survival-card">
+      <h3>
+        Line Survival Rate
+        <span class="tooltip-icon">i
+          <span class="tooltip-text">Approximate — based on 24h churn detection, not git blame tracking. Lines added in a commit and deleted within 24h on the same file are counted as churned.</span>
+        </span>
+      </h3>
+      <div class="survival-bar"><div class="fill" style="width: ${pct}%; background: ${color};"></div></div>
+      <div class="survival-stats">
+        <div><span>${s.totalAdded.toLocaleString()}</span> lines added</div>
+        <div><span>${s.totalChurned.toLocaleString()}</span> churned within 24h</div>
+        <div><span>${s.surviving.toLocaleString()}</span> surviving</div>
+        <div><span style="color:${color};">${pct}%</span> survival rate</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderSessionsTable(sessions) {
+  const pageSize = 20;
+  const totalPages = Math.ceil(sessions.length / pageSize);
+  const page = Math.min(currentPage, totalPages || 1);
+  const sorted = [...sessions].sort((a, b) => {
+    const av = getSortValue(a, sortCol);
+    const bv = getSortValue(b, sortCol);
+    if (typeof av === 'string') return sortOrder * av.localeCompare(bv);
+    return sortOrder * ((av ?? -Infinity) - (bv ?? -Infinity));
+  });
+  const pageData = sorted.slice((page - 1) * pageSize, page * pageSize);
+
+  const thArrow = col => col === sortCol ? (sortOrder === 1 ? ' ^' : ' v') : '';
+
+  return `<div class="sessions-section">
+    <h2>Sessions (${sessions.length})</h2>
+    <div class="sessions-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="sortTable('startTime')" class="${sortCol === 'startTime' ? 'sorted' : ''}">Date${thArrow('startTime')}</th>
+            <th onclick="sortTable('projectName')" class="${sortCol === 'projectName' ? 'sorted' : ''}">Project${thArrow('projectName')}</th>
+            <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')}</th>
+            <th onclick="sortTable('msgCount')" class="${sortCol === 'msgCount' ? 'sorted' : ''}">Msgs${thArrow('msgCount')}</th>
+            <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')}</th>
+            <th onclick="sortTable('commitCount')" class="${sortCol === 'commitCount' ? 'sorted' : ''}">Commits${thArrow('commitCount')}</th>
+            <th onclick="sortTable('linesAdded')" class="${sortCol === 'linesAdded' ? 'sorted' : ''}">Lines${thArrow('linesAdded')}</th>
+            <th>Grade</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${pageData.map((s, i) => {
+            const idx = (page - 1) * pageSize + i;
+            const gradeColor = GRADE_COLORS[s.grade] || GRADE_COLORS.F;
+            const modelShort = (s.model || 'unknown').replace('claude-', '').replace(/-\d.*/, '');
+            const rowClass = s.isOrphaned ? 'orphaned' : '';
+            return `
+              <tr class="${rowClass}" style="cursor:pointer;" onclick="toggleExpand(${idx})">
+                <td>${formatDate(s.startTime)}</td>
+                <td>${s.projectName || '—'}</td>
+                <td>${modelShort}</td>
+                <td>${s.userMessageCount + s.assistantMessageCount}</td>
+                <td>$${s.cost.totalCost.toFixed(2)}</td>
+                <td>${s.commitCount}</td>
+                <td>+${s.linesAdded} / -${s.linesDeleted}</td>
+                <td><span class="grade-badge" style="background:${gradeColor}22;color:${gradeColor};">${s.grade}</span></td>
+              </tr>
+              <tr class="expand-row" id="expand-${idx}">
+                <td colspan="8">
+                  <div class="expand-content">
+                    ${s.commits.length > 0 ? s.commits.map(c => `
+                      <div class="commit-item">
+                        <span class="commit-hash">${c.hash.slice(0, 7)}</span>
+                        <span class="commit-branch ${c.onMain ? 'main-badge' : ''}">${c.onMain ? 'main' : c.branches[0] || 'branch'}</span>
+                        <span>${c.subject}</span>
+                        <span style="margin-left:auto;color:var(--text-muted);">+${c.totalAdded}/-${c.totalDeleted}</span>
+                      </div>
+                    `).join('') : '<div style="color:var(--text-muted);">No matched commits</div>'}
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+      <div class="pagination">
+        <button onclick="changePage(-1)" ${page <= 1 ? 'disabled' : ''}>Prev</button>
+        <span>Page ${page} of ${totalPages || 1}</span>
+        <button onclick="changePage(1)" ${page >= totalPages ? 'disabled' : ''}>Next</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function getSortValue(session, col) {
+  if (col === 'cost.totalCost') return session.cost?.totalCost ?? 0;
+  if (col === 'msgCount') return (session.userMessageCount || 0) + (session.assistantMessageCount || 0);
+  return session[col];
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function initCharts() {
+  Chart.defaults.color = '#8b949e';
+  Chart.defaults.borderColor = '#30363d';
+  Chart.defaults.font.family = 'Inter';
+
+  // Timeline chart
+  const daily = DATA.daily;
+  new Chart(document.getElementById('chart-timeline'), {
+    type: 'line',
+    data: {
+      labels: daily.map(d => d.date),
+      datasets: [
+        {
+          label: 'Cost ($)',
+          data: daily.map(d => d.cost),
+          borderColor: '#d29922',
+          backgroundColor: 'rgba(210,153,34,0.1)',
+          fill: true,
+          tension: 0.3,
+          yAxisID: 'y',
+        },
+        {
+          label: 'Lines Added',
+          data: daily.map(d => d.linesAdded),
+          borderColor: '#3fb950',
+          backgroundColor: 'rgba(63,185,80,0.1)',
+          fill: true,
+          tension: 0.3,
+          yAxisID: 'y1',
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'top' } },
+      scales: {
+        y: { type: 'linear', position: 'left', title: { display: true, text: 'Cost ($)' } },
+        y1: { type: 'linear', position: 'right', title: { display: true, text: 'Lines Added' }, grid: { drawOnChartArea: false } },
+      },
+    },
+  });
+
+  // Model doughnut
+  const models = DATA.modelBreakdown;
+  const modelLabels = Object.keys(models).filter(k => models[k].cost > 0);
+  const modelColors = { opus: '#bc8cff', sonnet: '#58a6ff', haiku: '#3fb950', unknown: '#8b949e' };
+  new Chart(document.getElementById('chart-models'), {
+    type: 'doughnut',
+    data: {
+      labels: modelLabels.map(m => m.charAt(0).toUpperCase() + m.slice(1)),
+      datasets: [{
+        data: modelLabels.map(m => models[m].cost),
+        backgroundColor: modelLabels.map(m => modelColors[m] || '#8b949e'),
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const model = modelLabels[ctx.dataIndex];
+              const d = models[model];
+              return ` $${d.cost.toFixed(2)} | ${d.sessions} sessions | ${d.commits} commits`;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  // Tool usage horizontal bar
+  const tools = DATA.toolBreakdown;
+  const toolEntries = Object.entries(tools).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  new Chart(document.getElementById('chart-tools'), {
+    type: 'bar',
+    data: {
+      labels: toolEntries.map(([t]) => t),
+      datasets: [{
+        data: toolEntries.map(([, c]) => c),
+        backgroundColor: toolEntries.map((_, i) => {
+          const hue = 200 + i * 15;
+          return `hsl(${hue}, 60%, 55%)`;
+        }),
+        borderWidth: 0,
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { grid: { display: false } } },
+    },
+  });
+
+  // Session buckets
+  const buckets = DATA.sessionBuckets;
+  const bucketLabels = Object.keys(buckets);
+  new Chart(document.getElementById('chart-buckets'), {
+    type: 'bar',
+    data: {
+      labels: bucketLabels,
+      datasets: [
+        {
+          label: 'Avg $/Commit',
+          data: bucketLabels.map(b => buckets[b].avgCostPerCommit),
+          backgroundColor: '#58a6ff',
+          borderRadius: 4,
+          yAxisID: 'y',
+        },
+        {
+          label: 'Sessions',
+          data: bucketLabels.map(b => buckets[b].sessions),
+          backgroundColor: 'rgba(188,140,255,0.4)',
+          borderRadius: 4,
+          yAxisID: 'y1',
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'top' } },
+      scales: {
+        y: { type: 'linear', position: 'left', title: { display: true, text: 'Avg $/Commit' } },
+        y1: { type: 'linear', position: 'right', title: { display: true, text: 'Sessions' }, grid: { drawOnChartArea: false } },
+      },
+    },
+  });
+}
+
+function initHeatmap() {
+  const container = document.getElementById('heatmap-container');
+  if (!container) return;
+  const heatmap = DATA.heatmap.commits;
+  const maxVal = Math.max(1, ...heatmap.flat());
+
+  let html = '<div class="heatmap-grid">';
+  for (let day = 0; day < 7; day++) {
+    html += `<div class="heatmap-label">${DAY_LABELS[day]}</div>`;
+    for (let hour = 0; hour < 24; hour++) {
+      const val = heatmap[day][hour];
+      const intensity = val / maxVal;
+      const bg = val === 0 ? 'var(--bg-hover)' : `rgba(63,185,80,${0.2 + intensity * 0.8})`;
+      html += `<div class="heatmap-cell" style="background:${bg};" title="${DAY_LABELS[day]} ${hour}:00 — ${val} commits"></div>`;
+    }
+  }
+  html += '</div>';
+
+  html += '<div class="heatmap-hour-labels"><div></div>';
+  for (let h = 0; h < 24; h++) {
+    html += `<div class="heatmap-hour-label">${h % 3 === 0 ? h : ''}</div>`;
+  }
+  html += '</div>';
+
+  container.innerHTML = html;
+}
+
+function bindEvents() {}
+
+window.setMainOnly = function(val) {
+  mainOnly = val;
+  render();
+};
+
+window.toggleExpand = function(idx) {
+  const row = document.getElementById(`expand-${idx}`);
+  if (row) row.classList.toggle('open');
+};
+
+window.sortTable = function(col) {
+  if (sortCol === col) { sortOrder *= -1; }
+  else { sortCol = col; sortOrder = -1; }
+  currentPage = 1;
+  render();
+};
+
+window.changePage = function(delta) {
+  currentPage += delta;
+  render();
+};
+
+window.shareReport = function() {
+  const s = DATA.summary;
+  const text = [
+    '=== ai-roi Report ===',
+    `Period: Last ${DATA.meta.daysAnalyzed} days`,
+    `Total AI Cost: $${s.totalCost.toFixed(2)}`,
+    `Sessions: ${s.totalSessions}`,
+    `Commits Shipped: ${s.totalCommits}`,
+    `Lines Added: ${s.totalLinesAdded.toLocaleString()}`,
+    `Avg Cost/Commit: ${s.avgCostPerCommit !== null ? '$' + s.avgCostPerCommit.toFixed(2) : 'N/A'}`,
+    `Line Survival: ${s.lineSurvivalRate}%`,
+    `Overall Grade: ${s.overallGrade}`,
+    `Orphaned Sessions: ${s.orphanedSessionRate}%`,
+    `Commits on Main: ${s.mainBranchPct}%`,
+    '',
+    'Generated by ai-roi',
+  ].join('\n');
+
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('.share-btn');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = orig, 2000);
+  });
+};
+</script>
+</body>
+</html>
