@@ -79,12 +79,22 @@
       padding: 4px 12px;
     }
 
+    /* Shared section heading style */
+    .stats-section {
+      margin-bottom: 32px;
+    }
+    .stats-section h2 {
+      font-size: 1.1rem;
+      margin-bottom: 12px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
     /* Hero Stats */
     .hero-stats {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
       gap: 16px;
-      margin-bottom: 32px;
     }
     .stat-card {
       background: var(--bg-card);
@@ -93,6 +103,8 @@
       padding: 24px;
       text-align: center;
       transition: transform 0.2s, border-color 0.2s;
+      position: relative;
+      overflow: hidden;
     }
     .stat-card:hover {
       transform: translateY(-2px);
@@ -117,6 +129,14 @@
     .stat-card.grade .value {
       font-size: 3rem;
       line-height: 1;
+    }
+    .stat-card.glow::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+      border-radius: var(--radius) var(--radius) 0 0;
     }
 
     /* Insights */
@@ -466,15 +486,6 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* Token Usage Section */
-    .token-section {
-      margin-bottom: 32px;
-    }
-    .token-section h2 {
-      font-size: 1.1rem;
-      margin-bottom: 12px;
-      color: var(--text-secondary);
-      font-weight: 500;
-    }
     .token-stats {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -719,27 +730,30 @@ function render() {
 
 function renderHeroStats(s) {
   const gradeColor = GRADE_COLORS[s.overallGrade] || GRADE_COLORS.F;
-  return `<div class="hero-stats">
-    <div class="stat-card">
+  return `<div class="stats-section">
+    <h2>Performance Overview <i class="info-tip" data-tip="High-level metrics for your AI coding sessions — cost, output, efficiency, and overall grade.">i</i></h2>
+    <div class="hero-stats">
+    <div class="stat-card glow">
       <div class="label">Total AI Cost <i class="info-tip" data-tip="Estimated cost based on Anthropic's per-token pricing (input/output per 1M tokens): Opus 4.5/4.6: $5/$25, Opus 4.0/4.1: $15/$75, Sonnet 3.7/4.0/4.5/4.6: $3/$15, Haiku 4.5: $1/$5, Haiku 3.5: $0.80/$4, Haiku 3: $0.25/$1.25. Cache reads 90% cheaper, cache writes 25% more.">i</i></div>
       <div class="value" style="color: var(--accent-orange);">$${s.totalCost.toFixed(2)}</div>
       <div class="sub">${s.totalSessions} sessions</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card glow">
       <div class="label">Commits Shipped <i class="info-tip" data-tip="Git commits matched by file overlap — when a commit touches files that Claude edited during a session. For chat-only sessions, falls back to a 2-hour time window.">i</i></div>
       <div class="value" style="color: var(--accent-green);">${s.totalCommits}</div>
       <div class="sub">${s.totalLinesAdded.toLocaleString()} lines added</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card glow">
       <div class="label">Avg Cost / Commit <i class="info-tip" data-tip="Total AI cost divided by total commits produced. Lower is better — means your agent is efficient.">i</i></div>
       <div class="value" style="color: var(--accent-blue);">${s.avgCostPerCommit !== null ? '$' + s.avgCostPerCommit.toFixed(2) : 'N/A'}</div>
       <div class="sub">${s.totalFilesChanged} files changed</div>
     </div>
-    <div class="stat-card grade">
+    <div class="stat-card grade glow">
       <div class="label">ROI Grade <i class="info-tip" data-tip="Overall efficiency grade from A (great) to F (poor). Based on cost-per-commit and code survival. A: &le;$2, B: &le;$5, C: &le;$15, D: &le;$30, F: >$30 or no commits.">i</i></div>
       <div class="value" style="color: ${gradeColor};">${s.overallGrade}</div>
       <div class="sub">${s.orphanedSessionRate}% sessions orphaned</div>
     </div>
+  </div>
   </div>`;
 }
 
@@ -781,7 +795,7 @@ function renderSurvival(s) {
 function renderTokenHeroStats(t) {
   const effColor = t.tokenEfficiencyRate >= 70 ? 'var(--accent-green)' : t.tokenEfficiencyRate >= 40 ? 'var(--accent-orange)' : 'var(--accent-red)';
   const wastePct = t.totalAllTokens > 0 ? Math.round((t.tokensOrphaned / t.totalAllTokens) * 100) : 0;
-  return `<div class="token-section">
+  return `<div class="stats-section">
     <h2>Token Usage <i class="info-tip" data-tip="Raw token consumption across all sessions. Tracks input (prompts/context), output (generated text), and cache tokens.">i</i></h2>
     <div class="token-stats">
       <div class="token-stat-card glow">
