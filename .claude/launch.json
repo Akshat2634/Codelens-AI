@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ai-roi-dashboard",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["src/index.js", "--no-open"],
+      "port": 3457
+    },
+    {
+      "name": "ai-roi-dashboard-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3457
+    }
+  ]
+}

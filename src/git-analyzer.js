@@ -12,22 +12,40 @@ export function getGitUser() {
   }
 }
 
-function getMainBranchHashes(repoPath) {
-  // Determine main branch name
-  let mainBranch = 'main';
+function detectMainBranch(repoPath) {
+  // 1. Try git symbolic-ref to get the remote HEAD (most reliable)
+  try {
+    const ref = execSync(
+      `git -C "${repoPath}" symbolic-ref refs/remotes/origin/HEAD`,
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    // ref looks like "refs/remotes/origin/main" — extract the branch name
+    const branch = ref.replace('refs/remotes/origin/', '');
+    if (branch) return branch;
+  } catch {
+    // origin/HEAD not set — fall through to heuristics
+  }
+
+  // 2. Fallback: check local branches for common production branch names
   try {
     const branches = execSync(`git -C "${repoPath}" branch --list`, { encoding: 'utf-8' });
-    if (branches.includes('main')) {
-      mainBranch = 'main';
-    } else if (branches.includes('master')) {
-      mainBranch = 'master';
-    } else {
-      // No main/master branch found
-      return new Set();
+    const candidates = ['main', 'master', 'prod', 'production', 'release', 'develop'];
+    for (const name of candidates) {
+      // Match whole branch name to avoid partial matches (e.g. "main" in "domain")
+      if (branches.split('\n').some(b => b.trim().replace('* ', '') === name)) {
+        return name;
+      }
     }
   } catch {
-    return new Set();
+    // ignore
   }
+
+  return null;
+}
+
+function getMainBranchHashes(repoPath) {
+  const mainBranch = detectMainBranch(repoPath);
+  if (!mainBranch) return new Set();
 
   try {
     const raw = execSync(
