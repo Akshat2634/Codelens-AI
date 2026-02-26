@@ -498,13 +498,15 @@
       padding: 24px;
       text-align: center;
       transition: transform 0.2s, border-color 0.2s;
-      position: relative;
-      overflow: hidden;
+      border-top: 3px solid var(--border);
     }
     .token-stat-card:hover {
       transform: translateY(-2px);
-      border-color: var(--accent-purple);
     }
+    .token-stat-card.burned { border-top-color: var(--accent-orange); }
+    .token-stat-card.wasted { border-top-color: var(--accent-red); }
+    .token-stat-card.efficiency { border-top-color: var(--accent-green); }
+    .token-stat-card.per-commit { border-top-color: var(--accent-cyan); }
     .token-stat-card .label {
       font-size: 0.8rem;
       color: var(--text-secondary);
@@ -521,16 +523,49 @@
       color: var(--text-muted);
       margin-top: 4px;
     }
-    .token-stat-card.glow::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 3px;
-      background: linear-gradient(90deg, var(--accent-purple), var(--accent-cyan));
-      border-radius: var(--radius) var(--radius) 0 0;
+
+    /* Cost Breakdown by Period */
+    .period-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
     }
-    .token-stat-card.waste {
-      border-left: 3px solid var(--accent-red);
+    .period-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      text-align: center;
+      transition: transform 0.2s, border-color 0.2s;
+      border-top: 3px solid var(--border);
+    }
+    .period-card:hover {
+      transform: translateY(-2px);
+    }
+    .period-card.today { border-top-color: var(--accent-green); }
+    .period-card.week { border-top-color: var(--accent-blue); }
+    .period-card.month { border-top-color: var(--accent-purple); }
+    .period-card.all-time { border-top-color: var(--accent-orange); }
+    .period-card .period-label {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+    .period-card .period-cost {
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .period-card.today .period-cost { color: var(--accent-green); }
+    .period-card.week .period-cost { color: var(--accent-blue); }
+    .period-card.month .period-cost { color: var(--accent-purple); }
+    .period-card.all-time .period-cost { color: var(--accent-orange); }
+    .period-card .period-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      line-height: 1.5;
     }
 
     /* Token Flow Funnel */
@@ -609,11 +644,13 @@
     @media (max-width: 900px) {
       .hero-stats { grid-template-columns: repeat(2, 1fr); }
       .token-stats { grid-template-columns: repeat(2, 1fr); }
+      .period-stats { grid-template-columns: repeat(2, 1fr); }
       .charts-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 600px) {
       .hero-stats { grid-template-columns: 1fr; }
       .token-stats { grid-template-columns: 1fr; }
+      .period-stats { grid-template-columns: repeat(2, 1fr); }
       .container { padding: 16px; }
       header h1 { font-size: 1.8rem; }
     }
@@ -683,6 +720,7 @@ function render() {
 
   document.getElementById('app').innerHTML = `
     ${renderHeroStats(summary)}
+    ${renderCostByPeriod(summary.costByPeriod)}
     ${renderTokenHeroStats(t)}
     ${renderTokenFunnel(t)}
     ${renderTokenFunFacts(t.funFacts)}
@@ -723,8 +761,10 @@ function render() {
     ${renderSessionsTable(d.sessions)}
   `;
 
-  initCharts();
-  initHeatmap();
+  if (typeof Chart !== 'undefined') {
+    initCharts();
+    initHeatmap();
+  }
   bindEvents();
 }
 
@@ -754,6 +794,35 @@ function renderHeroStats(s) {
       <div class="sub">${s.orphanedSessionRate}% sessions orphaned</div>
     </div>
   </div>
+  </div>`;
+}
+
+function renderCostByPeriod(p) {
+  if (!p) return '';
+  return `<div class="stats-section">
+    <h2>Cost Breakdown <i class="info-tip" data-tip="Spending breakdown across time periods — today, this week, this month, and all time.">i</i></h2>
+    <div class="period-stats">
+      <div class="period-card today">
+        <div class="period-label">Today</div>
+        <div class="period-cost">$${p.today.cost.toFixed(2)}</div>
+        <div class="period-meta">${p.today.sessions} sessions &middot; ${p.today.commits} commits</div>
+      </div>
+      <div class="period-card week">
+        <div class="period-label">This Week</div>
+        <div class="period-cost">$${p.week.cost.toFixed(2)}</div>
+        <div class="period-meta">${p.week.sessions} sessions &middot; ${p.week.commits} commits</div>
+      </div>
+      <div class="period-card month">
+        <div class="period-label">This Month</div>
+        <div class="period-cost">$${p.month.cost.toFixed(2)}</div>
+        <div class="period-meta">${p.month.sessions} sessions &middot; ${p.month.commits} commits</div>
+      </div>
+      <div class="period-card all-time">
+        <div class="period-label">All Time</div>
+        <div class="period-cost">$${p.allTime.cost.toFixed(2)}</div>
+        <div class="period-meta">${p.allTime.sessions} sessions &middot; ${p.allTime.commits} commits</div>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -798,22 +867,22 @@ function renderTokenHeroStats(t) {
   return `<div class="stats-section">
     <h2>Token Usage <i class="info-tip" data-tip="Raw token consumption across all sessions. Tracks input (prompts/context), output (generated text), and cache tokens.">i</i></h2>
     <div class="token-stats">
-      <div class="token-stat-card glow">
+      <div class="token-stat-card burned">
         <div class="label">Total Tokens Burned <i class="info-tip" data-tip="Sum of all input, output, cache-read, and cache-creation tokens across every session.">i</i></div>
         <div class="value" style="color: var(--accent-orange);">${formatTokens(t.totalAllTokens)}</div>
         <div class="sub">input: ${formatTokens(t.totalInputTokens)} / output: ${formatTokens(t.totalOutputTokens)}</div>
       </div>
-      <div class="token-stat-card waste">
-        <div class="label">Tokens WASTED <i class="info-tip" data-tip="Tokens consumed in orphaned sessions — sessions with 10+ messages that produced zero commits. These tokens generated nothing that shipped.">i</i></div>
+      <div class="token-stat-card wasted">
+        <div class="label">Tokens Wasted <i class="info-tip" data-tip="Tokens consumed in orphaned sessions — sessions with 10+ messages that produced zero commits. These tokens generated nothing that shipped.">i</i></div>
         <div class="value" style="color: var(--accent-red);">${formatTokens(t.tokensOrphaned)}</div>
         <div class="sub">${wastePct}% of total — $${t.costOrphaned.toFixed(2)} burned</div>
       </div>
-      <div class="token-stat-card">
+      <div class="token-stat-card efficiency">
         <div class="label">Token Efficiency <i class="info-tip" data-tip="Percentage of total tokens consumed in sessions that produced at least one commit.">i</i></div>
         <div class="value" style="color: ${effColor};">${t.tokenEfficiencyRate}%</div>
         <div class="sub">tokens that shipped code</div>
       </div>
-      <div class="token-stat-card">
+      <div class="token-stat-card per-commit">
         <div class="label">Tokens per Commit <i class="info-tip" data-tip="Average total tokens consumed per git commit produced. Lower is more efficient.">i</i></div>
         <div class="value" style="color: var(--accent-cyan);">${formatTokens(t.tokensPerCommit)}</div>
         <div class="sub">${formatTokens(t.tokensPerLineAdded)} per line added</div>

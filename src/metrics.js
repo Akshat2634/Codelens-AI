@@ -502,6 +502,25 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     grade: computeSessionGrade(s),
   }));
 
+  // ---- Cost breakdown by time period ----
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay());
+  startOfWeek.setHours(0, 0, 0, 0);
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const costByPeriod = { today: { cost: 0, sessions: 0, commits: 0 }, week: { cost: 0, sessions: 0, commits: 0 }, month: { cost: 0, sessions: 0, commits: 0 }, allTime: { cost: 0, sessions: 0, commits: 0 } };
+  for (const session of correlatedSessions) {
+    const sDate = new Date(session.startTime);
+    const sDateStr = `${sDate.getFullYear()}-${String(sDate.getMonth() + 1).padStart(2, '0')}-${String(sDate.getDate()).padStart(2, '0')}`;
+    costByPeriod.allTime.cost += session.cost.totalCost;
+    costByPeriod.allTime.sessions++;
+    costByPeriod.allTime.commits += session.commitCount;
+    if (sDate >= startOfMonth) { costByPeriod.month.cost += session.cost.totalCost; costByPeriod.month.sessions++; costByPeriod.month.commits += session.commitCount; }
+    if (sDate >= startOfWeek) { costByPeriod.week.cost += session.cost.totalCost; costByPeriod.week.sessions++; costByPeriod.week.commits += session.commitCount; }
+    if (sDateStr === todayStr) { costByPeriod.today.cost += session.cost.totalCost; costByPeriod.today.sessions++; costByPeriod.today.commits += session.commitCount; }
+  }
+
   const summary = {
     totalCost,
     totalSessions,
@@ -522,6 +541,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     organicCommitCount: organicCommits.length,
     bestDay,
     worstDay,
+    costByPeriod,
   };
 
   // ---- Token analytics ----
