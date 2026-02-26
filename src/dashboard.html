@@ -90,53 +90,128 @@
       font-weight: 500;
     }
 
-    /* Hero Stats */
+    /* Hero Stats — 3+1 layout */
     .hero-stats {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
+      grid-template-columns: 1fr 220px;
+      gap: 20px;
+      align-items: stretch;
+    }
+    .hero-stats-left {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
     .stat-card {
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 24px;
-      text-align: center;
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
       transition: transform 0.2s, border-color 0.2s;
       position: relative;
       overflow: hidden;
+      text-align: left;
     }
     .stat-card:hover {
       transform: translateY(-2px);
       border-color: var(--accent-blue);
-    }
-    .stat-card .label {
-      font-size: 0.8rem;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
-    }
-    .stat-card .value {
-      font-size: 2rem;
-      font-weight: 700;
-    }
-    .stat-card .sub {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      margin-top: 4px;
-    }
-    .stat-card.grade .value {
-      font-size: 3rem;
-      line-height: 1;
     }
     .stat-card.glow::before {
       content: '';
       position: absolute;
       top: 0; left: 0; right: 0;
       height: 3px;
-      background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
       border-radius: var(--radius) var(--radius) 0 0;
+    }
+    .stat-card.glow.cost-card::before { background: var(--accent-orange); }
+    .stat-card.glow.commits-card::before { background: var(--accent-green); }
+    .stat-card.glow.avg-card::before { background: var(--accent-blue); }
+    .stat-card.glow.grade-card::before { background: linear-gradient(90deg, var(--accent-blue), var(--accent-green)); }
+    .stat-card .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .stat-card .stat-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .stat-card .stat-value-wrap {
+      margin-left: auto;
+      text-align: right;
+    }
+    .stat-card .label {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+    .stat-card .value {
+      font-size: 1.8rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .stat-card .sub {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 0;
+    }
+    .stat-card.grade {
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+    }
+    .stat-card.grade .value {
+      font-size: 3.5rem;
+      line-height: 1;
+      font-weight: 800;
+    }
+    .grade-circle {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 12px;
+      position: relative;
+    }
+    .grade-circle::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      padding: 4px;
+      background: conic-gradient(var(--grade-color) 0deg, var(--grade-color) var(--grade-deg, 270deg), var(--bg-hover) var(--grade-deg, 270deg));
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+    }
+    .hero-legend {
+      display: flex;
+      gap: 20px;
+      margin-top: 10px;
+      padding: 0 4px;
+    }
+    .hero-legend span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .hero-legend .dot, .cost-legend .dot, .token-legend .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
     }
 
     /* Insights */
@@ -485,7 +560,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* Token Usage Section */
+    /* Token Usage Section — visual cards */
     .token-stats {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -495,10 +570,12 @@
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 24px;
+      padding: 20px 24px;
       text-align: center;
       transition: transform 0.2s, border-color 0.2s;
       border-top: 3px solid var(--border);
+      display: flex;
+      flex-direction: column;
     }
     .token-stat-card:hover {
       transform: translateY(-2px);
@@ -523,40 +600,175 @@
       color: var(--text-muted);
       margin-top: 4px;
     }
+    /* Burned card: stacked bar */
+    .token-stacked-bar {
+      height: 10px;
+      background: var(--bg-hover);
+      border-radius: 5px;
+      overflow: hidden;
+      display: flex;
+      margin-top: 12px;
+      margin-bottom: 8px;
+    }
+    .token-stacked-bar .seg { height: 100%; }
+    .token-stacked-bar .seg:first-child { border-radius: 5px 0 0 5px; }
+    .token-stacked-bar .seg:last-child { border-radius: 0 5px 5px 0; }
+    .token-bar-legend {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+    .token-bar-legend .ldot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+    /* Wasted card: waste bar */
+    .waste-bar {
+      height: 8px;
+      background: var(--bg-hover);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 12px;
+      margin-bottom: 6px;
+    }
+    .waste-bar .fill {
+      height: 100%;
+      background: var(--accent-red);
+      border-radius: 4px;
+      transition: width 0.6s ease;
+    }
+    .waste-bar-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.65rem;
+      color: var(--text-muted);
+    }
+    /* Efficiency card: SVG ring gauge */
+    .efficiency-gauge {
+      margin: 12px auto 4px;
+      position: relative;
+      width: 80px;
+      height: 80px;
+    }
+    .efficiency-gauge svg { transform: rotate(-90deg); }
+    .efficiency-gauge .gauge-value {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+    /* Per-commit card: comparison bars */
+    .commit-bar-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+    .commit-bar-row:first-child { margin-top: 12px; }
+    .commit-bar-row .bar-label { width: 55px; text-align: right; flex-shrink: 0; }
+    .commit-bar-row .bar-track {
+      flex: 1;
+      height: 6px;
+      background: var(--bg-hover);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .commit-bar-row .bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.6s ease;
+    }
+    /* Token section legend */
+    .token-legend {
+      display: flex;
+      gap: 20px;
+      margin-top: 10px;
+      padding: 0 4px;
+    }
+    .token-legend span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
 
-    /* Cost Breakdown by Period */
+    /* Cost Breakdown — compact single-card timeline */
     .period-stats {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-    }
-    .period-card {
+      gap: 0;
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: var(--radius);
+      overflow: hidden;
+      position: relative;
+    }
+    .period-stats::before {
+      content: '';
+      position: absolute;
+      top: 28px;
+      left: 12.5%;
+      right: 12.5%;
+      height: 2px;
+      background: var(--border);
+      z-index: 1;
+    }
+    .period-card {
+      background: transparent;
+      border: none;
+      border-radius: 0;
       padding: 20px 24px;
       text-align: center;
-      transition: transform 0.2s, border-color 0.2s;
-      border-top: 3px solid var(--border);
+      transition: background 0.2s;
+      position: relative;
+    }
+    .period-card + .period-card {
+      border-left: 1px solid var(--border);
     }
     .period-card:hover {
-      transform: translateY(-2px);
+      background: var(--bg-hover);
     }
+    .period-card::before {
+      content: '';
+      display: block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin: 0 auto 16px;
+      position: relative;
+      z-index: 2;
+    }
+    .period-card.today::before { background: var(--accent-green); box-shadow: 0 0 8px rgba(63, 185, 80, 0.4); }
+    .period-card.week::before { background: var(--accent-blue); }
+    .period-card.month::before { background: var(--accent-purple); }
+    .period-card.all-time::before { background: var(--accent-orange); }
     .period-card.today { border-top-color: var(--accent-green); }
     .period-card.week { border-top-color: var(--accent-blue); }
     .period-card.month { border-top-color: var(--accent-purple); }
     .period-card.all-time { border-top-color: var(--accent-orange); }
     .period-card .period-label {
-      font-size: 0.75rem;
+      font-size: 0.7rem;
       color: var(--text-secondary);
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
     }
     .period-card .period-cost {
-      font-size: 1.8rem;
+      font-size: 1.6rem;
       font-weight: 700;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
     }
     .period-card.today .period-cost { color: var(--accent-green); }
     .period-card.week .period-cost { color: var(--accent-blue); }
@@ -566,6 +778,19 @@
       font-size: 0.75rem;
       color: var(--text-muted);
       line-height: 1.5;
+    }
+    .cost-legend {
+      display: flex;
+      gap: 20px;
+      margin-top: 10px;
+      padding: 0 4px;
+    }
+    .cost-legend span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
     }
 
     /* Token Flow Funnel */
@@ -642,9 +867,13 @@
 
     /* Responsive */
     @media (max-width: 900px) {
-      .hero-stats { grid-template-columns: repeat(2, 1fr); }
+      .hero-stats { grid-template-columns: 1fr; }
+      .stat-card.grade { max-width: 280px; margin: 0 auto; }
       .token-stats { grid-template-columns: repeat(2, 1fr); }
       .period-stats { grid-template-columns: repeat(2, 1fr); }
+      .period-stats::before { display: none; }
+      .period-card:nth-child(3) { border-left: none; }
+      .period-card:nth-child(3), .period-card:nth-child(4) { border-top: 1px solid var(--border); }
       .charts-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 600px) {
@@ -653,6 +882,7 @@
       .period-stats { grid-template-columns: repeat(2, 1fr); }
       .container { padding: 16px; }
       header h1 { font-size: 1.8rem; }
+      .hero-legend, .cost-legend, .token-legend { flex-wrap: wrap; }
     }
   </style>
 </head>
@@ -770,30 +1000,57 @@ function render() {
 
 function renderHeroStats(s) {
   const gradeColor = GRADE_COLORS[s.overallGrade] || GRADE_COLORS.F;
+  const GRADE_DEG = { A: 324, B: 270, C: 216, D: 144, F: 72 };
+  const gradeDeg = GRADE_DEG[s.overallGrade] || 72;
   return `<div class="stats-section">
     <h2>Performance Overview <i class="info-tip" data-tip="High-level metrics for your AI coding sessions — cost, output, efficiency, and overall grade.">i</i></h2>
     <div class="hero-stats">
-    <div class="stat-card glow">
-      <div class="label">Total AI Cost <i class="info-tip" data-tip="Estimated cost based on Anthropic's per-token pricing (input/output per 1M tokens): Opus 4.5/4.6: $5/$25, Opus 4.0/4.1: $15/$75, Sonnet 3.7/4.0/4.5/4.6: $3/$15, Haiku 4.5: $1/$5, Haiku 3.5: $0.80/$4, Haiku 3: $0.25/$1.25. Cache reads 90% cheaper, cache writes 25% more.">i</i></div>
-      <div class="value" style="color: var(--accent-orange);">$${s.totalCost.toFixed(2)}</div>
-      <div class="sub">${s.totalSessions} sessions</div>
+      <div class="hero-stats-left">
+        <div class="stat-card glow cost-card">
+          <span class="legend-dot" style="background: var(--accent-orange);"></span>
+          <div class="stat-info">
+            <div class="label">Total AI Cost <i class="info-tip" data-tip="Estimated cost based on Anthropic's per-token pricing.">i</i></div>
+            <div class="sub">${s.totalSessions} sessions</div>
+          </div>
+          <div class="stat-value-wrap">
+            <div class="value" style="color: var(--accent-orange);">$${s.totalCost.toFixed(2)}</div>
+          </div>
+        </div>
+        <div class="stat-card glow commits-card">
+          <span class="legend-dot" style="background: var(--accent-green);"></span>
+          <div class="stat-info">
+            <div class="label">Commits Shipped <i class="info-tip" data-tip="Git commits matched by file overlap with Claude-edited files.">i</i></div>
+            <div class="sub">${s.totalLinesAdded.toLocaleString()} lines added</div>
+          </div>
+          <div class="stat-value-wrap">
+            <div class="value" style="color: var(--accent-green);">${s.totalCommits}</div>
+          </div>
+        </div>
+        <div class="stat-card glow avg-card">
+          <span class="legend-dot" style="background: var(--accent-blue);"></span>
+          <div class="stat-info">
+            <div class="label">Avg Cost / Commit <i class="info-tip" data-tip="Total AI cost divided by total commits produced. Lower is better.">i</i></div>
+            <div class="sub">${s.totalFilesChanged} files changed</div>
+          </div>
+          <div class="stat-value-wrap">
+            <div class="value" style="color: var(--accent-blue);">${s.avgCostPerCommit !== null ? '$' + s.avgCostPerCommit.toFixed(2) : 'N/A'}</div>
+          </div>
+        </div>
+      </div>
+      <div class="stat-card grade glow grade-card" style="--grade-color: ${gradeColor}; --grade-deg: ${gradeDeg}deg;">
+        <div class="label">ROI Grade <i class="info-tip" data-tip="Overall efficiency grade from A (great) to F (poor). Based on cost-per-commit and code survival.">i</i></div>
+        <div class="grade-circle">
+          <div class="value" style="color: ${gradeColor};">${s.overallGrade}</div>
+        </div>
+        <div class="sub">${s.orphanedSessionRate}% sessions orphaned</div>
+      </div>
     </div>
-    <div class="stat-card glow">
-      <div class="label">Commits Shipped <i class="info-tip" data-tip="Git commits matched by file overlap — when a commit touches files that Claude edited during a session. For chat-only sessions, falls back to a 2-hour time window.">i</i></div>
-      <div class="value" style="color: var(--accent-green);">${s.totalCommits}</div>
-      <div class="sub">${s.totalLinesAdded.toLocaleString()} lines added</div>
+    <div class="hero-legend">
+      <span><span class="dot" style="background: var(--accent-orange);"></span>Cost</span>
+      <span><span class="dot" style="background: var(--accent-green);"></span>Output</span>
+      <span><span class="dot" style="background: var(--accent-blue);"></span>Efficiency</span>
+      <span><span class="dot" style="background: ${gradeColor};"></span>Grade: ${s.overallGrade}</span>
     </div>
-    <div class="stat-card glow">
-      <div class="label">Avg Cost / Commit <i class="info-tip" data-tip="Total AI cost divided by total commits produced. Lower is better — means your agent is efficient.">i</i></div>
-      <div class="value" style="color: var(--accent-blue);">${s.avgCostPerCommit !== null ? '$' + s.avgCostPerCommit.toFixed(2) : 'N/A'}</div>
-      <div class="sub">${s.totalFilesChanged} files changed</div>
-    </div>
-    <div class="stat-card grade glow">
-      <div class="label">ROI Grade <i class="info-tip" data-tip="Overall efficiency grade from A (great) to F (poor). Based on cost-per-commit and code survival. A: &le;$2, B: &le;$5, C: &le;$15, D: &le;$30, F: >$30 or no commits.">i</i></div>
-      <div class="value" style="color: ${gradeColor};">${s.overallGrade}</div>
-      <div class="sub">${s.orphanedSessionRate}% sessions orphaned</div>
-    </div>
-  </div>
   </div>`;
 }
 
@@ -822,6 +1079,12 @@ function renderCostByPeriod(p) {
         <div class="period-cost">$${p.allTime.cost.toFixed(2)}</div>
         <div class="period-meta">${p.allTime.sessions} sessions &middot; ${p.allTime.commits} commits</div>
       </div>
+    </div>
+    <div class="cost-legend">
+      <span><span class="dot" style="background: var(--accent-green);"></span>Today</span>
+      <span><span class="dot" style="background: var(--accent-blue);"></span>This Week</span>
+      <span><span class="dot" style="background: var(--accent-purple);"></span>This Month</span>
+      <span><span class="dot" style="background: var(--accent-orange);"></span>All Time</span>
     </div>
   </div>`;
 }
@@ -864,6 +1127,16 @@ function renderSurvival(s) {
 function renderTokenHeroStats(t) {
   const effColor = t.tokenEfficiencyRate >= 70 ? 'var(--accent-green)' : t.tokenEfficiencyRate >= 40 ? 'var(--accent-orange)' : 'var(--accent-red)';
   const wastePct = t.totalAllTokens > 0 ? Math.round((t.tokensOrphaned / t.totalAllTokens) * 100) : 0;
+  const totalIO = (t.totalInputTokens + t.totalOutputTokens) || 1;
+  const inputPct = Math.round((t.totalInputTokens / totalIO) * 100);
+  const outputPct = 100 - inputPct;
+  const gaugeR = 34;
+  const gaugeC = 2 * Math.PI * gaugeR;
+  const gaugeOffset = gaugeC - (gaugeC * Math.min(t.tokenEfficiencyRate, 100) / 100);
+  const maxTM = Math.max(t.tokensPerCommit, t.tokensPerLineAdded) || 1;
+  const commitBarPct = Math.round((t.tokensPerCommit / maxTM) * 100);
+  const lineBarPct = Math.round((t.tokensPerLineAdded / maxTM) * 100);
+
   return `<div class="stats-section">
     <h2>Token Usage <i class="info-tip" data-tip="Raw token consumption across all sessions. Tracks input (prompts/context), output (generated text), and cache tokens.">i</i></h2>
     <div class="token-stats">
@@ -871,22 +1144,48 @@ function renderTokenHeroStats(t) {
         <div class="label">Total Tokens Burned <i class="info-tip" data-tip="Sum of all input, output, cache-read, and cache-creation tokens across every session.">i</i></div>
         <div class="value" style="color: var(--accent-orange);">${formatTokens(t.totalAllTokens)}</div>
         <div class="sub">input: ${formatTokens(t.totalInputTokens)} / output: ${formatTokens(t.totalOutputTokens)}</div>
+        <div class="token-stacked-bar">
+          <div class="seg" style="width: ${inputPct}%; background: var(--accent-blue);"></div>
+          <div class="seg" style="width: ${outputPct}%; background: var(--accent-purple);"></div>
+        </div>
+        <div class="token-bar-legend">
+          <span><span class="ldot" style="background: var(--accent-blue);"></span>Input ${inputPct}%</span>
+          <span><span class="ldot" style="background: var(--accent-purple);"></span>Output ${outputPct}%</span>
+        </div>
       </div>
       <div class="token-stat-card wasted">
-        <div class="label">Tokens Wasted <i class="info-tip" data-tip="Tokens consumed in orphaned sessions — sessions with 10+ messages that produced zero commits. These tokens generated nothing that shipped.">i</i></div>
+        <div class="label">Tokens Wasted <i class="info-tip" data-tip="Tokens consumed in orphaned sessions — sessions with 10+ messages that produced zero commits.">i</i></div>
         <div class="value" style="color: var(--accent-red);">${formatTokens(t.tokensOrphaned)}</div>
         <div class="sub">${wastePct}% of total — $${t.costOrphaned.toFixed(2)} burned</div>
+        <div class="waste-bar"><div class="fill" style="width: ${wastePct}%;"></div></div>
+        <div class="waste-bar-label"><span>0%</span><span>${wastePct}% wasted</span><span>100%</span></div>
       </div>
       <div class="token-stat-card efficiency">
         <div class="label">Token Efficiency <i class="info-tip" data-tip="Percentage of total tokens consumed in sessions that produced at least one commit.">i</i></div>
         <div class="value" style="color: ${effColor};">${t.tokenEfficiencyRate}%</div>
         <div class="sub">tokens that shipped code</div>
+        <div class="efficiency-gauge">
+          <svg width="80" height="80" viewBox="0 0 80 80">
+            <circle cx="40" cy="40" r="${gaugeR}" fill="none" stroke="var(--bg-hover)" stroke-width="6"/>
+            <circle cx="40" cy="40" r="${gaugeR}" fill="none" stroke="${effColor}" stroke-width="6"
+              stroke-dasharray="${gaugeC.toFixed(1)}" stroke-dashoffset="${gaugeOffset.toFixed(1)}" stroke-linecap="round"/>
+          </svg>
+          <div class="gauge-value" style="color: ${effColor};">${t.tokenEfficiencyRate}%</div>
+        </div>
       </div>
       <div class="token-stat-card per-commit">
         <div class="label">Tokens per Commit <i class="info-tip" data-tip="Average total tokens consumed per git commit produced. Lower is more efficient.">i</i></div>
         <div class="value" style="color: var(--accent-cyan);">${formatTokens(t.tokensPerCommit)}</div>
         <div class="sub">${formatTokens(t.tokensPerLineAdded)} per line added</div>
+        <div class="commit-bar-row"><span class="bar-label">/ commit</span><div class="bar-track"><div class="bar-fill" style="width: ${commitBarPct}%; background: var(--accent-cyan);"></div></div></div>
+        <div class="commit-bar-row"><span class="bar-label">/ line</span><div class="bar-track"><div class="bar-fill" style="width: ${lineBarPct}%; background: var(--accent-purple);"></div></div></div>
       </div>
+    </div>
+    <div class="token-legend">
+      <span><span class="dot" style="background: var(--accent-orange);"></span>Total Burned</span>
+      <span><span class="dot" style="background: var(--accent-red);"></span>Wasted</span>
+      <span><span class="dot" style="background: var(--accent-green);"></span>Efficient</span>
+      <span><span class="dot" style="background: var(--accent-cyan);"></span>Per Commit</span>
     </div>
   </div>`;
 }
