@@ -1,5 +1,5 @@
 {
-  "name": "agent-analytics",
+  "name": "codelens-ai",
   "version": "0.1.0",
   "description": "Correlate Claude Code token usage with git output to measure AI coding agent ROI",
   "type": "module",
