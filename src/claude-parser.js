@@ -411,7 +411,7 @@ export async function parseAllProjects(claudeDir, days, projectFilter) {
     }
 
     const projectDir = path.join(claudeDir, folder);
-    const projectName = folder.split('-').pop() || folder;
+    const folderProjectName = folder;
 
     let files;
     try {
@@ -445,7 +445,11 @@ export async function parseAllProjects(claudeDir, days, projectFilter) {
         // Apply date filter on session start time
         if (new Date(session.startTime).getTime() < cutoffMs) continue;
 
-        session.projectName = projectName;
+        // Derive project name from the session's actual repo path (cwd),
+        // falling back to the folder name if repoPath is unavailable
+        session.projectName = session.repoPath
+          ? path.basename(session.repoPath)
+          : folderProjectName;
         sessions.push(session);
       } catch (err) {
         process.stderr.write(`Warning: Failed to parse ${filePath}: ${err.message}\n`);
