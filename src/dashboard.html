@@ -465,13 +465,144 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* Token Usage Section */
+    .token-section {
+      margin-bottom: 32px;
+    }
+    .token-section h2 {
+      font-size: 1.1rem;
+      margin-bottom: 12px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+    .token-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+    }
+    .token-stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      text-align: center;
+      transition: transform 0.2s, border-color 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+    .token-stat-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent-purple);
+    }
+    .token-stat-card .label {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+    .token-stat-card .value {
+      font-size: 2rem;
+      font-weight: 700;
+    }
+    .token-stat-card .sub {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .token-stat-card.glow::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent-purple), var(--accent-cyan));
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+    .token-stat-card.waste {
+      border-left: 3px solid var(--accent-red);
+    }
+
+    /* Token Flow Funnel */
+    .token-funnel {
+      margin-bottom: 32px;
+    }
+    .token-funnel-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+    }
+    .token-funnel-card h3 {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+      font-weight: 500;
+    }
+    .funnel-row {
+      margin-bottom: 16px;
+    }
+    .funnel-label-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      font-size: 0.8rem;
+    }
+    .funnel-label-row .name { color: var(--text-secondary); }
+    .funnel-label-row .amount { color: var(--text-primary); font-weight: 500; }
+    .funnel-bar {
+      height: 32px;
+      background: var(--bg-hover);
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+    }
+    .funnel-bar .segment {
+      height: 100%;
+      transition: width 0.8s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      font-weight: 500;
+      color: rgba(255,255,255,0.9);
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .funnel-bar .segment:first-child { border-radius: 8px 0 0 8px; }
+    .funnel-bar .segment:last-child { border-radius: 0 8px 8px 0; }
+    .funnel-legend {
+      display: flex;
+      gap: 20px;
+      margin-top: 12px;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      flex-wrap: wrap;
+    }
+    .funnel-legend .dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    @keyframes pulse-red {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    .funnel-bar .segment.waste-pulse {
+      animation: pulse-red 2s ease-in-out infinite;
+    }
+
     /* Responsive */
     @media (max-width: 900px) {
       .hero-stats { grid-template-columns: repeat(2, 1fr); }
+      .token-stats { grid-template-columns: repeat(2, 1fr); }
       .charts-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 600px) {
       .hero-stats { grid-template-columns: 1fr; }
+      .token-stats { grid-template-columns: 1fr; }
       .container { padding: 16px; }
       header h1 { font-size: 1.8rem; }
     }
@@ -507,6 +638,13 @@ const GRADE_COLORS = { A: '#3fb950', B: '#58a6ff', C: '#d29922', D: '#f0883e', F
 const INSIGHT_ICONS = { warning: '!', success: '+', info: 'i', tip: '*' };
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 let DATA = null;
+
+function formatTokens(n) {
+  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + 'B';
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return n.toString();
+}
 let currentPage = 1;
 let sortCol = 'startTime';
 let sortOrder = -1;
@@ -530,11 +668,21 @@ function render() {
   const d = DATA;
   document.getElementById('date-range').textContent = `Last ${d.meta.daysAnalyzed} days`;
   const summary = d.summary;
+  const t = d.tokenAnalytics;
 
   document.getElementById('app').innerHTML = `
     ${renderHeroStats(summary)}
+    ${renderTokenHeroStats(t)}
+    ${renderTokenFunnel(t)}
+    ${renderTokenFunFacts(t.funFacts)}
     ${renderInsights(d.insights)}
     <div class="charts-grid">
+      <div class="chart-card full-width">
+        <div class="chart-header">
+          <h3>Token Burn Rate <i class="info-tip" data-tip="Daily token consumption stacked by type (input/output/cache). Dashed orange line shows cumulative total — watch it climb.">i</i></h3>
+        </div>
+        <div class="chart-container"><canvas id="chart-token-burn"></canvas></div>
+      </div>
       <div class="chart-card full-width">
         <div class="chart-header">
           <h3>Cost vs Output Over Time <i class="info-tip" data-tip="Orange line = estimated dollar cost per day. Green line = lines of code added per day. Ideally green stays high while orange stays low.">i</i></h3>
@@ -559,6 +707,7 @@ function render() {
         <div id="heatmap-container"></div>
       </div>
     </div>
+    ${renderCacheEfficiency(t)}
     ${renderSurvival(d.lineSurvival)}
     ${renderSessionsTable(d.sessions)}
   `;
@@ -624,6 +773,127 @@ function renderSurvival(s) {
         <div><span>${s.totalChurned.toLocaleString()}</span> churned within 24h</div>
         <div><span>${s.surviving.toLocaleString()}</span> surviving</div>
         <div><span style="color:${color};">${pct}%</span> survival rate</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderTokenHeroStats(t) {
+  const effColor = t.tokenEfficiencyRate >= 70 ? 'var(--accent-green)' : t.tokenEfficiencyRate >= 40 ? 'var(--accent-orange)' : 'var(--accent-red)';
+  const wastePct = t.totalAllTokens > 0 ? Math.round((t.tokensOrphaned / t.totalAllTokens) * 100) : 0;
+  return `<div class="token-section">
+    <h2>Token Usage <i class="info-tip" data-tip="Raw token consumption across all sessions. Tracks input (prompts/context), output (generated text), and cache tokens.">i</i></h2>
+    <div class="token-stats">
+      <div class="token-stat-card glow">
+        <div class="label">Total Tokens Burned <i class="info-tip" data-tip="Sum of all input, output, cache-read, and cache-creation tokens across every session.">i</i></div>
+        <div class="value" style="color: var(--accent-orange);">${formatTokens(t.totalAllTokens)}</div>
+        <div class="sub">input: ${formatTokens(t.totalInputTokens)} / output: ${formatTokens(t.totalOutputTokens)}</div>
+      </div>
+      <div class="token-stat-card waste">
+        <div class="label">Tokens WASTED <i class="info-tip" data-tip="Tokens consumed in orphaned sessions — sessions with 10+ messages that produced zero commits. These tokens generated nothing that shipped.">i</i></div>
+        <div class="value" style="color: var(--accent-red);">${formatTokens(t.tokensOrphaned)}</div>
+        <div class="sub">${wastePct}% of total — $${t.costOrphaned.toFixed(2)} burned</div>
+      </div>
+      <div class="token-stat-card">
+        <div class="label">Token Efficiency <i class="info-tip" data-tip="Percentage of total tokens consumed in sessions that produced at least one commit.">i</i></div>
+        <div class="value" style="color: ${effColor};">${t.tokenEfficiencyRate}%</div>
+        <div class="sub">tokens that shipped code</div>
+      </div>
+      <div class="token-stat-card">
+        <div class="label">Tokens per Commit <i class="info-tip" data-tip="Average total tokens consumed per git commit produced. Lower is more efficient.">i</i></div>
+        <div class="value" style="color: var(--accent-cyan);">${formatTokens(t.tokensPerCommit)}</div>
+        <div class="sub">${formatTokens(t.tokensPerLineAdded)} per line added</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderTokenFunnel(t) {
+  const total = t.funnel.total || 1;
+  const pProd = ((t.funnel.productive / total) * 100).toFixed(1);
+  const pOrph = ((t.funnel.orphaned / total) * 100).toFixed(1);
+  const pExpl = ((t.funnel.exploratory / total) * 100).toFixed(1);
+
+  const pInput = ((t.funnel.input / total) * 100).toFixed(1);
+  const pOutput = ((t.funnel.output / total) * 100).toFixed(1);
+  const pCacheRead = ((t.funnel.cacheRead / total) * 100).toFixed(1);
+  const pCacheCreate = ((t.funnel.cacheCreation / total) * 100).toFixed(1);
+
+  const wasteHigh = parseFloat(pOrph) > 25;
+
+  return `<div class="token-funnel">
+    <div class="token-funnel-card">
+      <h3>Where Did Your Tokens Go? <i class="info-tip" data-tip="Visualizes token flow by type (input/output/cache) and by outcome (productive sessions vs wasted sessions).">i</i></h3>
+
+      <div class="funnel-row">
+        <div class="funnel-label-row">
+          <span class="name">By Type</span>
+          <span class="amount">${formatTokens(total)} total</span>
+        </div>
+        <div class="funnel-bar">
+          <div class="segment" style="width:${pInput}%;background:var(--accent-blue);" title="Input: ${formatTokens(t.funnel.input)}">${parseFloat(pInput) > 8 ? pInput + '%' : ''}</div>
+          <div class="segment" style="width:${pOutput}%;background:var(--accent-purple);" title="Output: ${formatTokens(t.funnel.output)}">${parseFloat(pOutput) > 8 ? pOutput + '%' : ''}</div>
+          <div class="segment" style="width:${pCacheRead}%;background:var(--accent-cyan);" title="Cache Read: ${formatTokens(t.funnel.cacheRead)}">${parseFloat(pCacheRead) > 8 ? pCacheRead + '%' : ''}</div>
+          <div class="segment" style="width:${pCacheCreate}%;background:var(--accent-orange);" title="Cache Write: ${formatTokens(t.funnel.cacheCreation)}">${parseFloat(pCacheCreate) > 8 ? pCacheCreate + '%' : ''}</div>
+        </div>
+        <div class="funnel-legend">
+          <span><span class="dot" style="background:var(--accent-blue);"></span>Input (${pInput}%)</span>
+          <span><span class="dot" style="background:var(--accent-purple);"></span>Output (${pOutput}%)</span>
+          <span><span class="dot" style="background:var(--accent-cyan);"></span>Cache Read (${pCacheRead}%)</span>
+          <span><span class="dot" style="background:var(--accent-orange);"></span>Cache Write (${pCacheCreate}%)</span>
+        </div>
+      </div>
+
+      <div class="funnel-row" style="margin-top:20px;">
+        <div class="funnel-label-row">
+          <span class="name">By Outcome</span>
+          <span class="amount">${pProd}% productive</span>
+        </div>
+        <div class="funnel-bar">
+          <div class="segment" style="width:${pProd}%;background:var(--accent-green);" title="Productive: ${formatTokens(t.funnel.productive)}">${parseFloat(pProd) > 8 ? pProd + '% Shipped' : ''}</div>
+          <div class="segment" style="width:${pExpl}%;background:rgba(88,166,255,0.4);" title="Exploratory: ${formatTokens(t.funnel.exploratory)}">${parseFloat(pExpl) > 8 ? pExpl + '% Idle' : ''}</div>
+          <div class="segment ${wasteHigh ? 'waste-pulse' : ''}" style="width:${pOrph}%;background:var(--accent-red);" title="WASTED: ${formatTokens(t.funnel.orphaned)}">${parseFloat(pOrph) > 5 ? pOrph + '% WASTED' : ''}</div>
+        </div>
+        <div class="funnel-legend">
+          <span><span class="dot" style="background:var(--accent-green);"></span>Productive (${pProd}%) — led to commits</span>
+          <span><span class="dot" style="background:rgba(88,166,255,0.4);"></span>Exploratory (${pExpl}%) — short sessions, no commits</span>
+          <span><span class="dot" style="background:var(--accent-red);"></span>WASTED (${pOrph}%) — long sessions, zero output</span>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderTokenFunFacts(facts) {
+  if (!facts || facts.length === 0) return '';
+  return `<div class="insights" style="margin-bottom:24px;">
+    <h2>Scale Check</h2>
+    <div class="insight-list">
+      ${facts.map(f => `
+        <div class="insight info">
+          <span class="icon">~</span>
+          <span>${f}</span>
+        </div>
+      `).join('')}
+    </div>
+  </div>`;
+}
+
+function renderCacheEfficiency(t) {
+  const hitRate = t.cacheHitRate;
+  const color = hitRate >= 60 ? 'var(--accent-green)' : hitRate >= 30 ? 'var(--accent-orange)' : 'var(--accent-red)';
+  return `<div class="survival-section">
+    <div class="survival-card">
+      <h3>
+        Cache Efficiency
+        <i class="info-tip" data-tip="Cache reads are 90% cheaper than regular input tokens. This shows what percentage of your input context was served from cache and how much money that saved you.">i</i>
+      </h3>
+      <div class="survival-bar"><div class="fill" style="width: ${hitRate}%; background: ${color};"></div></div>
+      <div class="survival-stats">
+        <div><span>${formatTokens(t.totalCacheReadTokens)}</span> tokens from cache</div>
+        <div><span>${formatTokens(t.totalInputTokens)}</span> fresh input tokens</div>
+        <div><span style="color:var(--accent-green);">$${t.cacheSavingsDollars.toFixed(2)}</span> saved</div>
+        <div><span style="color:${color};">${hitRate}%</span> cache hit rate</div>
       </div>
     </div>
   </div>`;
@@ -737,6 +1007,82 @@ function initCharts() {
   Chart.defaults.color = '#8b949e';
   Chart.defaults.borderColor = '#30363d';
   Chart.defaults.font.family = 'Inter';
+
+  // Token Burn Rate chart
+  const dailyTokens = DATA.daily;
+  let cumulative = 0;
+  const cumulativeData = dailyTokens.map(d => { cumulative += (d.totalTokens || 0); return cumulative; });
+
+  new Chart(document.getElementById('chart-token-burn'), {
+    type: 'bar',
+    data: {
+      labels: dailyTokens.map(d => d.date),
+      datasets: [
+        {
+          label: 'Input',
+          data: dailyTokens.map(d => d.inputTokens || 0),
+          backgroundColor: 'rgba(88, 166, 255, 0.8)',
+          stack: 'tokens',
+          borderRadius: 2,
+        },
+        {
+          label: 'Output',
+          data: dailyTokens.map(d => d.outputTokens || 0),
+          backgroundColor: 'rgba(188, 140, 255, 0.8)',
+          stack: 'tokens',
+          borderRadius: 2,
+        },
+        {
+          label: 'Cache Read',
+          data: dailyTokens.map(d => d.cacheReadTokens || 0),
+          backgroundColor: 'rgba(57, 210, 192, 0.6)',
+          stack: 'tokens',
+          borderRadius: 2,
+        },
+        {
+          label: 'Cumulative',
+          data: cumulativeData,
+          type: 'line',
+          borderColor: '#d29922',
+          borderDash: [5, 5],
+          pointRadius: 0,
+          fill: false,
+          yAxisID: 'y1',
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top' },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const val = ctx.parsed.y;
+              return ` ${ctx.dataset.label}: ${formatTokens(val)} tokens`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { stacked: true },
+        y: {
+          stacked: true,
+          position: 'left',
+          title: { display: true, text: 'Tokens / Day' },
+          ticks: { callback: v => formatTokens(v) },
+        },
+        y1: {
+          position: 'right',
+          title: { display: true, text: 'Cumulative' },
+          grid: { drawOnChartArea: false },
+          ticks: { callback: v => formatTokens(v) },
+        },
+      },
+    },
+  });
 
   // Timeline chart
   const daily = DATA.daily;
@@ -854,7 +1200,8 @@ function initCharts() {
             label: ctx => {
               const model = modelLabels[ctx.dataIndex];
               const d = models[model];
-              return ` $${d.cost.toFixed(2)} | ${d.sessions} sessions | ${d.commits} commits`;
+              const tpc = d.tokensPerCommit ? formatTokens(d.tokensPerCommit) + ' tok/commit' : 'no commits';
+              return ` $${d.cost.toFixed(2)} | ${d.sessions} sessions | ${d.commits} commits | ${tpc}`;
             },
           },
         },
