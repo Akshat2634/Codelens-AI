@@ -509,16 +509,16 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   startOfWeek.setHours(0, 0, 0, 0);
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const costByPeriod = { today: { cost: 0, sessions: 0, commits: 0 }, week: { cost: 0, sessions: 0, commits: 0 }, month: { cost: 0, sessions: 0, commits: 0 }, allTime: { cost: 0, sessions: 0, commits: 0 } };
+  const mkPeriod = () => ({ cost: 0, sessions: 0, commits: 0, tokens: 0 });
+  const costByPeriod = { today: mkPeriod(), week: mkPeriod(), month: mkPeriod(), allTime: mkPeriod() };
   for (const session of correlatedSessions) {
     const sDate = new Date(session.startTime);
     const sDateStr = `${sDate.getFullYear()}-${String(sDate.getMonth() + 1).padStart(2, '0')}-${String(sDate.getDate()).padStart(2, '0')}`;
-    costByPeriod.allTime.cost += session.cost.totalCost;
-    costByPeriod.allTime.sessions++;
-    costByPeriod.allTime.commits += session.commitCount;
-    if (sDate >= startOfMonth) { costByPeriod.month.cost += session.cost.totalCost; costByPeriod.month.sessions++; costByPeriod.month.commits += session.commitCount; }
-    if (sDate >= startOfWeek) { costByPeriod.week.cost += session.cost.totalCost; costByPeriod.week.sessions++; costByPeriod.week.commits += session.commitCount; }
-    if (sDateStr === todayStr) { costByPeriod.today.cost += session.cost.totalCost; costByPeriod.today.sessions++; costByPeriod.today.commits += session.commitCount; }
+    const sTok = session.totalInputTokens + session.totalOutputTokens + session.cacheReadTokens + session.cacheCreationTokens;
+    costByPeriod.allTime.cost += session.cost.totalCost; costByPeriod.allTime.sessions++; costByPeriod.allTime.commits += session.commitCount; costByPeriod.allTime.tokens += sTok;
+    if (sDate >= startOfMonth) { costByPeriod.month.cost += session.cost.totalCost; costByPeriod.month.sessions++; costByPeriod.month.commits += session.commitCount; costByPeriod.month.tokens += sTok; }
+    if (sDate >= startOfWeek) { costByPeriod.week.cost += session.cost.totalCost; costByPeriod.week.sessions++; costByPeriod.week.commits += session.commitCount; costByPeriod.week.tokens += sTok; }
+    if (sDateStr === todayStr) { costByPeriod.today.cost += session.cost.totalCost; costByPeriod.today.sessions++; costByPeriod.today.commits += session.commitCount; costByPeriod.today.tokens += sTok; }
   }
 
   const summary = {

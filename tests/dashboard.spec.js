@@ -144,6 +144,13 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
       await expect(legend).toContainText('This Week');
       await expect(legend).toContainText('All Time');
     });
+
+    test('each period card shows token count', async ({ page }) => {
+      const cards = page.locator('.stats-section').filter({ hasText: 'Cost Breakdown' }).locator('.period-card');
+      for (let i = 0; i < 4; i++) {
+        await expect(cards.nth(i).locator('.period-tokens')).toContainText('tokens');
+      }
+    });
   });
 
   // ═══════════════════════════════════════════

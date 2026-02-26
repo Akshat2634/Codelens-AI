@@ -775,6 +775,12 @@
       color: var(--text-muted);
       line-height: 1.5;
     }
+    .period-card .period-tokens {
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+      margin-top: 4px;
+      font-weight: 500;
+    }
     /* Token Flow Funnel */
     .token-funnel {
       margin-bottom: 32px;
@@ -1045,21 +1051,25 @@ function renderCostByPeriod(p) {
         <div class="period-label">Today</div>
         <div class="period-cost">$${p.today.cost.toFixed(2)}</div>
         <div class="period-meta">${p.today.sessions} sessions &middot; ${p.today.commits} commits</div>
+        <div class="period-tokens">${formatTokens(p.today.tokens)} tokens</div>
       </div>
       <div class="period-card week">
         <div class="period-label">This Week</div>
         <div class="period-cost">$${p.week.cost.toFixed(2)}</div>
         <div class="period-meta">${p.week.sessions} sessions &middot; ${p.week.commits} commits</div>
+        <div class="period-tokens">${formatTokens(p.week.tokens)} tokens</div>
       </div>
       <div class="period-card month">
         <div class="period-label">This Month</div>
         <div class="period-cost">$${p.month.cost.toFixed(2)}</div>
         <div class="period-meta">${p.month.sessions} sessions &middot; ${p.month.commits} commits</div>
+        <div class="period-tokens">${formatTokens(p.month.tokens)} tokens</div>
       </div>
       <div class="period-card all-time">
         <div class="period-label">All Time</div>
         <div class="period-cost">$${p.allTime.cost.toFixed(2)}</div>
         <div class="period-meta">${p.allTime.sessions} sessions &middot; ${p.allTime.commits} commits</div>
+        <div class="period-tokens">${formatTokens(p.allTime.tokens)} tokens</div>
       </div>
     </div>
     <div class="cost-legend">
