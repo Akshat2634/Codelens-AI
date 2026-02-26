@@ -693,6 +693,13 @@
       border-radius: 3px;
       transition: width 0.6s ease;
     }
+    .commit-bar-row .bar-val {
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      min-width: 40px;
+      text-align: right;
+    }
     /* Cost Breakdown — compact single-card timeline */
     .period-stats {
       display: grid;
@@ -1108,9 +1115,12 @@ function renderTokenHeroStats(t) {
   const gaugeR = 34;
   const gaugeC = 2 * Math.PI * gaugeR;
   const gaugeOffset = gaugeC - (gaugeC * Math.min(t.tokenEfficiencyRate, 100) / 100);
-  const maxTM = Math.max(t.tokensPerCommit, t.tokensPerLineAdded) || 1;
-  const commitBarPct = Math.round((t.tokensPerCommit / maxTM) * 100);
-  const lineBarPct = Math.round((t.tokensPerLineAdded / maxTM) * 100);
+  // Log scale so both bars are visible even when values differ by 100x+
+  const logCommit = t.tokensPerCommit > 0 ? Math.log10(t.tokensPerCommit) : 0;
+  const logLine = t.tokensPerLineAdded > 0 ? Math.log10(t.tokensPerLineAdded) : 0;
+  const logMax = Math.max(logCommit, logLine) || 1;
+  const commitBarPct = Math.round((logCommit / logMax) * 100);
+  const lineBarPct = Math.round((logLine / logMax) * 100);
 
   return `<div class="stats-section">
     <h2>Token Usage <i class="info-tip" data-tip="Raw token consumption across all sessions. Tracks input (prompts/context), output (generated text), and cache tokens.">i</i></h2>
@@ -1152,8 +1162,8 @@ function renderTokenHeroStats(t) {
         <div class="label">Tokens per Commit <i class="info-tip" data-tip="Average total tokens consumed per git commit produced. Lower is more efficient.">i</i></div>
         <div class="value" style="color: var(--accent-cyan);">${formatTokens(t.tokensPerCommit)}</div>
         <div class="sub">${formatTokens(t.tokensPerLineAdded)} per line added</div>
-        <div class="commit-bar-row"><span class="bar-label">/ commit</span><div class="bar-track"><div class="bar-fill" style="width: ${commitBarPct}%; background: var(--accent-cyan);"></div></div></div>
-        <div class="commit-bar-row"><span class="bar-label">/ line</span><div class="bar-track"><div class="bar-fill" style="width: ${lineBarPct}%; background: var(--accent-purple);"></div></div></div>
+        <div class="commit-bar-row"><span class="bar-label">/ commit</span><div class="bar-track"><div class="bar-fill" style="width: ${commitBarPct}%; background: var(--accent-cyan);"></div></div><span class="bar-val">${formatTokens(t.tokensPerCommit)}</span></div>
+        <div class="commit-bar-row"><span class="bar-label">/ line</span><div class="bar-track"><div class="bar-fill" style="width: ${lineBarPct}%; background: var(--accent-purple);"></div></div><span class="bar-val">${formatTokens(t.tokensPerLineAdded)}</span></div>
       </div>
     </div>
     <div class="token-legend">
