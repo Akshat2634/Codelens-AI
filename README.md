@@ -20,13 +20,13 @@ npx claude-roi
 
 ```bash
 # npm
-npm install -g codelens-ai
+npm install -g claude-roi
 
 # pnpm
-pnpm add -g codelens-ai
+pnpm add -g claude-roi
 
 # yarn
-yarn global add codelens-ai
+yarn global add claude-roi
 ```
 
 Then run anywhere:

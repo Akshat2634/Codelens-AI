@@ -1,10 +1,10 @@
 {
-  "name": "codelens-ai",
-  "version": "0.2.0",
+  "name": "claude-roi",
+  "version": "0.1.0",
   "description": "Correlate Claude Code token usage with git output to measure AI coding agent ROI",
   "type": "module",
   "bin": {
-    "claude-roi": "./src/index.js"
+    "claude-roi": "src/index.js"
   },
   "main": "./src/index.js",
   "scripts": {
