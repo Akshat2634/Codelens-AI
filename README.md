@@ -13,7 +13,7 @@ Codelens AI ties Claude Code token usage to actual git output. It reads your loc
 ### Option 1: Run directly (no install)
 
 ```bash
-npx agent-analytics
+npx claude-roi
 ```
 
 ### Option 2: Install globally
@@ -32,7 +32,7 @@ yarn global add codelens-ai
 Then run anywhere:
 
 ```bash
-agent-analytics
+claude-roi
 ```
 
 ### Option 3: Clone and run from source
@@ -61,7 +61,7 @@ node src/index.js
 ## Quick Start
 
 ```bash
-npx agent-analytics
+npx claude-roi
 ```
 
 This parses your `~/.claude/projects/` session data, analyzes your git repos, and opens a dashboard at `http://localhost:3457`.
@@ -81,13 +81,13 @@ This parses your `~/.claude/projects/` session data, analyzes your git repos, an
 ## CLI Options
 
 ```bash
-agent-analytics                        # default: last 30 days, port 3457
-agent-analytics --days 90              # look back 90 days
-agent-analytics --port 8080            # custom port
-agent-analytics --no-open              # don't auto-open browser
-agent-analytics --json                 # dump all metrics as JSON to stdout
-agent-analytics --project techops      # filter to a specific project
-agent-analytics --refresh              # force full re-parse (ignore cache)
+claude-roi                        # default: last 30 days, port 3457
+claude-roi --days 90              # look back 90 days
+claude-roi --port 8080            # custom port
+claude-roi --no-open              # don't auto-open browser
+claude-roi --json                 # dump all metrics as JSON to stdout
+claude-roi --project techops      # filter to a specific project
+claude-roi --refresh              # force full re-parse (ignore cache)
 ```
 
 ## Dashboard
@@ -112,7 +112,7 @@ The dashboard includes:
 
 ### Caching
 
-Parsed session data is cached at `~/.cache/agent-analytics/parsed-sessions.json`. On subsequent runs, only new or modified JSONL files are re-parsed, making startup near-instant. Use `--refresh` to force a full re-parse.
+Parsed session data is cached at `~/.cache/claude-roi/parsed-sessions.json`. On subsequent runs, only new or modified JSONL files are re-parsed, making startup near-instant. Use `--refresh` to force a full re-parse.
 
 ### Cost Calculation
 

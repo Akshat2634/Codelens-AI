@@ -10,12 +10,12 @@ import { computeMetrics } from './metrics.js';
 import { loadCache, saveCache, deleteCache, getStaleFiles } from './cache.js';
 import { createServer } from './server.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 async function main() {
   const program = new Command();
   program
-    .name('agent-analytics')
+    .name('claude-roi')
     .description('Correlate Claude Code token usage with git output to measure AI coding agent ROI')
     .version(VERSION)
     .option('-p, --port <number>', 'port to serve dashboard', '3457')
@@ -30,7 +30,7 @@ async function main() {
   const port = parseInt(opts.port, 10);
   const days = parseInt(opts.days, 10);
 
-  console.log(`\x1b[36magent-analytics\x1b[0m v${VERSION}`);
+  console.log(`\x1b[36mclaude-roi\x1b[0m v${VERSION}`);
 
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
@@ -125,7 +125,7 @@ async function main() {
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      console.error(`\x1b[31mPort ${port} is already in use.\x1b[0m Try: agent-analytics --port ${port + 1}`);
+      console.error(`\x1b[31mPort ${port} is already in use.\x1b[0m Try: claude-roi --port ${port + 1}`);
       process.exit(1);
     }
     throw err;
