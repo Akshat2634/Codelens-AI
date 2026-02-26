@@ -12,31 +12,51 @@ export function getGitUser() {
   }
 }
 
-function getMainBranchHashes(repoPath) {
-  // Determine main branch name
-  let mainBranch = 'main';
+function detectDefaultBranch(repoPath) {
+  // 1. Check what the remote HEAD points to (most reliable)
+  try {
+    const ref = execSync(
+      `git -C "${repoPath}" symbolic-ref refs/remotes/origin/HEAD`,
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    // Returns e.g. "refs/remotes/origin/main"
+    const branch = ref.replace('refs/remotes/origin/', '');
+    if (branch) return branch;
+  } catch {
+    // No remote HEAD set, fall through
+  }
+
+  // 2. Fallback: check for common default branch names
   try {
     const branches = execSync(`git -C "${repoPath}" branch --list`, { encoding: 'utf-8' });
-    if (branches.includes('main')) {
-      mainBranch = 'main';
-    } else if (branches.includes('master')) {
-      mainBranch = 'master';
-    } else {
-      // No main/master branch found
-      return new Set();
+    const branchList = branches.split('\n').map(b => b.replace('*', '').trim()).filter(Boolean);
+    for (const name of ['main', 'master', 'develop', 'development', 'staging', 'trunk']) {
+      if (branchList.includes(name)) return name;
     }
+    // 3. Last resort: return the first branch
+    if (branchList.length > 0) return branchList[0];
   } catch {
-    return new Set();
+    // ignore
   }
+
+  return null;
+}
+
+function getMainBranchHashes(repoPath) {
+  const mainBranch = detectDefaultBranch(repoPath);
+  if (!mainBranch) return { hashes: new Set(), branchName: null };
 
   try {
     const raw = execSync(
       `git -C "${repoPath}" log ${mainBranch} --format=%H`,
       { encoding: 'utf-8', maxBuffer: 50 * 1024 * 1024 }
     );
-    return new Set(raw.trim().split('\n').filter(Boolean));
+    return {
+      hashes: new Set(raw.trim().split('\n').filter(Boolean)),
+      branchName: mainBranch,
+    };
   } catch {
-    return new Set();
+    return { hashes: new Set(), branchName: mainBranch };
   }
 }
 
@@ -120,15 +140,12 @@ function parseGitLog(raw) {
 
 export function analyzeGitRepo(repoPath, days) {
   if (!existsSync(path.join(repoPath, '.git'))) {
-    return { repoPath, commits: [], allCommits: [] };
+    return { repoPath, commits: [], allCommits: [], defaultBranch: null };
   }
 
   const user = getGitUser();
 
   try {
-    // Use %x00 (null byte) for the last delimiter to avoid ambiguity with subject containing |
-    // Actually, let's use a 5-pipe approach: hash|email|timestamp|subject|decorations
-    // But subject can have |. So we use the fact that decorations is the LAST field.
     const raw = execSync(
       `git -C "${repoPath}" log --all --since="${days} days ago" --format="COMMIT:%H|%ae|%aI|%s|%D" --numstat`,
       { encoding: 'utf-8', maxBuffer: 50 * 1024 * 1024 }
@@ -136,8 +153,8 @@ export function analyzeGitRepo(repoPath, days) {
 
     const allCommits = parseGitLog(raw);
 
-    // Get main branch hashes for onMain tagging
-    const mainHashes = getMainBranchHashes(repoPath);
+    // Get default branch hashes for onMain tagging
+    const { hashes: mainHashes, branchName } = getMainBranchHashes(repoPath);
     for (const commit of allCommits) {
       commit.onMain = mainHashes.has(commit.hash);
     }
@@ -145,9 +162,9 @@ export function analyzeGitRepo(repoPath, days) {
     // Filter to current user
     const userCommits = allCommits.filter(c => c.authorEmail === user.email);
 
-    return { repoPath, commits: userCommits, allCommits };
+    return { repoPath, commits: userCommits, allCommits, defaultBranch: branchName };
   } catch (err) {
     process.stderr.write(`Warning: Git analysis failed for ${repoPath}: ${err.message}\n`);
-    return { repoPath, commits: [], allCommits: [] };
+    return { repoPath, commits: [], allCommits: [], defaultBranch: null };
   }
 }

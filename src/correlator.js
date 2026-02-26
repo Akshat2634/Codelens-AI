@@ -1,8 +1,16 @@
-const POST_SESSION_BUFFER_MS = 30 * 60 * 1000; // 30 minutes after session end
+const FALLBACK_BUFFER_MS = 2 * 60 * 60 * 1000; // 2 hours for time-only fallback
 
+/**
+ * Correlate sessions to commits using file-based matching.
+ *
+ * Primary: match commits whose changed files overlap with session.filesWritten.
+ *   Time constraint: commit is on the same calendar day or the next day.
+ * Fallback: for sessions with no filesWritten (chat-only), use time window
+ *   [sessionStart, sessionEnd + 2 hours].
+ */
 export function correlateSessions(sessions, commitsByRepo) {
   const result = [];
-  const claimedCommits = new Set(); // track commits already assigned to a session
+  const claimedCommits = new Set();
 
   // Sort sessions by end time so earlier sessions claim commits first
   const sorted = [...sessions].sort(
@@ -15,16 +23,34 @@ export function correlateSessions(sessions, commitsByRepo) {
 
     const sessionStart = new Date(session.startTime).getTime();
     const sessionEnd = new Date(session.endTime).getTime();
-    const windowEnd = sessionEnd + POST_SESSION_BUFFER_MS;
+    const sessionFiles = new Set(session.filesWritten || []);
 
-    // Find commits within the session window, not already claimed
-    const matched = repoCommits.filter(c =>
-      c.timestampMs >= sessionStart &&
-      c.timestampMs <= windowEnd &&
-      !claimedCommits.has(c.hash)
-    );
+    let matched;
 
-    // Mark these commits as claimed
+    if (sessionFiles.size > 0) {
+      // PRIMARY: File-based correlation
+      // Time window: same calendar day as session, or next calendar day
+      const sessionDay = new Date(session.startTime);
+      const dayStart = new Date(sessionDay.getFullYear(), sessionDay.getMonth(), sessionDay.getDate()).getTime();
+      const dayEnd = dayStart + 2 * 24 * 60 * 60 * 1000; // end of next calendar day
+
+      matched = repoCommits.filter(c => {
+        if (claimedCommits.has(c.hash)) return false;
+        if (c.timestampMs < dayStart || c.timestampMs >= dayEnd) return false;
+        // Check file overlap: any commit file matches a session file
+        return c.files.some(f => sessionFiles.has(f.path));
+      });
+    } else {
+      // FALLBACK: Time-based for chat-only sessions (no files written)
+      const windowEnd = sessionEnd + FALLBACK_BUFFER_MS;
+      matched = repoCommits.filter(c =>
+        c.timestampMs >= sessionStart &&
+        c.timestampMs <= windowEnd &&
+        !claimedCommits.has(c.hash)
+      );
+    }
+
+    // Claim matched commits
     for (const c of matched) {
       claimedCommits.add(c.hash);
     }
@@ -38,6 +64,10 @@ export function correlateSessions(sessions, commitsByRepo) {
     const messageCount = session.userMessageCount + session.assistantMessageCount;
     const isOrphaned = messageCount > 10 && matched.length === 0;
 
+    // Calculate which session files were committed vs not
+    const committedFiles = new Set(matched.flatMap(c => c.files.map(f => f.path)));
+    const uncommittedFiles = [...sessionFiles].filter(f => !committedFiles.has(f));
+
     result.push({
       ...session,
       commits: matched,
@@ -48,6 +78,8 @@ export function correlateSessions(sessions, commitsByRepo) {
       netLines,
       filesChanged,
       isOrphaned,
+      matchedByFiles: sessionFiles.size > 0,
+      uncommittedFiles,
       costPerCommit: matched.length > 0 ? session.cost.totalCost / matched.length : null,
       costPerLine: linesAdded > 0 ? session.cost.totalCost / linesAdded : null,
       costPerNetLine: netLines > 0 ? session.cost.totalCost / netLines : null,
@@ -56,10 +88,10 @@ export function correlateSessions(sessions, commitsByRepo) {
 
   // Identify organic commits (not claimed by any session)
   const organicCommits = [];
-  for (const [repoPath, analysis] of Object.entries(commitsByRepo)) {
+  for (const [, analysis] of Object.entries(commitsByRepo)) {
     for (const commit of analysis.commits) {
       if (!claimedCommits.has(commit.hash)) {
-        organicCommits.push({ ...commit, repoPath });
+        organicCommits.push({ ...commit });
       }
     }
   }

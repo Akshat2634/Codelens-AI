@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSy
 import path from 'node:path';
 import os from 'node:os';
 
-const CACHE_DIR = path.join(os.homedir(), '.cache', 'ai-roi');
+const CACHE_DIR = path.join(os.homedir(), '.cache', 'agent-analytics');
 const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
 const CACHE_VERSION = 1;
 

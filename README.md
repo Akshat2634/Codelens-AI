@@ -1,8 +1,8 @@
-# ai-roi
+# Codelens AI
 
 **Agent Productivity-to-Cost Correlator** — Is your AI coding agent actually shipping code?
 
-`ai-roi` ties Claude Code token usage to actual git output. It reads your local Claude Code session files, correlates them with git commits by timestamp, and serves a dashboard answering: *"Am I getting ROI from my AI coding agent?"*
+Codelens AI ties Claude Code token usage to actual git output. It reads your local Claude Code session files, correlates them with git commits by timestamp, and serves a dashboard answering: *"Am I getting ROI from my AI coding agent?"*
 
 - One command, zero config
 - All data stays local
@@ -13,33 +13,33 @@
 ### Option 1: Run directly (no install)
 
 ```bash
-npx ai-roi
+npx agent-analytics
 ```
 
 ### Option 2: Install globally
 
 ```bash
 # npm
-npm install -g ai-roi
+npm install -g agent-analytics
 
 # pnpm
-pnpm add -g ai-roi
+pnpm add -g agent-analytics
 
 # yarn
-yarn global add ai-roi
+yarn global add agent-analytics
 ```
 
 Then run anywhere:
 
 ```bash
-ai-roi
+agent-analytics
 ```
 
 ### Option 3: Clone and run from source
 
 ```bash
-git clone https://github.com/AkshatSahu/ai-roi.git
-cd ai-roi
+git clone https://github.com/Akshat2634/Codelens-AI.git
+cd Codelens-AI
 
 # Install dependencies (pick one)
 npm install
@@ -61,7 +61,7 @@ node src/index.js
 ## Quick Start
 
 ```bash
-npx ai-roi
+npx agent-analytics
 ```
 
 This parses your `~/.claude/projects/` session data, analyzes your git repos, and opens a dashboard at `http://localhost:3457`.
@@ -75,19 +75,19 @@ This parses your `~/.claude/projects/` session data, analyzes your git repos, an
 | **Orphaned Sessions** | Sessions with 10+ messages that produced zero commits           |
 | **ROI Grade (A-F)**   | Composite score based on tokens-per-commit and survival rate    |
 | **Model Comparison**  | Efficiency breakdown across Opus, Sonnet, and Haiku             |
-| **Branch Awareness**  | What % of AI commits landed on main/master                      |
+| **Branch Awareness**  | What % of AI commits landed on production                       |
 | **Peak Hours**        | Hour-of-day x day-of-week productivity heatmap                  |
 
 ## CLI Options
 
 ```bash
-ai-roi                        # default: last 30 days, port 3457
-ai-roi --days 90              # look back 90 days
-ai-roi --port 8080            # custom port
-ai-roi --no-open              # don't auto-open browser
-ai-roi --json                 # dump all metrics as JSON to stdout
-ai-roi --project techops      # filter to a specific project
-ai-roi --refresh              # force full re-parse (ignore cache)
+agent-analytics                        # default: last 30 days, port 3457
+agent-analytics --days 90              # look back 90 days
+agent-analytics --port 8080            # custom port
+agent-analytics --no-open              # don't auto-open browser
+agent-analytics --json                 # dump all metrics as JSON to stdout
+agent-analytics --project techops      # filter to a specific project
+agent-analytics --refresh              # force full re-parse (ignore cache)
 ```
 
 ## Dashboard
@@ -112,17 +112,20 @@ The dashboard includes:
 
 ### Caching
 
-Parsed session data is cached at `~/.cache/ai-roi/parsed-sessions.json`. On subsequent runs, only new or modified JSONL files are re-parsed, making startup near-instant. Use `--refresh` to force a full re-parse.
+Parsed session data is cached at `~/.cache/agent-analytics/parsed-sessions.json`. On subsequent runs, only new or modified JSONL files are re-parsed, making startup near-instant. Use `--refresh` to force a full re-parse.
 
 ### Cost Calculation
 
-Token costs are calculated per model family:
+Token costs are version-aware and calculated per model:
 
-| Model  | Input   | Output  | Cache Read | Cache Write |
-| ------ | ------- | ------- | ---------- | ----------- |
-| Opus   | $15/M   | $75/M   | $1.50/M    | $18.75/M    |
-| Sonnet | $3/M    | $15/M   | $0.30/M    | $3.75/M     |
-| Haiku  | $0.25/M | $1.25/M | $0.025/M   | $0.3125/M   |
+| Model | Input | Output | Cache Read | Cache Write |
+| --- | --- | --- | --- | --- |
+| Opus 4.5/4.6 | $5/M | $25/M | $0.50/M | $6.25/M |
+| Opus 4.0/4.1 | $15/M | $75/M | $1.50/M | $18.75/M |
+| Sonnet 3.7/4.0/4.5/4.6 | $3/M | $15/M | $0.30/M | $3.75/M |
+| Haiku 4.5 | $1/M | $5/M | $0.10/M | $1.25/M |
+| Haiku 3.5 | $0.80/M | $4/M | $0.08/M | $1.00/M |
+| Haiku 3 | $0.25/M | $1.25/M | $0.03/M | $0.30/M |
 
 ### Line Survival
 
@@ -131,7 +134,7 @@ Line survival uses an approximate heuristic: if lines added in commit A are dele
 ## Project Structure
 
 ```
-ai-roi/
+Codelens-AI/
 ├── package.json
 ├── README.md
 ├── .gitignore
@@ -154,8 +157,8 @@ Contributions welcome! Here's how to get started:
 # 1. Fork the repo on GitHub
 
 # 2. Clone your fork
-git clone https://github.com/YOUR_USERNAME/ai-roi.git
-cd ai-roi
+git clone https://github.com/YOUR_USERNAME/Codelens-AI.git
+cd Codelens-AI
 
 # 3. Install dependencies
 npm install

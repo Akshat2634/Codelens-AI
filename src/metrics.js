@@ -47,21 +47,20 @@ function computeLineSurvival(commitsByRepo) {
   return { totalAdded, totalChurned, surviving, survivalRate };
 }
 
-function computeEfficiencyGrade(tokensPerCommit, survivalRate) {
-  if (tokensPerCommit <= 500_000 && survivalRate >= 90) return 'A';
-  if (tokensPerCommit <= 1_000_000 && survivalRate >= 75) return 'B';
-  if (tokensPerCommit <= 3_000_000 && survivalRate >= 50) return 'C';
-  if (tokensPerCommit <= 10_000_000 && survivalRate >= 25) return 'D';
+function computeEfficiencyGrade(costPerCommit, survivalRate) {
+  // Grade based on cost per commit (more meaningful than raw token count)
+  if (costPerCommit <= 2 && survivalRate >= 90) return 'A';
+  if (costPerCommit <= 5 && survivalRate >= 75) return 'B';
+  if (costPerCommit <= 15 && survivalRate >= 50) return 'C';
+  if (costPerCommit <= 40 && survivalRate >= 25) return 'D';
   return 'F';
 }
 
 function computeSessionGrade(session) {
   if (session.commitCount === 0) return 'F';
-  const totalTokens = session.totalInputTokens + session.totalOutputTokens +
-    session.cacheReadTokens + session.cacheCreationTokens;
-  const tokensPerCommit = totalTokens / session.commitCount;
+  const costPerCommit = session.cost.totalCost / session.commitCount;
   // Use 80 as a default survival (we don't have per-session survival)
-  return computeEfficiencyGrade(tokensPerCommit, 80);
+  return computeEfficiencyGrade(costPerCommit, 80);
 }
 
 function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets) {
@@ -127,9 +126,17 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
   const totalOnMain = correlatedSessions.reduce((s, cs) => s + cs.commitsOnMain, 0);
   if (summary.totalCommits > 0) {
     const pct = Math.round((totalOnMain / summary.totalCommits) * 100);
+    let mainText;
+    if (pct < 30) {
+      mainText = `${pct}% of AI-assisted commits landed on production — this is normal if you primarily work on feature branches.`;
+    } else if (pct >= 70) {
+      mainText = `${pct}% of AI-assisted commits landed directly on production.`;
+    } else {
+      mainText = `${pct}% of AI-assisted commits landed on production.`;
+    }
     insights.push({
       type: pct >= 50 ? 'success' : 'info',
-      text: `${pct}% of AI-assisted commits landed on main/master.`,
+      text: mainText,
     });
   }
 
@@ -157,6 +164,36 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
     });
   }
 
+  // Average commit delay (time between session end and commit)
+  const delays = [];
+  for (const session of correlatedSessions) {
+    if (session.commits.length === 0) continue;
+    const sessionEnd = new Date(session.endTime).getTime();
+    for (const c of session.commits) {
+      const delay = c.timestampMs - sessionEnd;
+      if (delay >= 0) delays.push(delay);
+    }
+  }
+  if (delays.length > 0) {
+    const avgDelayMs = delays.reduce((s, d) => s + d, 0) / delays.length;
+    const avgDelayHours = avgDelayMs / (1000 * 60 * 60);
+    if (avgDelayHours < 1) {
+      insights.push({ type: 'success', text: `On average, commits happen ${Math.round(avgDelayHours * 60)} minutes after a session ends.` });
+    } else {
+      insights.push({ type: 'info', text: `On average, commits happen ${avgDelayHours.toFixed(1)} hours after a session ends.` });
+    }
+  }
+
+  // Uncommitted files insight
+  const totalUncommitted = correlatedSessions.reduce((s, c) => s + (c.uncommittedFiles?.length || 0), 0);
+  const totalWritten = correlatedSessions.reduce((s, c) => s + (c.filesWritten?.length || 0), 0);
+  if (totalWritten > 0 && totalUncommitted > 0) {
+    const pct = Math.round((totalUncommitted / totalWritten) * 100);
+    if (pct >= 20) {
+      insights.push({ type: 'info', text: `${pct}% of files Claude edited (${totalUncommitted}/${totalWritten}) were not found in any commit.` });
+    }
+  }
+
   return insights;
 }
 
@@ -182,16 +219,16 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
 
   const lineSurvival = computeLineSurvival(commitsByRepo);
 
-  const totalTokens = totalInputTokens + totalOutputTokens;
-  const tokensPerCommit = totalCommits > 0 ? totalTokens / totalCommits : 0;
+  const avgCost = totalCommits > 0 ? totalCost / totalCommits : 0;
   const overallGrade = totalCommits > 0
-    ? computeEfficiencyGrade(tokensPerCommit, lineSurvival.survivalRate)
+    ? computeEfficiencyGrade(avgCost, lineSurvival.survivalRate)
     : 'F';
 
   // ---- Daily timeline ----
   const dailyMap = new Map();
   for (const session of correlatedSessions) {
-    const date = session.startTime.slice(0, 10);
+    const d = new Date(session.startTime);
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     if (!dailyMap.has(date)) {
       dailyMap.set(date, { date, cost: 0, sessions: 0, commits: 0, linesAdded: 0, linesDeleted: 0, netLines: 0 });
     }
@@ -270,11 +307,16 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   const heatmap = Array.from({ length: 7 }, () => Array(24).fill(0));
   const heatmapCost = Array.from({ length: 7 }, () => Array(24).fill(0));
   for (const session of correlatedSessions) {
-    const d = new Date(session.startTime);
-    const dayOfWeek = d.getDay(); // 0=Sun
-    const hour = d.getHours();
-    heatmap[dayOfWeek][hour] += session.commitCount;
-    heatmapCost[dayOfWeek][hour] += session.cost.totalCost;
+    // Place each commit at its actual timestamp, not the session start
+    for (const commit of session.commits) {
+      const d = new Date(commit.timestamp);
+      const dayOfWeek = d.getDay(); // 0=Sun
+      const hour = d.getHours();
+      heatmap[dayOfWeek][hour]++;
+    }
+    // Cost is still attributed to session start time
+    const sd = new Date(session.startTime);
+    heatmapCost[sd.getDay()][sd.getHours()] += session.cost.totalCost;
   }
 
   // ---- Per-project breakdown ----
@@ -335,6 +377,9 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     meta: {
       generatedAt: new Date().toISOString(),
       daysAnalyzed: days,
+      defaultBranches: Object.fromEntries(
+        Object.entries(commitsByRepo).map(([repo, a]) => [repo.split('/').pop(), a.defaultBranch]).filter(([, b]) => b)
+      ),
     },
     summary,
     insights,

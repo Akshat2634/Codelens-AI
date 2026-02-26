@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ai-roi — Agent Productivity Dashboard</title>
+  <title>Codelens AI — Agent Productivity Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <style>
@@ -78,51 +78,6 @@
       border-radius: 20px;
       padding: 4px 12px;
     }
-
-    /* Controls bar */
-    .controls {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 24px;
-      padding: 12px 16px;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-    }
-    .toggle-group {
-      display: flex;
-      background: var(--bg-primary);
-      border-radius: 6px;
-      overflow: hidden;
-      border: 1px solid var(--border);
-    }
-    .toggle-btn {
-      padding: 6px 16px;
-      border: none;
-      background: transparent;
-      color: var(--text-secondary);
-      cursor: pointer;
-      font-size: 0.85rem;
-      font-family: inherit;
-      transition: all 0.2s;
-    }
-    .toggle-btn.active {
-      background: var(--accent-blue);
-      color: #fff;
-    }
-    .share-btn {
-      padding: 6px 16px;
-      border: 1px solid var(--border);
-      background: var(--bg-card);
-      color: var(--text-primary);
-      border-radius: 6px;
-      cursor: pointer;
-      font-family: inherit;
-      font-size: 0.85rem;
-      transition: all 0.2s;
-    }
-    .share-btn:hover { background: var(--bg-hover); }
 
     /* Hero Stats */
     .hero-stats {
@@ -216,6 +171,24 @@
       margin-bottom: 16px;
       font-weight: 500;
     }
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .chart-header h3 { margin-bottom: 0; }
+    .scale-toggle {
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.75rem;
+    }
+    .scale-toggle:hover { color: var(--text-primary); border-color: var(--accent-blue); }
     .chart-container {
       position: relative;
       width: 100%;
@@ -241,37 +214,55 @@
       align-items: center;
       gap: 6px;
     }
-    .survival-card .tooltip-icon {
-      width: 16px;
-      height: 16px;
+    .info-tip {
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      width: 16px;
+      height: 16px;
       border-radius: 50%;
       background: var(--bg-hover);
-      font-size: 0.65rem;
       color: var(--text-muted);
+      font-size: 0.6rem;
+      font-style: normal;
       cursor: help;
+      margin-left: 6px;
       position: relative;
+      vertical-align: middle;
+      flex-shrink: 0;
     }
-    .tooltip-icon .tooltip-text {
-      visibility: hidden;
-      width: 260px;
+    .info-tip:hover::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
       background: var(--bg-primary);
       color: var(--text-secondary);
-      border: 1px solid var(--border);
       padding: 8px 12px;
       border-radius: 6px;
       font-size: 0.75rem;
       font-weight: 400;
-      position: absolute;
-      bottom: 130%;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10;
+      width: 280px;
       line-height: 1.4;
+      border: 1px solid var(--border);
+      z-index: 100;
+      pointer-events: none;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      white-space: normal;
+      text-transform: none;
+      letter-spacing: normal;
     }
-    .tooltip-icon:hover .tooltip-text { visibility: visible; }
+    /* Table header tooltips: show below the icon instead of above */
+    thead .info-tip:hover::after {
+      bottom: auto;
+      top: calc(100% + 8px);
+    }
+    /* Make table header tooltip icons more visible */
+    thead .info-tip {
+      background: rgba(255,255,255,0.1);
+      color: var(--text-secondary);
+    }
     .survival-bar {
       height: 24px;
       background: var(--bg-hover);
@@ -340,7 +331,8 @@
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      overflow: hidden;
+      overflow-x: auto;
+      overflow-y: visible;
     }
     table {
       width: 100%;
@@ -385,6 +377,10 @@
       background: var(--bg-secondary);
     }
     .expand-row.open { display: table-row; }
+    .expand-row td {
+      white-space: normal;
+      max-width: 1px;
+    }
     .expand-content {
       padding: 12px 16px;
       font-size: 0.8rem;
@@ -395,8 +391,16 @@
       gap: 10px;
       padding: 6px 0;
       border-bottom: 1px solid var(--border);
+      overflow: hidden;
     }
     .expand-content .commit-item:last-child { border-bottom: none; }
+    .commit-subject {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+      flex: 1;
+    }
     .commit-hash {
       font-family: 'SF Mono', Monaco, monospace;
       color: var(--accent-blue);
@@ -476,8 +480,8 @@
 <body>
   <div class="container">
     <header>
-      <h1>ai-roi</h1>
-      <p class="tagline">Is your AI agent actually shipping code?</p>
+      <h1>Codelens AI</h1>
+      <p class="tagline">Correlates your AI coding agent's token spend with actual git output — see what shipped, what churned, and what it cost.</p>
       <div class="meta-info">
         <span class="badge" id="date-range"></span>
         <span class="badge">All data stays local</span>
@@ -492,7 +496,9 @@
     </div>
 
     <footer>
-      Built with <strong>ai-roi</strong> &mdash; <a href="https://github.com/YOUR_USERNAME/ai-roi">GitHub</a>
+      Made by <a href="https://www.linkedin.com/in/akshat2634/">Akshat</a> &middot; Powered by <a href="https://code.claude.com/docs/en/overview">Claude Code</a> &middot; <a href="https://github.com/Akshat2634/Codelens-AI">GitHub</a>
+      <div style="margin-top:6px;font-size:0.75rem;opacity:0.7;">Open source — contributions, ideas, and feedback welcome! <a href="https://github.com/Akshat2634/Codelens-AI" style="color:var(--accent-blue);">Star the repo</a> if you find it useful.</div>
+      <div style="margin-top:6px;font-size:0.7rem;opacity:0.4;">Cost estimates are approximate — based on Anthropic's published per-token pricing and may vary from actual billing. Currently supports Claude Code only. Support for Cursor, Codex, Gemini CLI, and more coming soon.</div>
     </footer>
   </div>
 
@@ -501,10 +507,11 @@ const GRADE_COLORS = { A: '#3fb950', B: '#58a6ff', C: '#d29922', D: '#f0883e', F
 const INSIGHT_ICONS = { warning: '!', success: '+', info: 'i', tip: '*' };
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 let DATA = null;
-let mainOnly = false;
 let currentPage = 1;
 let sortCol = 'startTime';
 let sortOrder = -1;
+let timelineChart = null;
+let timelineLogScale = false;
 
 document.addEventListener('DOMContentLoaded', async () => {
   try {
@@ -522,30 +529,33 @@ document.addEventListener('DOMContentLoaded', async () => {
 function render() {
   const d = DATA;
   document.getElementById('date-range').textContent = `Last ${d.meta.daysAnalyzed} days`;
+  const summary = d.summary;
 
   document.getElementById('app').innerHTML = `
-    ${renderControls()}
-    ${renderHeroStats(d.summary)}
+    ${renderHeroStats(summary)}
     ${renderInsights(d.insights)}
     <div class="charts-grid">
       <div class="chart-card full-width">
-        <h3>Cost vs Output Over Time</h3>
+        <div class="chart-header">
+          <h3>Cost vs Output Over Time <i class="info-tip" data-tip="Orange line = estimated dollar cost per day. Green line = lines of code added per day. Ideally green stays high while orange stays low.">i</i></h3>
+          <button class="scale-toggle" onclick="toggleTimelineScale()">Log scale</button>
+        </div>
         <div class="chart-container"><canvas id="chart-timeline"></canvas></div>
       </div>
       <div class="chart-card">
-        <h3>Model Cost Breakdown</h3>
+        <h3>Model Cost Breakdown <i class="info-tip" data-tip="How your spending splits across different Claude models (Opus, Sonnet, Haiku). Opus is the most expensive but may be more capable.">i</i></h3>
         <div class="chart-container"><canvas id="chart-models"></canvas></div>
       </div>
       <div class="chart-card">
-        <h3>Tool Usage Distribution</h3>
+        <h3>Tool Usage Distribution <i class="info-tip" data-tip="Which tools Claude used most during your sessions. Read = reading files, Bash = running commands, Edit = modifying files, Write = creating new files.">i</i></h3>
         <div class="chart-container"><canvas id="chart-tools"></canvas></div>
       </div>
       <div class="chart-card">
-        <h3>Session Length vs Efficiency</h3>
+        <h3>Session Length vs Efficiency <i class="info-tip" data-tip="Sessions grouped by message count (1-50, 51-100, etc). Blue bars = average cost per commit for that group. Purple bars = number of sessions. Find your sweet spot — the group with the lowest blue bar.">i</i></h3>
         <div class="chart-container"><canvas id="chart-buckets"></canvas></div>
       </div>
       <div class="chart-card">
-        <h3>Productivity Heatmap (commits by hour & day)</h3>
+        <h3>Productivity Heatmap <i class="info-tip" data-tip="Each cell = commits produced during that hour and day of week. Darker green = more commits. Find your peak productivity windows.">i</i></h3>
         <div id="heatmap-container"></div>
       </div>
     </div>
@@ -558,36 +568,26 @@ function render() {
   bindEvents();
 }
 
-function renderControls() {
-  return `<div class="controls">
-    <div class="toggle-group">
-      <button class="toggle-btn ${!mainOnly ? 'active' : ''}" onclick="setMainOnly(false)">All Branches</button>
-      <button class="toggle-btn ${mainOnly ? 'active' : ''}" onclick="setMainOnly(true)">Main Only</button>
-    </div>
-    <button class="share-btn" onclick="shareReport()">Copy Summary</button>
-  </div>`;
-}
-
 function renderHeroStats(s) {
   const gradeColor = GRADE_COLORS[s.overallGrade] || GRADE_COLORS.F;
   return `<div class="hero-stats">
     <div class="stat-card">
-      <div class="label">Total AI Cost</div>
+      <div class="label">Total AI Cost <i class="info-tip" data-tip="Estimated cost based on Anthropic's per-token pricing (input/output per 1M tokens): Opus 4.5/4.6: $5/$25, Opus 4.0/4.1: $15/$75, Sonnet 3.7/4.0/4.5/4.6: $3/$15, Haiku 4.5: $1/$5, Haiku 3.5: $0.80/$4, Haiku 3: $0.25/$1.25. Cache reads 90% cheaper, cache writes 25% more.">i</i></div>
       <div class="value" style="color: var(--accent-orange);">$${s.totalCost.toFixed(2)}</div>
       <div class="sub">${s.totalSessions} sessions</div>
     </div>
     <div class="stat-card">
-      <div class="label">Commits Shipped</div>
+      <div class="label">Commits Shipped <i class="info-tip" data-tip="Git commits matched by file overlap — when a commit touches files that Claude edited during a session. For chat-only sessions, falls back to a 2-hour time window.">i</i></div>
       <div class="value" style="color: var(--accent-green);">${s.totalCommits}</div>
-      <div class="sub">${mainOnly ? s.totalCommitsOnMain + ' on main' : s.totalLinesAdded.toLocaleString() + ' lines added'}</div>
+      <div class="sub">${s.totalLinesAdded.toLocaleString()} lines added</div>
     </div>
     <div class="stat-card">
-      <div class="label">Avg Cost / Commit</div>
+      <div class="label">Avg Cost / Commit <i class="info-tip" data-tip="Total AI cost divided by total commits produced. Lower is better — means your agent is efficient.">i</i></div>
       <div class="value" style="color: var(--accent-blue);">${s.avgCostPerCommit !== null ? '$' + s.avgCostPerCommit.toFixed(2) : 'N/A'}</div>
-      <div class="sub">${s.mainBranchPct}% landed on main</div>
+      <div class="sub">${s.totalFilesChanged} files changed</div>
     </div>
     <div class="stat-card grade">
-      <div class="label">ROI Grade</div>
+      <div class="label">ROI Grade <i class="info-tip" data-tip="Overall efficiency grade from A (great) to F (poor). Based on cost-per-commit and code survival. A: &le;$2, B: &le;$5, C: &le;$15, D: &le;$30, F: >$30 or no commits.">i</i></div>
       <div class="value" style="color: ${gradeColor};">${s.overallGrade}</div>
       <div class="sub">${s.orphanedSessionRate}% sessions orphaned</div>
     </div>
@@ -616,9 +616,7 @@ function renderSurvival(s) {
     <div class="survival-card">
       <h3>
         Line Survival Rate
-        <span class="tooltip-icon">i
-          <span class="tooltip-text">Approximate — based on 24h churn detection, not git blame tracking. Lines added in a commit and deleted within 24h on the same file are counted as churned.</span>
-        </span>
+        <i class="info-tip" data-tip="Of all lines your AI agent added, how many are still in the codebase after 24 hours. Approximate — based on churn detection, not exact git blame tracking.">i</i>
       </h3>
       <div class="survival-bar"><div class="fill" style="width: ${pct}%; background: ${color};"></div></div>
       <div class="survival-stats">
@@ -653,29 +651,36 @@ function renderSessionsTable(sessions) {
           <tr>
             <th onclick="sortTable('startTime')" class="${sortCol === 'startTime' ? 'sorted' : ''}">Date${thArrow('startTime')}</th>
             <th onclick="sortTable('projectName')" class="${sortCol === 'projectName' ? 'sorted' : ''}">Project${thArrow('projectName')}</th>
-            <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')}</th>
-            <th onclick="sortTable('msgCount')" class="${sortCol === 'msgCount' ? 'sorted' : ''}">Msgs${thArrow('msgCount')}</th>
-            <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')}</th>
-            <th onclick="sortTable('commitCount')" class="${sortCol === 'commitCount' ? 'sorted' : ''}">Commits${thArrow('commitCount')}</th>
-            <th onclick="sortTable('linesAdded')" class="${sortCol === 'linesAdded' ? 'sorted' : ''}">Lines${thArrow('linesAdded')}</th>
-            <th>Grade</th>
+            <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')} <i class="info-tip" data-tip="Primary model used in the session. Models marked (sub) are subagents spawned for background tasks like code search and exploration.">i</i></th>
+            <th onclick="sortTable('msgCount')" class="${sortCol === 'msgCount' ? 'sorted' : ''}">Msgs${thArrow('msgCount')} <i class="info-tip" data-tip="Total messages in the session (your messages + Claude's responses).">i</i></th>
+            <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')} <i class="info-tip" data-tip="Estimated cost based on token usage and Anthropic's pricing. Calculated from input, output, cache read (90% discount), and cache write (25% premium) tokens.">i</i></th>
+            <th onclick="sortTable('commitCount')" class="${sortCol === 'commitCount' ? 'sorted' : ''}">Commits${thArrow('commitCount')} <i class="info-tip" data-tip="Git commits that touch files Claude edited in this session. Falls back to time-window for chat-only sessions.">i</i></th>
+            <th onclick="sortTable('linesAdded')" class="${sortCol === 'linesAdded' ? 'sorted' : ''}">Lines${thArrow('linesAdded')} <i class="info-tip" data-tip="Lines added / lines deleted in matched commits.">i</i></th>
+            <th>Grade <i class="info-tip" data-tip="Session efficiency: A = great ROI, B = good, C = average, D = poor, F = no commits or very high cost.">i</i></th>
           </tr>
         </thead>
         <tbody>
           ${pageData.map((s, i) => {
             const idx = (page - 1) * pageSize + i;
             const gradeColor = GRADE_COLORS[s.grade] || GRADE_COLORS.F;
-            const modelShort = (s.model || 'unknown').replace('claude-', '').replace(/-\d.*/, '');
+            const primaryName = formatModelName(s.model || 'unknown');
+            const subModels = Object.keys(s.modelBreakdown || {})
+              .filter(m => m !== s.model)
+              .map(formatModelName)
+              .filter(Boolean);
+            const modelDisplay = subModels.length > 0
+              ? primaryName + ' <span style="color:var(--text-muted);font-size:0.75rem;">+ ' + subModels.join(', ') + ' <span style="opacity:0.6;">(sub)</span></span>'
+              : primaryName;
             const rowClass = s.isOrphaned ? 'orphaned' : '';
             return `
               <tr class="${rowClass}" style="cursor:pointer;" onclick="toggleExpand(${idx})">
                 <td>${formatDate(s.startTime)}</td>
                 <td>${s.projectName || '—'}</td>
-                <td>${modelShort}</td>
+                <td>${modelDisplay}</td>
                 <td>${s.userMessageCount + s.assistantMessageCount}</td>
                 <td>$${s.cost.totalCost.toFixed(2)}</td>
                 <td>${s.commitCount}</td>
-                <td>+${s.linesAdded} / -${s.linesDeleted}</td>
+                <td><span style="color:#3fb950">+${s.linesAdded.toLocaleString()}</span> / <span style="color:#f85149">-${s.linesDeleted.toLocaleString()}</span></td>
                 <td><span class="grade-badge" style="background:${gradeColor}22;color:${gradeColor};">${s.grade}</span></td>
               </tr>
               <tr class="expand-row" id="expand-${idx}">
@@ -685,8 +690,8 @@ function renderSessionsTable(sessions) {
                       <div class="commit-item">
                         <span class="commit-hash">${c.hash.slice(0, 7)}</span>
                         <span class="commit-branch ${c.onMain ? 'main-badge' : ''}">${c.onMain ? 'main' : c.branches[0] || 'branch'}</span>
-                        <span>${c.subject}</span>
-                        <span style="margin-left:auto;color:var(--text-muted);">+${c.totalAdded}/-${c.totalDeleted}</span>
+                        <span class="commit-subject">${c.subject}</span>
+                        <span style="margin-left:auto;color:var(--text-muted);white-space:nowrap;flex-shrink:0;">+${c.totalAdded}/-${c.totalDeleted}</span>
                       </div>
                     `).join('') : '<div style="color:var(--text-muted);">No matched commits</div>'}
                   </div>
@@ -711,10 +716,21 @@ function getSortValue(session, col) {
   return session[col];
 }
 
+function formatModelName(modelId) {
+  if (!modelId) return 'Unknown';
+  // claude-opus-4-6 → Opus 4.6, claude-sonnet-4-5-20250929 → Sonnet 4.5, claude-haiku-4-5-20251001 → Haiku 4.5
+  const m = modelId.toLowerCase().replace('claude-', '');
+  const match = m.match(/^(opus|sonnet|haiku)-(\d+)-(\d+)/);
+  if (match) return match[1].charAt(0).toUpperCase() + match[1].slice(1) + ' ' + match[2] + '.' + match[3];
+  // fallback: capitalize first word
+  const family = m.replace(/-\d.*/, '');
+  return family.charAt(0).toUpperCase() + family.slice(1);
+}
+
 function formatDate(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
 function initCharts() {
@@ -724,7 +740,8 @@ function initCharts() {
 
   // Timeline chart
   const daily = DATA.daily;
-  new Chart(document.getElementById('chart-timeline'), {
+  const avgCost = daily.reduce((s, d) => s + d.cost, 0) / (daily.length || 1);
+  timelineChart = new Chart(document.getElementById('chart-timeline'), {
     type: 'line',
     data: {
       labels: daily.map(d => d.date),
@@ -737,6 +754,7 @@ function initCharts() {
           fill: true,
           tension: 0.3,
           yAxisID: 'y',
+          pointRadius: daily.map(d => d.cost > avgCost * 3 ? 6 : 3),
         },
         {
           label: 'Lines Added',
@@ -753,10 +771,57 @@ function initCharts() {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { position: 'top' } },
+      plugins: {
+        legend: { position: 'top' },
+        tooltip: {
+          callbacks: {
+            title: ctx => ctx[0].label,
+            afterBody: ctx => {
+              const idx = ctx[0].dataIndex;
+              const day = DATA.daily[idx];
+              return 'Sessions: ' + (day.sessions || 0);
+            },
+          },
+        },
+      },
       scales: {
-        y: { type: 'linear', position: 'left', title: { display: true, text: 'Cost ($)' } },
-        y1: { type: 'linear', position: 'right', title: { display: true, text: 'Lines Added' }, grid: { drawOnChartArea: false } },
+        y: {
+          type: 'linear', position: 'left',
+          title: { display: true, text: 'Cost ($)' },
+          ticks: {
+            callback: function(v) {
+              if (this.type === 'logarithmic') {
+                const nice = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+                return nice.includes(v) ? '$' + v : '';
+              }
+              return '$' + v;
+            },
+          },
+          afterBuildTicks: function(axis) {
+            if (axis.type === 'logarithmic') {
+              axis.min = 0.5;
+            }
+          },
+        },
+        y1: {
+          type: 'linear', position: 'right',
+          title: { display: true, text: 'Lines Added' },
+          grid: { drawOnChartArea: false },
+          ticks: {
+            callback: function(v) {
+              if (this.type === 'logarithmic') {
+                const nice = [1, 5, 10, 50, 100, 500, 1000, 5000];
+                return nice.includes(v) ? v.toLocaleString() : '';
+              }
+              return v.toLocaleString();
+            },
+          },
+          afterBuildTicks: function(axis) {
+            if (axis.type === 'logarithmic') {
+              axis.min = 1;
+            }
+          },
+        },
       },
     },
   });
@@ -765,10 +830,14 @@ function initCharts() {
   const models = DATA.modelBreakdown;
   const modelLabels = Object.keys(models).filter(k => models[k].cost > 0);
   const modelColors = { opus: '#bc8cff', sonnet: '#58a6ff', haiku: '#3fb950', unknown: '#8b949e' };
+  const modelTotalCost = modelLabels.reduce((s, m) => s + models[m].cost, 0);
   new Chart(document.getElementById('chart-models'), {
     type: 'doughnut',
     data: {
-      labels: modelLabels.map(m => m.charAt(0).toUpperCase() + m.slice(1)),
+      labels: modelLabels.map(m => {
+        const pct = modelTotalCost > 0 ? Math.round((models[m].cost / modelTotalCost) * 100) : 0;
+        return m.charAt(0).toUpperCase() + m.slice(1) + ' (' + pct + '%)';
+      }),
       datasets: [{
         data: modelLabels.map(m => models[m].cost),
         backgroundColor: modelLabels.map(m => modelColors[m] || '#8b949e'),
@@ -879,15 +948,19 @@ function initHeatmap() {
   }
   html += '</div>';
 
+  // Gradient legend
+  html += '<div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:8px;font-size:0.7rem;color:var(--text-muted);">';
+  html += '<span>Fewer</span><div style="display:flex;gap:1px;">';
+  const legendSteps = [0.2, 0.4, 0.6, 0.8, 1.0];
+  for (const step of legendSteps) {
+    html += `<div style="width:14px;height:14px;border-radius:3px;background:rgba(63,185,80,${0.2 + step * 0.8});"></div>`;
+  }
+  html += '</div><span>More commits</span></div>';
+
   container.innerHTML = html;
 }
 
 function bindEvents() {}
-
-window.setMainOnly = function(val) {
-  mainOnly = val;
-  render();
-};
 
 window.toggleExpand = function(idx) {
   const row = document.getElementById(`expand-${idx}`);
@@ -906,31 +979,17 @@ window.changePage = function(delta) {
   render();
 };
 
-window.shareReport = function() {
-  const s = DATA.summary;
-  const text = [
-    '=== ai-roi Report ===',
-    `Period: Last ${DATA.meta.daysAnalyzed} days`,
-    `Total AI Cost: $${s.totalCost.toFixed(2)}`,
-    `Sessions: ${s.totalSessions}`,
-    `Commits Shipped: ${s.totalCommits}`,
-    `Lines Added: ${s.totalLinesAdded.toLocaleString()}`,
-    `Avg Cost/Commit: ${s.avgCostPerCommit !== null ? '$' + s.avgCostPerCommit.toFixed(2) : 'N/A'}`,
-    `Line Survival: ${s.lineSurvivalRate}%`,
-    `Overall Grade: ${s.overallGrade}`,
-    `Orphaned Sessions: ${s.orphanedSessionRate}%`,
-    `Commits on Main: ${s.mainBranchPct}%`,
-    '',
-    'Generated by ai-roi',
-  ].join('\n');
-
-  navigator.clipboard.writeText(text).then(() => {
-    const btn = document.querySelector('.share-btn');
-    const orig = btn.textContent;
-    btn.textContent = 'Copied!';
-    setTimeout(() => btn.textContent = orig, 2000);
-  });
+window.toggleTimelineScale = function() {
+  if (!timelineChart) return;
+  timelineLogScale = !timelineLogScale;
+  const scaleType = timelineLogScale ? 'logarithmic' : 'linear';
+  timelineChart.options.scales.y.type = scaleType;
+  timelineChart.options.scales.y1.type = scaleType;
+  timelineChart.update();
+  const btn = document.querySelector('.scale-toggle');
+  if (btn) btn.textContent = timelineLogScale ? 'Linear scale' : 'Log scale';
 };
+
 </script>
 </body>
 </html>
