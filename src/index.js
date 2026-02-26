@@ -10,7 +10,7 @@ import { computeMetrics } from './metrics.js';
 import { loadCache, saveCache, deleteCache, getStaleFiles } from './cache.js';
 import { createServer } from './server.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 
 async function main() {
   const program = new Command();
