@@ -158,14 +158,14 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
       expect(transition).toContain('transform');
     });
 
-    test('legend row shows 4 color-coded items including grade', async ({ page }) => {
+    test('legend row shows 4 color-coded items matching card labels', async ({ page }) => {
       const legend = page.locator('.hero-legend');
       await expect(legend).toHaveCount(1);
       await expect(legend.locator('.dot')).toHaveCount(4);
-      await expect(legend).toContainText('Cost');
-      await expect(legend).toContainText('Output');
-      await expect(legend).toContainText('Efficiency');
-      await expect(legend).toContainText('Grade');
+      await expect(legend).toContainText('Total AI Cost');
+      await expect(legend).toContainText('Commits Shipped');
+      await expect(legend).toContainText('Avg Cost / Commit');
+      await expect(legend).toContainText('ROI Grade');
     });
 
     test('legend has card-style background and border', async ({ page }) => {
