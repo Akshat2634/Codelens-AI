@@ -20,13 +20,13 @@ npx agent-analytics
 
 ```bash
 # npm
-npm install -g agent-analytics
+npm install -g codelens-ai
 
 # pnpm
-pnpm add -g agent-analytics
+pnpm add -g codelens-ai
 
 # yarn
-yarn global add agent-analytics
+yarn global add codelens-ai
 ```
 
 Then run anywhere:
