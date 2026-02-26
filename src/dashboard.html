@@ -819,6 +819,9 @@ function renderTokenFunnel(t) {
   const pCacheRead = ((t.funnel.cacheRead / total) * 100).toFixed(1);
   const pCacheCreate = ((t.funnel.cacheCreation / total) * 100).toFixed(1);
 
+  // Display-friendly percentages: show "< 0.1%" instead of "0.0%" when value exists but rounds down
+  const fmtPct = (raw, val) => (raw === '0.0' && val > 0) ? '< 0.1' : raw;
+
   const wasteHigh = parseFloat(pOrph) > 25;
 
   return `<div class="token-funnel">
@@ -837,10 +840,10 @@ function renderTokenFunnel(t) {
           <div class="segment" style="width:${pCacheCreate}%;background:var(--accent-orange);" title="Cache Write: ${formatTokens(t.funnel.cacheCreation)}">${parseFloat(pCacheCreate) > 8 ? pCacheCreate + '%' : ''}</div>
         </div>
         <div class="funnel-legend">
-          <span><span class="dot" style="background:var(--accent-blue);"></span>Input (${pInput}%)</span>
-          <span><span class="dot" style="background:var(--accent-purple);"></span>Output (${pOutput}%)</span>
-          <span><span class="dot" style="background:var(--accent-cyan);"></span>Cache Read (${pCacheRead}%)</span>
-          <span><span class="dot" style="background:var(--accent-orange);"></span>Cache Write (${pCacheCreate}%)</span>
+          <span><span class="dot" style="background:var(--accent-blue);"></span>Input ${formatTokens(t.funnel.input)} (${fmtPct(pInput, t.funnel.input)}%)</span>
+          <span><span class="dot" style="background:var(--accent-purple);"></span>Output ${formatTokens(t.funnel.output)} (${fmtPct(pOutput, t.funnel.output)}%)</span>
+          <span><span class="dot" style="background:var(--accent-cyan);"></span>Cache Read ${formatTokens(t.funnel.cacheRead)} (${fmtPct(pCacheRead, t.funnel.cacheRead)}%)</span>
+          <span><span class="dot" style="background:var(--accent-orange);"></span>Cache Write ${formatTokens(t.funnel.cacheCreation)} (${fmtPct(pCacheCreate, t.funnel.cacheCreation)}%)</span>
         </div>
       </div>
 
