@@ -2,6 +2,100 @@ import { getModelFamily } from './claude-parser.js';
 
 const CHURN_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+function formatBigNumber(n) {
+  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + 'B';
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return n.toString();
+}
+
+function sessionTokens(s) {
+  return s.totalInputTokens + s.totalOutputTokens + s.cacheReadTokens + s.cacheCreationTokens;
+}
+
+function computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, totalLinesAdded, modelBreakdown) {
+  // Aggregate token stats
+  const totalInputTokens = correlatedSessions.reduce((s, c) => s + c.totalInputTokens, 0);
+  const totalOutputTokens = correlatedSessions.reduce((s, c) => s + c.totalOutputTokens, 0);
+  const totalCacheReadTokens = correlatedSessions.reduce((s, c) => s + c.cacheReadTokens, 0);
+  const totalCacheCreationTokens = correlatedSessions.reduce((s, c) => s + c.cacheCreationTokens, 0);
+  const totalAllTokens = totalInputTokens + totalOutputTokens + totalCacheReadTokens + totalCacheCreationTokens;
+
+  // Token waste analysis
+  const productiveSessions = correlatedSessions.filter(s => s.commitCount > 0);
+  const orphanedSessions = correlatedSessions.filter(s => s.isOrphaned);
+
+  const tokensProductive = productiveSessions.reduce((s, c) => s + sessionTokens(c), 0);
+  const tokensOrphaned = orphanedSessions.reduce((s, c) => s + sessionTokens(c), 0);
+  const tokensExploratory = totalAllTokens - tokensProductive - tokensOrphaned;
+
+  const costOrphaned = orphanedSessions.reduce((s, c) => s + c.cost.totalCost, 0);
+
+  const tokenEfficiencyRate = totalAllTokens > 0
+    ? Math.round((tokensProductive / totalAllTokens) * 100)
+    : 0;
+
+  // Token-to-output ratios
+  const tokensPerCommit = totalCommits > 0 ? Math.round(totalAllTokens / totalCommits) : 0;
+  const tokensPerLineAdded = totalLinesAdded > 0 ? Math.round(totalAllTokens / totalLinesAdded) : 0;
+  const tokensPerSurvivingLine = lineSurvival.surviving > 0
+    ? Math.round(totalAllTokens / lineSurvival.surviving) : 0;
+  const outputInputRatio = totalInputTokens > 0
+    ? Math.round((totalOutputTokens / totalInputTokens) * 100) / 100 : 0;
+
+  // Cache efficiency
+  const totalRawInput = totalInputTokens + totalCacheReadTokens;
+  const cacheHitRate = totalRawInput > 0
+    ? Math.round((totalCacheReadTokens / totalRawInput) * 100) : 0;
+  const totalCacheReadCost = correlatedSessions.reduce((s, c) => s + c.cost.cacheReadCost, 0);
+  // Cache reads are 90% cheaper — savings = what it would have cost at full price minus what was paid
+  const cacheSavingsDollars = totalCacheReadCost * 9;
+
+  // Fun facts
+  const funFacts = generateTokenFunFacts(totalAllTokens, totalOutputTokens);
+
+  return {
+    totalAllTokens,
+    totalInputTokens,
+    totalOutputTokens,
+    totalCacheReadTokens,
+    totalCacheCreationTokens,
+    tokensProductive,
+    tokensOrphaned,
+    tokensExploratory,
+    costOrphaned,
+    tokenEfficiencyRate,
+    tokensPerCommit,
+    tokensPerLineAdded,
+    tokensPerSurvivingLine,
+    outputInputRatio,
+    cacheHitRate,
+    cacheSavingsDollars,
+    funnel: {
+      total: totalAllTokens,
+      input: totalInputTokens,
+      output: totalOutputTokens,
+      cacheRead: totalCacheReadTokens,
+      cacheCreation: totalCacheCreationTokens,
+      productive: tokensProductive,
+      orphaned: tokensOrphaned,
+      exploratory: tokensExploratory,
+    },
+    funFacts,
+  };
+}
+
+function generateTokenFunFacts(totalAllTokens, totalOutputTokens) {
+  const facts = [];
+  // ~0.75 words per token for English text
+  const approxWords = Math.round(totalOutputTokens * 0.75);
+  const novels = (approxWords / 80000).toFixed(1);
+  if (parseFloat(novels) >= 0.1) {
+    facts.push(`Claude generated ~${formatBigNumber(approxWords)} words of output — about ${novels} novels worth of text.`);
+  }
+  return facts;
+}
+
 function computeLineSurvival(commitsByRepo) {
   let totalAdded = 0;
   let totalChurned = 0;
@@ -63,7 +157,7 @@ function computeSessionGrade(session) {
   return computeEfficiencyGrade(costPerCommit, 80);
 }
 
-function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets) {
+function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics) {
   const insights = [];
 
   // Orphaned session rate
@@ -194,6 +288,60 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
     }
   }
 
+  // ---- Token-specific insights ----
+  if (tokenAnalytics && tokenAnalytics.totalAllTokens > 0) {
+    const t = tokenAnalytics;
+
+    // Token efficiency overview
+    const wastePct = t.totalAllTokens > 0
+      ? Math.round((t.tokensOrphaned / t.totalAllTokens) * 100) : 0;
+    insights.push({
+      type: wastePct > 20 ? 'warning' : 'info',
+      text: `You burned ${formatBigNumber(t.totalAllTokens)} tokens — ${t.tokenEfficiencyRate}% shipped code, ${wastePct}% was WASTED in sessions that produced nothing.`,
+    });
+
+    // Orphaned session token waste (alarming if >20%)
+    if (wastePct > 20) {
+      const orphanedCount = correlatedSessions.filter(s => s.isOrphaned).length;
+      insights.push({
+        type: 'warning',
+        text: `${formatBigNumber(t.tokensOrphaned)} tokens went up in smoke across ${orphanedCount} orphaned sessions. That's $${t.costOrphaned.toFixed(2)} burned with zero output.`,
+      });
+    }
+
+    // Cache savings
+    if (t.cacheHitRate > 0) {
+      insights.push({
+        type: 'success',
+        text: `Cache saved you ${formatBigNumber(t.totalCacheReadTokens)} tokens (${t.cacheHitRate}% of input) — $${t.cacheSavingsDollars.toFixed(2)} you didn't have to spend.`,
+      });
+    }
+
+    // Model token efficiency comparison
+    const modelFamiliesForTokens = Object.entries(modelBreakdown)
+      .filter(([, d]) => d.tokensPerCommit !== null);
+    if (modelFamiliesForTokens.length > 1) {
+      const sorted = [...modelFamiliesForTokens].sort((a, b) => a[1].tokensPerCommit - b[1].tokensPerCommit);
+      const best = sorted[0];
+      const worst = sorted[sorted.length - 1];
+      if (best[1].tokensPerCommit && worst[1].tokensPerCommit) {
+        const ratio = (worst[1].tokensPerCommit / best[1].tokensPerCommit).toFixed(1);
+        insights.push({
+          type: 'info',
+          text: `${capitalise(best[0])} burns ${formatBigNumber(best[1].tokensPerCommit)} tokens/commit vs ${formatBigNumber(worst[1].tokensPerCommit)} for ${capitalise(worst[0])} — ${ratio}x difference.`,
+        });
+      }
+    }
+
+    // Tokens per commit tip
+    if (t.tokensPerCommit > 100000) {
+      insights.push({
+        type: 'tip',
+        text: `You burn ${formatBigNumber(t.tokensPerCommit)} tokens per commit. Consider breaking work into smaller, focused sessions.`,
+      });
+    }
+  }
+
   return insights;
 }
 
@@ -230,7 +378,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     const d = new Date(session.startTime);
     const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     if (!dailyMap.has(date)) {
-      dailyMap.set(date, { date, cost: 0, sessions: 0, commits: 0, linesAdded: 0, linesDeleted: 0, netLines: 0 });
+      dailyMap.set(date, { date, cost: 0, sessions: 0, commits: 0, linesAdded: 0, linesDeleted: 0, netLines: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0 });
     }
     const day = dailyMap.get(date);
     day.cost += session.cost.totalCost;
@@ -239,6 +387,10 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     day.linesAdded += session.linesAdded;
     day.linesDeleted += session.linesDeleted;
     day.netLines += session.netLines;
+    day.inputTokens += session.totalInputTokens;
+    day.outputTokens += session.totalOutputTokens;
+    day.cacheReadTokens += session.cacheReadTokens;
+    day.totalTokens += session.totalInputTokens + session.totalOutputTokens + session.cacheReadTokens + session.cacheCreationTokens;
   }
   const daily = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));
 
@@ -272,6 +424,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   }
   for (const data of Object.values(modelBreakdown)) {
     data.avgCostPerCommit = data.commits > 0 ? data.cost / data.commits : null;
+    data.tokensPerCommit = data.commits > 0 ? Math.round(data.tokens / data.commits) : null;
   }
 
   // ---- Tool breakdown ----
@@ -349,6 +502,25 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     grade: computeSessionGrade(s),
   }));
 
+  // ---- Cost breakdown by time period ----
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay());
+  startOfWeek.setHours(0, 0, 0, 0);
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const mkPeriod = () => ({ cost: 0, sessions: 0, commits: 0, tokens: 0 });
+  const costByPeriod = { today: mkPeriod(), week: mkPeriod(), month: mkPeriod(), allTime: mkPeriod() };
+  for (const session of correlatedSessions) {
+    const sDate = new Date(session.startTime);
+    const sDateStr = `${sDate.getFullYear()}-${String(sDate.getMonth() + 1).padStart(2, '0')}-${String(sDate.getDate()).padStart(2, '0')}`;
+    const sTok = session.totalInputTokens + session.totalOutputTokens + session.cacheReadTokens + session.cacheCreationTokens;
+    costByPeriod.allTime.cost += session.cost.totalCost; costByPeriod.allTime.sessions++; costByPeriod.allTime.commits += session.commitCount; costByPeriod.allTime.tokens += sTok;
+    if (sDate >= startOfMonth) { costByPeriod.month.cost += session.cost.totalCost; costByPeriod.month.sessions++; costByPeriod.month.commits += session.commitCount; costByPeriod.month.tokens += sTok; }
+    if (sDate >= startOfWeek) { costByPeriod.week.cost += session.cost.totalCost; costByPeriod.week.sessions++; costByPeriod.week.commits += session.commitCount; costByPeriod.week.tokens += sTok; }
+    if (sDateStr === todayStr) { costByPeriod.today.cost += session.cost.totalCost; costByPeriod.today.sessions++; costByPeriod.today.commits += session.commitCount; costByPeriod.today.tokens += sTok; }
+  }
+
   const summary = {
     totalCost,
     totalSessions,
@@ -369,9 +541,13 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     organicCommitCount: organicCommits.length,
     bestDay,
     worstDay,
+    costByPeriod,
   };
 
-  const insights = generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets);
+  // ---- Token analytics ----
+  const tokenAnalytics = computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, totalLinesAdded, modelBreakdown);
+
+  const insights = generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics);
 
   return {
     meta: {
@@ -382,6 +558,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
       ),
     },
     summary,
+    tokenAnalytics,
     insights,
     daily,
     projects,

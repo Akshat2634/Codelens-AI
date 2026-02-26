@@ -112,5 +112,10 @@ export function createServer(payload) {
     res.json(payload.lineSurvival);
   });
 
+  // Token analytics
+  app.get('/api/tokens', (req, res) => {
+    res.json(payload.tokenAnalytics);
+  });
+
   return app;
 }
