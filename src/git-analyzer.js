@@ -2,6 +2,25 @@ import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
+// Files excluded from line-count metrics (lock files, minified bundles, etc.)
+const EXCLUDED_EXACT = new Set([
+  'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
+  'composer.lock', 'Gemfile.lock', 'Cargo.lock',
+  'poetry.lock', 'Pipfile.lock', 'go.sum', 'flake.lock', 'bun.lockb',
+]);
+
+const EXCLUDED_PATTERNS = [
+  /\.min\.js$/, /\.min\.css$/, /\.map$/,
+  /(?:^|\/)dist\//, /(?:^|\/)build\//, /(?:^|\/)\.next\//,
+  /(?:^|\/)__pycache__\//,
+];
+
+function isGeneratedFile(filePath) {
+  const basename = path.posix.basename(filePath);
+  if (EXCLUDED_EXACT.has(basename)) return true;
+  return EXCLUDED_PATTERNS.some(re => re.test(filePath));
+}
+
 export function getGitUser() {
   try {
     const name = execSync('git config user.name', { encoding: 'utf-8' }).trim();
@@ -128,9 +147,12 @@ function parseGitLog(raw) {
         const deleted = parts[1] === '-' ? 0 : parseInt(parts[1], 10) || 0;
         const filePath = parts.slice(2).join('\t'); // handle filenames with tabs
         current.files.push({ path: filePath, added, deleted });
-        current.totalAdded += added;
-        current.totalDeleted += deleted;
-        current.netLines += (added - deleted);
+        // Exclude lock/generated files from headline metrics
+        if (!isGeneratedFile(filePath)) {
+          current.totalAdded += added;
+          current.totalDeleted += deleted;
+          current.netLines += (added - deleted);
+        }
       }
     }
   }
