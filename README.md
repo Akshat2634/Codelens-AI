@@ -120,8 +120,9 @@ Token costs are version-aware and calculated per model:
 
 | Model | Input | Output | Cache Read | Cache Write |
 | --- | --- | --- | --- | --- |
-| Opus 4.5/4.6 | $5/M | $25/M | $0.50/M | $6.25/M |
-| Opus 4.0/4.1 | $15/M | $75/M | $1.50/M | $18.75/M |
+| Opus 4.6 | $15/M | $75/M | $1.50/M | $18.75/M |
+| Opus 4.5 | $5/M | $25/M | $0.50/M | $6.25/M |
+| Opus 4.0/4.1 (legacy) | $15/M | $75/M | $1.50/M | $18.75/M |
 | Sonnet 3.7/4.0/4.5/4.6 | $3/M | $15/M | $0.30/M | $3.75/M |
 | Haiku 4.5 | $1/M | $5/M | $0.10/M | $1.25/M |
 | Haiku 3.5 | $0.80/M | $4/M | $0.08/M | $1.00/M |

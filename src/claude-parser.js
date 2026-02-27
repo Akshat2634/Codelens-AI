@@ -5,9 +5,11 @@ import path from 'node:path';
 // Pricing per million tokens — from https://docs.anthropic.com/en/docs/about-claude/pricing
 // Cache reads = 0.1x base input, Cache writes (5min) = 1.25x base input
 const PRICING = {
-  // Opus 4.5 / 4.6: $5 input, $25 output
-  'opus-new':   { input: 5,     output: 25,    cacheRead: 0.50,   cacheWrite: 6.25   },
-  // Opus 4.0 / 4.1: $15 input, $75 output
+  // Opus 4.6: $15 input, $75 output
+  'opus-46':    { input: 15,    output: 75,    cacheRead: 1.50,   cacheWrite: 18.75  },
+  // Opus 4.5: $5 input, $25 output
+  'opus-45':    { input: 5,     output: 25,    cacheRead: 0.50,   cacheWrite: 6.25   },
+  // Opus 4.0 / 4.1 (legacy): $15 input, $75 output
   'opus-old':   { input: 15,    output: 75,    cacheRead: 1.50,   cacheWrite: 18.75  },
   // Sonnet 4.0 / 4.5 / 4.6: $3 input, $15 output
   sonnet:       { input: 3,     output: 15,    cacheRead: 0.30,   cacheWrite: 3.75   },
@@ -33,9 +35,10 @@ function getModelFamily(modelName) {
 function getPricingTier(modelName) {
   if (!modelName) return null;
   const lower = modelName.toLowerCase();
-  // Opus 4.5/4.6 = new pricing, Opus 4.0/4.1 = old pricing
+  // Opus: check most specific version first
   if (lower.includes('opus')) {
-    if (lower.includes('4-5') || lower.includes('4-6') || lower.includes('4.5') || lower.includes('4.6')) return 'opus-new';
+    if (lower.includes('4-6') || lower.includes('4.6')) return 'opus-46';
+    if (lower.includes('4-5') || lower.includes('4.5')) return 'opus-45';
     return 'opus-old';
   }
   // All Sonnet versions (3.7, 4.0, 4.5, 4.6) share $3/$15 pricing
@@ -46,7 +49,7 @@ function getPricingTier(modelName) {
     if (lower.includes('3-5') || lower.includes('3.5')) return 'haiku-35';
     return 'haiku-3'; // Haiku 3 (claude-3-haiku)
   }
-  return null;
+  return 'sonnet'; // default unknown models to Sonnet pricing
 }
 
 function calculateCost(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName) {
