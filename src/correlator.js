@@ -15,66 +15,99 @@ function computeOverlappingLines(commits, sessionFiles) {
 }
 
 /**
+ * Compute the temporal distance between a commit and a session.
+ * Returns the minimum absolute distance from the commit to the session's
+ * time range (0 if the commit falls within the session window).
+ */
+function temporalDistance(commitMs, sessionStartMs, sessionEndMs) {
+  if (commitMs >= sessionStartMs && commitMs <= sessionEndMs) return 0;
+  return Math.min(
+    Math.abs(commitMs - sessionStartMs),
+    Math.abs(commitMs - sessionEndMs)
+  );
+}
+
+/**
  * Correlate sessions to commits using file-based matching.
  *
+ * Uses a two-pass "nearest session wins" approach:
+ *   1. For each commit, find all candidate sessions (file overlap + time window)
+ *      and assign it to the temporally closest one.
+ *   2. Build correlated results from those assignments.
+ *
  * Primary: match commits whose changed files overlap with session.filesWritten.
- *   Time constraint: commit is on the same calendar day or the next day.
+ *   Time constraint: commit is within [sessionStart, sessionEnd + 2 hours].
  * Fallback: for sessions with no filesWritten (chat-only), use time window
  *   [sessionStart, sessionEnd + 2 hours].
  */
 export function correlateSessions(sessions, commitsByRepo) {
-  const result = [];
-  const claimedCommits = new Set();
+  // Phase 1: Build candidate map — for each commit, find the best session
+  // commitHash -> { session, hasFileOverlap }
+  const commitAssignment = new Map();
 
-  // Sort sessions by end time so earlier sessions claim commits first
-  const sorted = [...sessions].sort(
-    (a, b) => new Date(a.endTime).getTime() - new Date(b.endTime).getTime()
-  );
-
-  for (const session of sorted) {
+  for (const session of sessions) {
     const repoAnalysis = commitsByRepo[session.repoPath];
     const repoCommits = repoAnalysis?.commits || [];
 
-    const sessionStart = new Date(session.startTime).getTime();
-    const sessionEnd = new Date(session.endTime).getTime();
+    const sessionStartMs = new Date(session.startTime).getTime();
+    const sessionEndMs = new Date(session.endTime).getTime();
     const sessionFiles = new Set(session.filesWritten || []);
+    const windowEnd = sessionEndMs + FALLBACK_BUFFER_MS;
 
-    let matched;
+    for (const commit of repoCommits) {
+      // Time constraint: commit must fall within [sessionStart, sessionEnd + 2h]
+      if (commit.timestampMs < sessionStartMs || commit.timestampMs > windowEnd) continue;
 
-    if (sessionFiles.size > 0) {
-      // PRIMARY: File-based correlation
-      // Time window: same calendar day as session, or next calendar day
-      const sessionDay = new Date(session.startTime);
-      const dayStart = new Date(sessionDay.getFullYear(), sessionDay.getMonth(), sessionDay.getDate()).getTime();
-      const dayEnd = dayStart + 2 * 24 * 60 * 60 * 1000; // end of next calendar day
+      const hasFileOverlap = sessionFiles.size > 0 &&
+        commit.files.some(f => sessionFiles.has(f.path));
+      const isChatOnly = sessionFiles.size === 0;
 
-      matched = repoCommits.filter(c => {
-        if (claimedCommits.has(c.hash)) return false;
-        if (c.timestampMs < dayStart || c.timestampMs >= dayEnd) return false;
-        // Check file overlap: any commit file matches a session file
-        return c.files.some(f => sessionFiles.has(f.path));
-      });
-    } else {
-      // FALLBACK: Time-based for chat-only sessions (no files written)
-      const windowEnd = sessionEnd + FALLBACK_BUFFER_MS;
-      matched = repoCommits.filter(c =>
-        c.timestampMs >= sessionStart &&
-        c.timestampMs <= windowEnd &&
-        !claimedCommits.has(c.hash)
-      );
+      // Must have file overlap, or be a chat-only session (time-based fallback)
+      if (!hasFileOverlap && !isChatOnly) continue;
+
+      const distance = temporalDistance(commit.timestampMs, sessionStartMs, sessionEndMs);
+      const existing = commitAssignment.get(commit.hash);
+
+      if (!existing) {
+        commitAssignment.set(commit.hash, { session, hasFileOverlap, distance });
+      } else {
+        // Prefer file-based match over time-only match
+        if (hasFileOverlap && !existing.hasFileOverlap) {
+          commitAssignment.set(commit.hash, { session, hasFileOverlap, distance });
+        } else if (hasFileOverlap === existing.hasFileOverlap && distance < existing.distance) {
+          // Same match type — prefer temporally closer session
+          commitAssignment.set(commit.hash, { session, hasFileOverlap, distance });
+        }
+      }
     }
+  }
 
-    // Claim matched commits
-    for (const c of matched) {
-      claimedCommits.add(c.hash);
+  // Phase 2: Group commits by assigned session
+  const sessionCommits = new Map(); // sessionId -> commit[]
+  for (const [hash, { session }] of commitAssignment) {
+    if (!sessionCommits.has(session.sessionId)) {
+      sessionCommits.set(session.sessionId, []);
     }
+    // Find the actual commit object from the repo
+    const repoAnalysis = commitsByRepo[session.repoPath];
+    const commit = repoAnalysis?.commits?.find(c => c.hash === hash);
+    if (commit) {
+      sessionCommits.get(session.sessionId).push(commit);
+    }
+  }
+
+  // Phase 3: Build correlated results
+  const claimedCommits = new Set(commitAssignment.keys());
+  const result = [];
+
+  for (const session of sessions) {
+    const sessionFiles = new Set(session.filesWritten || []);
+    const matched = sessionCommits.get(session.sessionId) || [];
 
     let linesAdded, linesDeleted;
     if (sessionFiles.size > 0) {
-      // Only count lines from files Claude actually edited
       ({ linesAdded, linesDeleted } = computeOverlappingLines(matched, sessionFiles));
     } else {
-      // Fallback (chat-only): count all lines in matched commits
       linesAdded = matched.reduce((s, c) => s + c.totalAdded, 0);
       linesDeleted = matched.reduce((s, c) => s + c.totalDeleted, 0);
     }
@@ -87,7 +120,6 @@ export function correlateSessions(sessions, commitsByRepo) {
     const messageCount = session.userMessageCount + session.assistantMessageCount;
     const isOrphaned = messageCount > 10 && matched.length === 0;
 
-    // Calculate which session files were committed vs not
     const committedFiles = new Set(matched.flatMap(c => c.files.map(f => f.path)));
     const uncommittedFiles = [...sessionFiles].filter(f => !committedFiles.has(f));
 
@@ -119,7 +151,7 @@ export function correlateSessions(sessions, commitsByRepo) {
     }
   }
 
-  // Re-sort result by start time descending (most recent first for display)
+  // Sort result by start time descending (most recent first for display)
   result.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
 
   return { correlatedSessions: result, organicCommits };
