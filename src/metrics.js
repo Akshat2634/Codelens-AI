@@ -9,6 +9,14 @@ function formatBigNumber(n) {
   return n.toString();
 }
 
+function formatDuration(minutes) {
+  if (minutes < 60) return `${minutes} minutes`;
+  const hrs = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (mins === 0) return `${hrs} hr${hrs > 1 ? 's' : ''}`;
+  return `${hrs} hr${hrs > 1 ? 's' : ''} ${mins} min`;
+}
+
 function sessionTokens(s) {
   return s.totalInputTokens + s.totalOutputTokens + s.cacheReadTokens + s.cacheCreationTokens;
 }
@@ -254,7 +262,7 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
   if (avgDuration > 0) {
     insights.push({
       type: 'info',
-      text: `Average session duration: ${Math.round(avgDuration)} minutes.`,
+      text: `Average session duration: ${formatDuration(Math.round(avgDuration))}.`,
     });
   }
 
@@ -272,7 +280,7 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
     const avgDelayMs = delays.reduce((s, d) => s + d, 0) / delays.length;
     const avgDelayHours = avgDelayMs / (1000 * 60 * 60);
     if (avgDelayHours < 1) {
-      insights.push({ type: 'success', text: `On average, commits happen ${Math.round(avgDelayHours * 60)} minutes after a session ends.` });
+      insights.push({ type: 'success', text: `On average, commits happen ${formatDuration(Math.round(avgDelayHours * 60))} after a session ends.` });
     } else {
       insights.push({ type: 'info', text: `On average, commits happen ${avgDelayHours.toFixed(1)} hours after a session ends.` });
     }
