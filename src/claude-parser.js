@@ -360,8 +360,9 @@ function mergeSubagentIntoSession(parent, sub) {
   parent.cost.cacheCreationCost += sub.cost.cacheCreationCost;
   parent.cost.totalCost += sub.cost.totalCost;
 
-  parent.assistantMessageCount += sub.assistantMessageCount;
-  parent.userMessageCount += sub.userMessageCount;
+  // Do NOT merge message counts — subagent internal messages (tool calls,
+  // file reads, grep, etc.) inflate the count and misrepresent actual
+  // user interaction depth. Only the main session's messages are meaningful.
 
   // Merge model breakdown
   for (const [model, data] of Object.entries(sub.modelBreakdown)) {
@@ -384,6 +385,38 @@ function mergeSubagentIntoSession(parent, sub) {
   for (const f of sub.filesRead) {
     if (!parent.filesRead.includes(f)) parent.filesRead.push(f);
   }
+}
+
+/**
+ * Deduplicate continuation sessions created by Claude Code web.
+ * These share the same startTime and repoPath but have different session IDs
+ * with incrementally growing message counts. Keep only the most complete
+ * version (latest endTime) from each group.
+ */
+function deduplicateContinuationSessions(sessions) {
+  const groups = new Map();
+
+  for (const session of sessions) {
+    if (!session.startTime || !session.repoPath) {
+      groups.set(`__unique__${session.sessionId}`, session);
+      continue;
+    }
+
+    const key = `${session.startTime}|${session.repoPath}`;
+
+    if (!groups.has(key)) {
+      groups.set(key, session);
+    } else {
+      const existing = groups.get(key);
+      const existingEnd = new Date(existing.endTime).getTime();
+      const candidateEnd = new Date(session.endTime).getTime();
+      if (candidateEnd > existingEnd) {
+        groups.set(key, session);
+      }
+    }
+  }
+
+  return [...groups.values()];
 }
 
 export async function parseAllProjects(claudeDir, days, projectFilter) {
@@ -457,10 +490,13 @@ export async function parseAllProjects(claudeDir, days, projectFilter) {
     }
   }
 
-  // Sort by start time descending
-  sessions.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+  // Deduplicate continuation sessions (same conversation split across multiple files)
+  const deduped = deduplicateContinuationSessions(sessions);
 
-  return { sessions, fileIndex };
+  // Sort by start time descending
+  deduped.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+
+  return { sessions: deduped, fileIndex };
 }
 
 export { calculateCost, getModelFamily, PRICING };
