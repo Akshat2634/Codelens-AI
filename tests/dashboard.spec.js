@@ -31,8 +31,13 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
 
     test('header has bottom border separator', async ({ page }) => {
       const header = page.locator('header');
+      // Check for gradient fade line via ::after pseudo-element or border
+      const hasAfter = await header.evaluate(el => {
+        const after = getComputedStyle(el, '::after');
+        return after.content !== 'none' && after.height !== '0px';
+      });
       const borderBottom = await header.evaluate(el => getComputedStyle(el).borderBottomStyle);
-      expect(borderBottom).toBe('solid');
+      expect(hasAfter || borderBottom === 'solid').toBeTruthy();
     });
 
     test('meta badges have pill shape (rounded corners)', async ({ page }) => {
@@ -149,7 +154,7 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
     test('stat cards have colored top bar glow via ::before', async ({ page }) => {
       const costCard = page.locator('.stat-card.cost-card');
       const beforeHeight = await costCard.evaluate(el => getComputedStyle(el, '::before').height);
-      expect(beforeHeight).toBe('3px');
+      expect(beforeHeight).toBe('2px');
     });
 
     test('stat cards have hover transition defined', async ({ page }) => {
@@ -201,8 +206,11 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
 
     test('period-stats is a single card (has background)', async ({ page }) => {
       const periodStats = page.locator('.period-stats');
-      const bg = await periodStats.evaluate(el => getComputedStyle(el).backgroundColor);
-      expect(bg).not.toBe('rgba(0, 0, 0, 0)');
+      const { bg, bgImage } = await periodStats.evaluate(el => ({
+        bg: getComputedStyle(el).backgroundColor,
+        bgImage: getComputedStyle(el).backgroundImage
+      }));
+      expect(bg !== 'rgba(0, 0, 0, 0)' || bgImage !== 'none').toBeTruthy();
     });
 
     test('period-stats uses 4-column grid layout', async ({ page }) => {
@@ -498,9 +506,12 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
 
     test('funnel card has proper card styling', async ({ page }) => {
       const card = page.locator('.token-funnel-card');
-      const bg = await card.evaluate(el => getComputedStyle(el).backgroundColor);
+      const { bg, bgImage } = await card.evaluate(el => ({
+        bg: getComputedStyle(el).backgroundColor,
+        bgImage: getComputedStyle(el).backgroundImage
+      }));
       const border = await card.evaluate(el => getComputedStyle(el).borderStyle);
-      expect(bg).not.toBe('rgba(0, 0, 0, 0)');
+      expect(bg !== 'rgba(0, 0, 0, 0)' || bgImage !== 'none').toBeTruthy();
       expect(border).toBe('solid');
     });
 
@@ -743,9 +754,12 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
       const cards = page.locator('.charts-grid .chart-card');
       const count = await cards.count();
       for (let i = 0; i < count; i++) {
-        const bg = await cards.nth(i).evaluate(el => getComputedStyle(el).backgroundColor);
+        const { bg, bgImage } = await cards.nth(i).evaluate(el => ({
+          bg: getComputedStyle(el).backgroundColor,
+          bgImage: getComputedStyle(el).backgroundImage
+        }));
         const border = await cards.nth(i).evaluate(el => getComputedStyle(el).borderStyle);
-        expect(bg).not.toBe('rgba(0, 0, 0, 0)');
+        expect(bg !== 'rgba(0, 0, 0, 0)' || bgImage !== 'none').toBeTruthy();
         expect(border).toBe('solid');
       }
     });
@@ -864,8 +878,8 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
     test('progress bar color is based on survival rate', async ({ page }) => {
       const fill = page.locator('.survival-section').filter({ hasText: 'Line Survival Rate' }).locator('.survival-bar .fill');
       const bg = await fill.evaluate(el => el.style.background);
-      // Should be green (>=80%), orange (>=50%), or red (<50%)
-      expect(bg).toMatch(/accent-(green|orange|red)/);
+      // Should be gradient (purple-blue for >=80%), (orange-purple for >=50%), or red (<50%)
+      expect(bg).toMatch(/accent-(purple|orange|red|blue)/);
     });
 
     test('displays survival stats: added, churned, surviving, rate', async ({ page }) => {
@@ -898,8 +912,11 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
 
     test('table wrapper has proper card styling', async ({ page }) => {
       const wrap = page.locator('.sessions-table-wrap');
-      const bg = await wrap.evaluate(el => getComputedStyle(el).backgroundColor);
-      expect(bg).not.toBe('rgba(0, 0, 0, 0)');
+      const { bg, bgImage } = await wrap.evaluate(el => ({
+        bg: getComputedStyle(el).backgroundColor,
+        bgImage: getComputedStyle(el).backgroundImage
+      }));
+      expect(bg !== 'rgba(0, 0, 0, 0)' || bgImage !== 'none').toBeTruthy();
     });
 
     test('table has 8 column headers', async ({ page }) => {
@@ -963,8 +980,8 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
       expect(text).toMatch(/\+[\d,]+/);
       expect(text).toMatch(/-[\d,]+/);
       // Green for additions, red for deletions
-      const greenSpan = linesCell.locator('span[style*="3fb950"]');
-      const redSpan = linesCell.locator('span[style*="f85149"]');
+      const greenSpan = linesCell.locator('span[style*="22d3a8"]');
+      const redSpan = linesCell.locator('span[style*="ef4444"]');
       await expect(greenSpan).toHaveCount(1);
       await expect(redSpan).toHaveCount(1);
     });
@@ -1049,8 +1066,8 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
     test('sorted column header is highlighted blue', async ({ page }) => {
       const sortedTh = page.locator('thead th.sorted').first();
       const color = await sortedTh.evaluate(el => getComputedStyle(el).color);
-      // --accent-blue is rgb(88, 166, 255)
-      expect(color).toBe('rgb(88, 166, 255)');
+      // --accent-blue is rgb(59, 130, 246)
+      expect(color).toBe('rgb(59, 130, 246)');
     });
 
     test('clicking same column toggles sort direction', async ({ page }) => {
@@ -1131,15 +1148,20 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
 
     test('footer has top border separator', async ({ page }) => {
       const footer = page.locator('footer');
+      // Check for gradient fade line via ::before or solid border
+      const hasBefore = await footer.evaluate(el => {
+        const before = getComputedStyle(el, '::before');
+        return before.content !== 'none' && before.height !== '0px';
+      });
       const borderTop = await footer.evaluate(el => getComputedStyle(el).borderTopStyle);
-      expect(borderTop).toBe('solid');
+      expect(hasBefore || borderTop === 'solid').toBeTruthy();
     });
 
     test('footer links are blue and change on hover', async ({ page }) => {
       const link = page.locator('footer a').first();
       const color = await link.evaluate(el => getComputedStyle(el).color);
-      // --accent-blue is rgb(88, 166, 255)
-      expect(color).toBe('rgb(88, 166, 255)');
+      // --accent-blue is rgb(59, 130, 246)
+      expect(color).toBe('rgb(59, 130, 246)');
     });
   });
 
@@ -1223,9 +1245,9 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
   // 16. DARK THEME & VISUAL CONSISTENCY
   // ═══════════════════════════════════════════
   test.describe('Visual & Theme', () => {
-    test('page uses dark background (#0d1117)', async ({ page }) => {
+    test('page uses dark background (#0a0e17)', async ({ page }) => {
       const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-      expect(bg).toBe('rgb(13, 17, 23)');
+      expect(bg).toBe('rgb(10, 14, 23)');
     });
 
     test('CSS custom properties are defined on :root', async ({ page }) => {
@@ -1242,24 +1264,24 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
           radius: style.getPropertyValue('--radius').trim(),
         };
       });
-      expect(vars.bgPrimary).toBe('#0d1117');
-      expect(vars.bgCard).toBe('#1c2128');
-      expect(vars.border).toBe('#30363d');
-      expect(vars.textPrimary).toBe('#e6edf3');
-      expect(vars.accentGreen).toBe('#3fb950');
-      expect(vars.accentRed).toBe('#f85149');
-      expect(vars.accentBlue).toBe('#58a6ff');
+      expect(vars.bgPrimary).toBe('#0a0e17');
+      expect(vars.bgCard).toBe('#151d2b');
+      expect(vars.border).toBe('#1f2d3d');
+      expect(vars.textPrimary).toBe('#f0f4f8');
+      expect(vars.accentGreen).toBe('#22d3a8');
+      expect(vars.accentRed).toBe('#ef4444');
+      expect(vars.accentBlue).toBe('#3b82f6');
       expect(vars.radius).toBe('12px');
     });
 
-    test('body uses Inter font family', async ({ page }) => {
+    test('body uses DM Sans font family', async ({ page }) => {
       const fontFamily = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
-      expect(fontFamily).toContain('Inter');
+      expect(fontFamily).toContain('DM Sans');
     });
 
-    test('container has max-width 1280px', async ({ page }) => {
+    test('container has max-width 1320px', async ({ page }) => {
       const maxWidth = await page.locator('.container').evaluate(el => getComputedStyle(el).maxWidth);
-      expect(maxWidth).toBe('1280px');
+      expect(maxWidth).toBe('1320px');
     });
 
     test('hero stat cards have visible colored top bars via ::before', async ({ page }) => {

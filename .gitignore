@@ -3,3 +3,5 @@ node_modules/
 *.log
 test-results/
 .claude/
+.agents/
+skills-lock.json
