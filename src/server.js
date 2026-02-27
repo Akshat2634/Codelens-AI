@@ -5,8 +5,9 @@ import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export function createServer(payload) {
+export function createServer(initialPayload, rebuildFn) {
   const app = express();
+  let payload = initialPayload;
 
   // Serve dashboard HTML
   const dashboardHtml = readFileSync(path.join(__dirname, 'dashboard.html'), 'utf-8');
@@ -18,6 +19,22 @@ export function createServer(payload) {
   // Full payload (single fetch for dashboard)
   app.get('/api/all', (req, res) => {
     res.json(payload);
+  });
+
+  // Re-run the full pipeline: clear cache, re-parse sessions, re-analyze git, recompute metrics
+  app.post('/api/refresh', async (req, res) => {
+    if (!rebuildFn) return res.status(501).json({ error: 'Refresh not available' });
+    try {
+      console.log('\x1b[36m[refresh]\x1b[0m Re-parsing sessions and recomputing metrics...');
+      const newPayload = await rebuildFn();
+      if (!newPayload) return res.status(404).json({ error: 'No sessions found after refresh' });
+      payload = newPayload;
+      console.log('\x1b[32m[refresh]\x1b[0m Done');
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('\x1b[31m[refresh]\x1b[0m Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Hero stats + insights

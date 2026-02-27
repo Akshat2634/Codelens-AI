@@ -15,42 +15,20 @@ const { version: VERSION } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8')
 );
 
-async function main() {
-  const program = new Command();
-  program
-    .name('claude-roi')
-    .description('Correlate Claude Code token usage with git output to measure AI coding agent ROI')
-    .version(VERSION)
-    .option('-p, --port <number>', 'port to serve dashboard', '3457')
-    .option('-d, --days <number>', 'number of days to look back', '30')
-    .option('--no-open', 'do not auto-open browser')
-    .option('--json', 'output raw JSON to stdout instead of starting server')
-    .option('--project <name>', 'filter to specific project')
-    .option('--refresh', 'force full re-parse, ignore cache');
-
-  program.parse();
-  const opts = program.opts();
-  const port = parseInt(opts.port, 10);
-  const days = parseInt(opts.days, 10);
-
-  console.log(`\x1b[36mclaude-roi\x1b[0m v${VERSION}`);
-
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-
+async function buildPayload(claudeDir, days, project, forceRefresh = false) {
   // Step 1: Parse sessions (with caching)
   let sessions;
   let fileIndex;
   const startParse = Date.now();
 
-  if (opts.refresh) {
+  if (forceRefresh) {
     deleteCache();
     console.log('Cache cleared, performing full parse...');
   }
 
-  const cached = opts.refresh ? null : loadCache();
+  const cached = forceRefresh ? null : loadCache();
 
   if (cached) {
-    // Incremental parse: only process new/modified files
     const stale = getStaleFiles(claudeDir, cached.fileIndex);
     const newCount = stale.newFiles.length;
     const modifiedCount = stale.modifiedFiles.length;
@@ -58,33 +36,24 @@ async function main() {
     const cachedCount = Object.keys(cached.fileIndex).length - modifiedCount - deletedCount;
 
     if (newCount === 0 && modifiedCount === 0 && deletedCount === 0) {
-      // Nothing changed, use cache as-is
       sessions = cached.sessions;
       fileIndex = cached.fileIndex;
       console.log(`Parsing sessions... ${cached.sessions.length} cached (${Date.now() - startParse}ms)`);
     } else {
-      // Parse only new/modified files
-      const { sessions: freshSessions, fileIndex: freshIndex } = await parseAllProjects(claudeDir, days, opts.project);
-
-      // For a simpler approach: just do a full re-parse when files change
-      // This avoids complex merging logic while still benefiting from caching
-      // when nothing has changed
+      const { sessions: freshSessions, fileIndex: freshIndex } = await parseAllProjects(claudeDir, days, project);
       sessions = freshSessions;
       fileIndex = freshIndex;
       console.log(`Parsing sessions... ${newCount} new, ${modifiedCount} updated, ${Math.max(0, cachedCount)} cached (${Date.now() - startParse}ms)`);
     }
   } else {
-    // Full parse
-    const result = await parseAllProjects(claudeDir, days, opts.project);
+    const result = await parseAllProjects(claudeDir, days, project);
     sessions = result.sessions;
     fileIndex = result.fileIndex;
     console.log(`Parsing sessions... ${sessions.length} parsed (${Date.now() - startParse}ms)`);
   }
 
   if (sessions.length === 0) {
-    console.log('\x1b[33mNo Claude Code sessions found.\x1b[0m');
-    console.log('Make sure you have used Claude Code and session files exist in ~/.claude/projects/');
-    process.exit(0);
+    return null;
   }
 
   // Step 2: Analyze git repos
@@ -107,14 +76,48 @@ async function main() {
   // Save cache for next run
   saveCache(sessions, fileIndex);
 
-  // Step 5: Output
+  return payload;
+}
+
+async function main() {
+  const program = new Command();
+  program
+    .name('claude-roi')
+    .description('Correlate Claude Code token usage with git output to measure AI coding agent ROI')
+    .version(VERSION)
+    .option('-p, --port <number>', 'port to serve dashboard', '3457')
+    .option('-d, --days <number>', 'number of days to look back', '30')
+    .option('--no-open', 'do not auto-open browser')
+    .option('--json', 'output raw JSON to stdout instead of starting server')
+    .option('--project <name>', 'filter to specific project')
+    .option('--refresh', 'force full re-parse, ignore cache');
+
+  program.parse();
+  const opts = program.opts();
+  const port = parseInt(opts.port, 10);
+  const days = parseInt(opts.days, 10);
+
+  console.log(`\x1b[36mclaude-roi\x1b[0m v${VERSION}`);
+
+  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+
+  const payload = await buildPayload(claudeDir, days, opts.project, opts.refresh);
+
+  if (!payload) {
+    console.log('\x1b[33mNo Claude Code sessions found.\x1b[0m');
+    console.log('Make sure you have used Claude Code and session files exist in ~/.claude/projects/');
+    process.exit(0);
+  }
+
+  // Output
   if (opts.json) {
     process.stdout.write(JSON.stringify(payload, null, 2));
     process.exit(0);
   }
 
-  // Start server
-  const app = createServer(payload);
+  // Start server — pass a rebuild function so /api/refresh can re-run the pipeline
+  const rebuild = () => buildPayload(claudeDir, days, opts.project, true);
+  const app = createServer(payload, rebuild);
   const server = app.listen(port, () => {
     const url = `http://localhost:${port}`;
     console.log(`\x1b[32mDashboard:\x1b[0m ${url}`);
