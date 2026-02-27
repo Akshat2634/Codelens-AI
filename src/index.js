@@ -9,8 +9,11 @@ import { correlateSessions } from './correlator.js';
 import { computeMetrics } from './metrics.js';
 import { loadCache, saveCache, deleteCache, getStaleFiles } from './cache.js';
 import { createServer } from './server.js';
+import { readFileSync } from 'node:fs';
 
-const VERSION = '0.1.1';
+const { version: VERSION } = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+);
 
 async function main() {
   const program = new Command();

@@ -151,36 +151,7 @@ Codelens-AI/
 
 ## Contributing
 
-Contributions welcome! Here's how to get started:
-
-```bash
-# 1. Fork the repo on GitHub
-
-# 2. Clone your fork
-git clone https://github.com/YOUR_USERNAME/Codelens-AI.git
-cd Codelens-AI
-
-# 3. Install dependencies
-npm install
-
-# 4. Run in dev mode (no auto-open browser)
-node src/index.js --no-open
-
-# 5. Make your changes and test
-node src/index.js --json | head -30   # verify JSON output
-node src/index.js --no-open           # test dashboard at localhost:3457
-
-# 6. Submit a pull request
-```
-
-### Ideas for contributions
-
-- Support for other AI coding tools (Copilot, Cursor, etc.)
-- Git blame-based line survival tracking (more accurate than the 24h heuristic)
-- Export dashboard as PDF/PNG
-- Historical trend tracking across multiple runs
-- Team/multi-user support
-- Custom pricing configuration via CLI flag or config file
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, guidelines, and ideas for contributions.
 
 ## Privacy
 

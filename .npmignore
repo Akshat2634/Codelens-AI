@@ -1,4 +1,12 @@
 .claude/
 .git/
+.github/
 node_modules/
+tests/
+test-results/
+playwright.config.js
 *.tgz
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+CHANGELOG.md
