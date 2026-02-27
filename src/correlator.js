@@ -1,5 +1,19 @@
 const FALLBACK_BUFFER_MS = 2 * 60 * 60 * 1000; // 2 hours for time-only fallback
 
+function computeOverlappingLines(commits, sessionFiles) {
+  let linesAdded = 0;
+  let linesDeleted = 0;
+  for (const c of commits) {
+    for (const f of c.files) {
+      if (sessionFiles.has(f.path)) {
+        linesAdded += f.added;
+        linesDeleted += f.deleted;
+      }
+    }
+  }
+  return { linesAdded, linesDeleted };
+}
+
 /**
  * Correlate sessions to commits using file-based matching.
  *
@@ -55,10 +69,19 @@ export function correlateSessions(sessions, commitsByRepo) {
       claimedCommits.add(c.hash);
     }
 
-    const linesAdded = matched.reduce((s, c) => s + c.totalAdded, 0);
-    const linesDeleted = matched.reduce((s, c) => s + c.totalDeleted, 0);
+    let linesAdded, linesDeleted;
+    if (sessionFiles.size > 0) {
+      // Only count lines from files Claude actually edited
+      ({ linesAdded, linesDeleted } = computeOverlappingLines(matched, sessionFiles));
+    } else {
+      // Fallback (chat-only): count all lines in matched commits
+      linesAdded = matched.reduce((s, c) => s + c.totalAdded, 0);
+      linesDeleted = matched.reduce((s, c) => s + c.totalDeleted, 0);
+    }
     const netLines = linesAdded - linesDeleted;
-    const filesChanged = new Set(matched.flatMap(c => c.files.map(f => f.path))).size;
+    const filesChanged = sessionFiles.size > 0
+      ? new Set(matched.flatMap(c => c.files.filter(f => sessionFiles.has(f.path)).map(f => f.path))).size
+      : new Set(matched.flatMap(c => c.files.map(f => f.path))).size;
     const commitsOnMain = matched.filter(c => c.onMain).length;
 
     const messageCount = session.userMessageCount + session.assistantMessageCount;
