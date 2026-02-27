@@ -360,8 +360,8 @@ function mergeSubagentIntoSession(parent, sub) {
   parent.cost.cacheCreationCost += sub.cost.cacheCreationCost;
   parent.cost.totalCost += sub.cost.totalCost;
 
-  parent.assistantMessageCount += sub.assistantMessageCount;
-  parent.userMessageCount += sub.userMessageCount;
+  // Message counts intentionally NOT merged — we only report
+  // the main-conversation messages, not internal subagent chatter.
 
   // Merge model breakdown
   for (const [model, data] of Object.entries(sub.modelBreakdown)) {
@@ -457,10 +457,28 @@ export async function parseAllProjects(claudeDir, days, projectFilter) {
     }
   }
 
-  // Sort by start time descending
-  sessions.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+  // Deduplicate sessions by sessionId (same session can appear in
+  // multiple project dirs, e.g. main repo vs worktree paths)
+  const seen = new Map();
+  for (const s of sessions) {
+    const id = s.sessionId;
+    if (!seen.has(id)) {
+      seen.set(id, s);
+    } else {
+      const existing = seen.get(id);
+      const existingMsgs = existing.userMessageCount + existing.assistantMessageCount;
+      const newMsgs = s.userMessageCount + s.assistantMessageCount;
+      if (newMsgs > existingMsgs) {
+        seen.set(id, s);
+      }
+    }
+  }
+  const deduped = Array.from(seen.values());
 
-  return { sessions, fileIndex };
+  // Sort by start time descending
+  deduped.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+
+  return { sessions: deduped, fileIndex };
 }
 
 export { calculateCost, getModelFamily, PRICING };
