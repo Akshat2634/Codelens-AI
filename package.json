@@ -9,7 +9,8 @@
   "main": "./src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node src/index.js --no-open"
+    "dev": "node src/index.js --no-open",
+    "test": "npx playwright test"
   },
   "keywords": [
     "claude",
@@ -21,17 +22,26 @@
     "git",
     "dashboard"
   ],
+  "author": "Akshat Sahu",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Akshat2634/Codelens-AI.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Akshat2634/Codelens-AI/issues"
+  },
+  "homepage": "https://github.com/Akshat2634/Codelens-AI#readme",
   "engines": {
     "node": ">=18.0.0"
   },
   "dependencies": {
     "commander": "^13.0.0",
     "express": "^5.0.0",
-    "open": "^10.0.0",
-    "playwright": "^1.58.2"
+    "open": "^10.0.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.56.1"
+    "@playwright/test": "^1.56.1",
+    "playwright": "^1.58.2"
   }
 }
