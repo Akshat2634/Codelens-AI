@@ -5,8 +5,8 @@ import path from 'node:path';
 // Pricing per million tokens — from https://docs.anthropic.com/en/docs/about-claude/pricing
 // Cache reads = 0.1x base input, Cache writes (5min) = 1.25x base input
 const PRICING = {
-  // Opus 4.6: $15 input, $75 output
-  'opus-46':    { input: 15,    output: 75,    cacheRead: 1.50,   cacheWrite: 18.75  },
+  // Opus 4.6: $5 input, $25 output
+  'opus-46':    { input: 5,     output: 25,    cacheRead: 0.50,   cacheWrite: 6.25   },
   // Opus 4.5: $5 input, $25 output
   'opus-45':    { input: 5,     output: 25,    cacheRead: 0.50,   cacheWrite: 6.25   },
   // Opus 4.0 / 4.1 (legacy): $15 input, $75 output
