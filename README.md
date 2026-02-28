@@ -116,7 +116,7 @@ Parsed session data is cached at `~/.cache/claude-roi/parsed-sessions.json`. On 
 
 ### Cost Calculation
 
-Token costs are version-aware and calculated per model:
+Token costs are version-aware and calculated per model (see [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing)):
 
 | Model | Input | Output | Cache Read | Cache Write |
 | --- | --- | --- | --- | --- |
