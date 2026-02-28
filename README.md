@@ -161,7 +161,7 @@ git push --follow-tags
 
 This automatically publishes to npm and creates a GitHub Release with auto-generated notes.
 
-**Setup (one-time):** Add an `NPM_TOKEN` secret in your repo settings (Settings → Secrets → Actions) with a [granular access token](https://www.npmjs.com/settings/~/tokens/granular-access-tokens/new) that has read/write access to the `claude-roi` package.
+**Setup (one-time):** Configure [trusted publishing](https://docs.npmjs.com/trusted-publishers/) on npm for the `claude-roi` package, linking it to the GitHub Actions workflow. No tokens or secrets needed.
 
 ## Contributing
 
