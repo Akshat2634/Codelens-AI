@@ -2337,13 +2337,21 @@ window.sortTable = function(col) {
   if (sortCol === col) { sortOrder *= -1; }
   else { sortCol = col; sortOrder = -1; }
   currentPage = 1;
-  render();
+  rerenderSessionsTable();
 };
 
 window.changePage = function(delta) {
   currentPage += delta;
-  render();
+  rerenderSessionsTable();
 };
+
+function rerenderSessionsTable() {
+  const container = document.querySelector('.sessions-section');
+  if (container) {
+    const wrapper = container.parentElement;
+    wrapper.innerHTML = renderSessionsTable(DATA.sessions);
+  }
+}
 
 window.toggleTimelineScale = function() {
   if (!timelineChart) return;
