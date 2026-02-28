@@ -134,7 +134,7 @@ Line survival uses an approximate heuristic: if lines added in commit A are dele
 
 ## Project Structure
 
-```
+```text
 Codelens-AI/
 ├── package.json
 ├── README.md
@@ -149,6 +149,19 @@ Codelens-AI/
     ├── server.js         # Express server + API routes
     └── dashboard.html    # Single-file dashboard (inline CSS/JS)
 ```
+
+## Releasing
+
+Releases are automated via GitHub Actions. To publish a new version:
+
+```bash
+npm version patch   # or minor / major
+git push --follow-tags
+```
+
+This automatically publishes to npm and creates a GitHub Release with auto-generated notes.
+
+**Setup (one-time):** Add an `NPM_TOKEN` secret in your repo settings (Settings → Secrets → Actions) with a [granular access token](https://www.npmjs.com/settings/~/tokens/granular-access-tokens/new) that has read/write access to the `claude-roi` package.
 
 ## Contributing
 
