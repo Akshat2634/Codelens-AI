@@ -2187,7 +2187,17 @@ function initCharts() {
               const model = modelLabels[ctx.dataIndex];
               const d = models[model];
               const tpc = d.tokensPerCommit ? formatTokens(d.tokensPerCommit) + ' tok/commit' : 'no commits';
-              return ` $${d.cost.toFixed(2)} | ${d.sessions} sessions | ${d.commits} commits | ${tpc}`;
+              const lines = [
+                ` $${d.cost.toFixed(2)} | ${formatTokens(d.tokens)} tokens | ${d.sessions} sessions | ${Math.round(d.commits)} commits | ${tpc}`,
+              ];
+              const subEntries = Object.entries(d.subModels || {});
+              if (subEntries.length >= 1) {
+                for (const [modelId, sub] of subEntries) {
+                  const pct = d.cost > 0 ? Math.round((sub.cost / d.cost) * 100) : 0;
+                  lines.push(`  ${formatModelName(modelId)}: $${sub.cost.toFixed(2)} | ${formatTokens(sub.tokens)} tokens (${pct}%)`);
+                }
+              }
+              return lines;
             },
           },
         },

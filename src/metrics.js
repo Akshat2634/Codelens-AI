@@ -420,10 +420,17 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     for (const [model, data] of Object.entries(session.modelBreakdown)) {
       const family = getModelFamily(model) || 'unknown';
       if (!modelBreakdown[family]) {
-        modelBreakdown[family] = { cost: 0, tokens: 0, sessions: 0, commits: 0, avgCostPerCommit: null };
+        modelBreakdown[family] = { cost: 0, tokens: 0, sessions: 0, commits: 0, avgCostPerCommit: null, subModels: {} };
       }
       modelBreakdown[family].cost += data.cost;
       modelBreakdown[family].tokens += data.tokens;
+
+      // Accumulate sub-model cost and tokens within this family
+      if (!modelBreakdown[family].subModels[model]) {
+        modelBreakdown[family].subModels[model] = { cost: 0, tokens: 0 };
+      }
+      modelBreakdown[family].subModels[model].cost   += data.cost;
+      modelBreakdown[family].subModels[model].tokens += data.tokens;
 
       // Distribute sessions and commits proportionally by token share
       const share = sessionTotalTokens > 0 ? data.tokens / sessionTotalTokens : 0;
@@ -435,6 +442,9 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     data.sessions = Math.round(data.sessions);
     data.avgCostPerCommit = data.commits > 0 ? data.cost / data.commits : null;
     data.tokensPerCommit = data.commits > 0 ? Math.round(data.tokens / data.commits) : null;
+    data.subModels = Object.fromEntries(
+      Object.entries(data.subModels).sort(([, a], [, b]) => b.cost - a.cost)
+    );
   }
 
   // ---- Tool breakdown ----
