@@ -1352,6 +1352,7 @@
       <div class="meta-info">
         <span class="badge" id="date-range"></span>
         <span class="badge">All data stays local</span>
+        <span class="badge">No tracking, no telemetry</span>
       </div>
     </header>
 
@@ -1516,7 +1517,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function render() {
   const d = DATA;
-  document.getElementById('date-range').textContent = `Last ${d.meta.daysAnalyzed} days`;
+  const fmtDate = iso => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  const dateLabel = (d.meta.startDate && d.meta.endDate)
+    ? `${fmtDate(d.meta.startDate)} – ${fmtDate(d.meta.endDate)}`
+    : `Last ${d.meta.daysAnalyzed} days`;
+  document.getElementById('date-range').textContent = dateLabel;
   const summary = d.summary;
   const t = d.tokenAnalytics;
 

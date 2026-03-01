@@ -573,6 +573,12 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     meta: {
       generatedAt: new Date().toISOString(),
       daysAnalyzed: days,
+      startDate: correlatedSessions.length > 0
+        ? new Date(Math.min(...correlatedSessions.map(s => new Date(s.startTime).getTime()))).toISOString()
+        : null,
+      endDate: correlatedSessions.length > 0
+        ? new Date(Math.max(...correlatedSessions.map(s => new Date(s.startTime).getTime()))).toISOString()
+        : null,
       defaultBranches: Object.fromEntries(
         Object.entries(commitsByRepo).map(([repo, a]) => [repo.split('/').pop(), a.defaultBranch]).filter(([, b]) => b)
       ),
