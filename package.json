@@ -1,6 +1,6 @@
 {
   "name": "claude-roi",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Correlate Claude Code token usage with git output to measure AI coding agent ROI",
   "type": "module",
   "bin": {
