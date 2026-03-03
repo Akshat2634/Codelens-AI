@@ -1,5 +1,7 @@
 # Codelens AI
 
+**[codelensai-dev.vercel.app](https://codelensai-dev.vercel.app/)**
+
 **Agent Productivity-to-Cost Correlator** — Is your AI coding agent actually shipping code?
 
 Codelens AI ties Claude Code token usage to actual git output. It reads your local Claude Code session files, correlates them with git commits by timestamp, and serves a dashboard answering: *"Am I getting ROI from my AI coding agent?"*

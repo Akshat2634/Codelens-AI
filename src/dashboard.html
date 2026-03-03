@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Codelens AI — Agent Productivity Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='8' y='14' width='4' height='12' rx='1.5' fill='%23e67e22'/%3E%3Crect x='14' y='6' width='4' height='20' rx='1.5' fill='%232ecc71'/%3E%3Crect x='20' y='10' width='4' height='16' rx='1.5' fill='%233498db'/%3E%3C/svg%3E">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script>
     (function() {
@@ -206,8 +207,37 @@
       background-size: 200% 200%;
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
+      background-clip: text;
       animation: gradientMove 8s ease-in-out infinite;
       margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+    .logo-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      -webkit-text-fill-color: initial;
+    }
+    .logo-bars .bar-orange {
+      width: 5px;
+      height: 18px;
+      border-radius: 2px;
+      background: #e67e22;
+    }
+    .logo-bars .bar-teal {
+      width: 5px;
+      height: 28px;
+      border-radius: 2px;
+      background: #2ecc71;
+    }
+    .logo-bars .bar-blue {
+      width: 5px;
+      height: 22px;
+      border-radius: 2px;
+      background: #3498db;
     }
     @keyframes gradientMove {
       0%, 100% { background-position: 0% 50%; }
@@ -1317,6 +1347,175 @@
       .container { padding: 16px; }
       header h1 { font-size: 1.8rem; }
       .hero-legend, .cost-legend, .token-legend { flex-wrap: wrap; }
+      .share-modal { padding: 20px; }
+      .share-actions { flex-direction: column; }
+    }
+
+    /* ── Share Button Glow ─────────────────────── */
+    .share-btn:hover {
+      color: var(--accent-purple);
+      border-color: rgba(168, 85, 247, 0.3);
+      box-shadow: 0 0 12px rgba(168, 85, 247, 0.15);
+    }
+
+    /* ── Share Modal ───────────────────────────── */
+    .share-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: modalFadeIn 0.25s ease;
+    }
+    @keyframes modalFadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .share-modal {
+      background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      padding: 32px;
+      max-width: 680px;
+      width: 90vw;
+      max-height: 90vh;
+      overflow-y: auto;
+      position: relative;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+      animation: modalSlideUp 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    }
+    @keyframes modalSlideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .share-modal-title {
+      font-family: var(--font-display);
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .share-modal-subtitle {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 24px;
+    }
+    .share-modal-close {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 1px solid var(--glass-border);
+      background: var(--overlay-medium);
+      color: var(--text-secondary);
+      font-size: 1.2rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, color 0.2s;
+    }
+    .share-modal-close:hover {
+      background: var(--overlay-intense);
+      color: var(--text-primary);
+    }
+    .share-theme-toggle {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 16px;
+      background: var(--bg-hover);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 3px;
+      width: fit-content;
+    }
+    .share-theme-toggle button {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 16px;
+      border-radius: 16px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-family: var(--font-body);
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    .share-theme-toggle button:hover {
+      color: var(--text-primary);
+    }
+    .share-theme-toggle button.active {
+      background: var(--bg-card);
+      color: var(--text-primary);
+      box-shadow: 0 1px 6px var(--shadow-card);
+    }
+    .share-preview-wrap {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 24px;
+    }
+    .share-preview-wrap canvas {
+      width: 100%;
+      max-width: 420px;
+      aspect-ratio: 3 / 4;
+      border-radius: var(--radius-sm);
+      box-shadow: 0 8px 32px var(--shadow-card);
+    }
+    .share-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+    }
+    .share-action-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--glass-border);
+      background: var(--overlay-medium);
+      color: var(--text-secondary);
+      font-family: var(--font-body);
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s, color 0.2s, transform 0.15s;
+    }
+    .share-action-btn:hover {
+      background: var(--overlay-intense);
+      border-color: var(--glass-border-hover);
+      color: var(--text-primary);
+      transform: translateY(-1px);
+    }
+    .share-action-btn.primary {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(168, 85, 247, 0.2));
+      border-color: rgba(59, 130, 246, 0.3);
+      color: var(--text-primary);
+    }
+    .share-action-btn.primary:hover {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(168, 85, 247, 0.3));
+    }
+    .share-toast {
+      text-align: center;
+      margin-top: 16px;
+      font-size: 0.8rem;
+      color: var(--accent-green);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .share-toast.visible {
+      opacity: 1;
     }
   </style>
 </head>
@@ -1324,6 +1523,11 @@
   <div class="container">
     <header>
       <div class="header-actions">
+        <button class="header-action-btn share-btn" id="share-btn" aria-label="Share report card" title="Share AI Report Card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+          </svg>
+        </button>
         <button class="header-action-btn refresh-btn" id="refresh-btn" aria-label="Refresh data" title="Refresh dashboard data">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
@@ -1347,7 +1551,7 @@
           </button>
         </div>
       </div>
-      <h1>Codelens AI</h1>
+      <h1><span class="logo-bars"><span class="bar-orange"></span><span class="bar-teal"></span><span class="bar-blue"></span></span>Codelens AI</h1>
       <p class="tagline">Correlates your AI coding agent's token spend with actual git output — see what shipped, what churned, and what it cost.</p>
       <div class="meta-info">
         <span class="badge" id="date-range"></span>
@@ -1364,10 +1568,43 @@
     </div>
 
     <footer>
-      Made by <a href="https://www.linkedin.com/in/akshat2634/">Akshat</a> &middot; Powered by <a href="https://code.claude.com/docs/en/overview">Claude Code</a> &middot; <a href="https://github.com/Akshat2634/Codelens-AI">GitHub</a>
+      Made by <a href="https://www.linkedin.com/in/akshat2634/">Akshat</a> &middot; Powered by <a href="https://code.claude.com/docs/en/overview">Claude Code</a> &middot; <a href="https://github.com/Akshat2634/Codelens-AI">GitHub</a> &middot; <a href="https://codelensai-dev.vercel.app/">Website</a>
       <div style="margin-top:6px;font-size:0.75rem;opacity:0.7;">Open source — contributions, ideas, and feedback welcome! <a href="https://github.com/Akshat2634/Codelens-AI" style="color:var(--accent-blue);">Star the repo</a> if you find it useful.</div>
       <div style="margin-top:6px;font-size:0.7rem;opacity:0.4;">Cost estimates are approximate — based on Anthropic's published per-token pricing and may vary from actual billing. Currently supports Claude Code only. Support for Cursor, Codex, Gemini CLI, and more coming soon.</div>
     </footer>
+
+    <!-- Share Report Card Modal -->
+    <div class="share-modal-backdrop" id="share-modal" style="display:none;">
+      <div class="share-modal">
+        <button class="share-modal-close" id="share-modal-close" aria-label="Close">&times;</button>
+        <h2 class="share-modal-title">Your AI Report Card</h2>
+        <p class="share-modal-subtitle">Share your AI coding insights</p>
+        <div class="share-theme-toggle" id="share-theme-toggle">
+          <button data-share-theme="dark" class="active" title="Dark card">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            Dark
+          </button>
+          <button data-share-theme="light" title="Light card">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            Light
+          </button>
+        </div>
+        <div class="share-preview-wrap">
+          <canvas id="share-canvas"></canvas>
+        </div>
+        <div class="share-actions">
+          <button class="share-action-btn primary" id="share-copy-btn">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy to Clipboard
+          </button>
+          <button class="share-action-btn" id="share-download-btn">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download PNG
+          </button>
+        </div>
+        <div class="share-toast" id="share-toast"></div>
+      </div>
+    </div>
   </div>
 
 <script>
@@ -2378,6 +2615,439 @@ window.toggleTimelineScale = function() {
   const btn = document.querySelector('.scale-toggle');
   if (btn) btn.textContent = timelineLogScale ? 'Linear scale' : 'Log scale';
 };
+
+/* ── Share Report Card ─────────────────────────── */
+
+const GRADE_HEX = { A: '#22d3a8', B: '#3b82f6', C: '#f59e0b', D: '#f0883e', F: '#ef4444' };
+const INSIGHT_COLORS = { warning: '#f59e0b', success: '#22d3a8', info: '#3b82f6', tip: '#a855f7' };
+
+const SHARE_THEME = {
+  dark: {
+    bg1: '#0a0e17', bg2: '#111827',
+    orb1: 'rgba(59, 130, 246, 0.06)', orb2: 'rgba(168, 85, 247, 0.05)', orb3: 'rgba(34, 211, 168, 0.04)',
+    border: 'rgba(255,255,255,0.06)',
+    glassBg: 'rgba(255,255,255,0.03)', glassBorder: 'rgba(255,255,255,0.06)',
+    textPrimary: '#f0f4f8', textSecondary: '#94a3b8', textMuted: '#64748b', textDim: '#475569',
+    barTrack: 'rgba(255,255,255,0.06)', heatmapEmpty: 'rgba(255,255,255,0.04)',
+    separator: 'rgba(255,255,255,0.06)', separatorLight: 'rgba(255,255,255,0.04)',
+    insightText: '#cbd5e1',
+  },
+  light: {
+    bg1: '#f8fafc', bg2: '#e2e8f0',
+    orb1: 'rgba(59, 130, 246, 0.08)', orb2: 'rgba(168, 85, 247, 0.06)', orb3: 'rgba(34, 211, 168, 0.05)',
+    border: 'rgba(0,0,0,0.08)',
+    glassBg: 'rgba(0,0,0,0.03)', glassBorder: 'rgba(0,0,0,0.08)',
+    textPrimary: '#0f172a', textSecondary: '#475569', textMuted: '#64748b', textDim: '#94a3b8',
+    barTrack: 'rgba(0,0,0,0.06)', heatmapEmpty: 'rgba(0,0,0,0.05)',
+    separator: 'rgba(0,0,0,0.08)', separatorLight: 'rgba(0,0,0,0.05)',
+    insightText: '#334155',
+  }
+};
+
+function drawRoundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function drawOrb(ctx, x, y, radius, color) {
+  const grad = ctx.createRadialGradient(x, y, 0, x, y, radius);
+  grad.addColorStop(0, color);
+  grad.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad;
+  ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+}
+
+function drawGradeCircle(ctx, cx, cy, r, grade, th) {
+  const color = GRADE_HEX[grade] || GRADE_HEX.F;
+  // Background circle
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.strokeStyle = th.barTrack;
+  ctx.lineWidth = 6;
+  ctx.stroke();
+  // Grade arc
+  const pct = { A: 0.95, B: 0.8, C: 0.6, D: 0.4, F: 0.2 }[grade] || 0.2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * pct);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 6;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+  // Grade letter
+  ctx.font = 'bold 36px "JetBrains Mono", monospace';
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(grade, cx, cy);
+  // Label below
+  ctx.font = '600 10px "JetBrains Mono", monospace';
+  ctx.fillStyle = th.textMuted;
+  ctx.fillText('ROI GRADE', cx, cy + r + 18);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+}
+
+function drawStatBox(ctx, x, y, w, h, value, label, accentColor, th) {
+  // Glass background
+  drawRoundRect(ctx, x, y, w, h, 8);
+  ctx.fillStyle = th.glassBg;
+  ctx.fill();
+  ctx.strokeStyle = th.glassBorder;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  // Value
+  ctx.font = 'bold 20px "JetBrains Mono", monospace';
+  ctx.fillStyle = accentColor;
+  ctx.fillText(value, x + 14, y + 28);
+  // Label
+  ctx.font = '400 11px "DM Sans", sans-serif';
+  ctx.fillStyle = th.textMuted;
+  ctx.fillText(label, x + 14, y + h - 10);
+}
+
+function drawProgressBar(ctx, x, y, w, label, value, suffix, color, th) {
+  const barH = 8;
+  const labelW = 140;
+  const valueW = 50;
+  const barW = w - labelW - valueW - 16;
+  // Label
+  ctx.font = '400 12px "DM Sans", sans-serif';
+  ctx.fillStyle = th.textSecondary;
+  ctx.fillText(label, x, y + 10);
+  // Bar track
+  const bx = x + labelW;
+  drawRoundRect(ctx, bx, y + 3, barW, barH, 4);
+  ctx.fillStyle = th.barTrack;
+  ctx.fill();
+  // Bar fill
+  const fillW = Math.max(0, (value / 100) * barW);
+  if (fillW > 0) {
+    drawRoundRect(ctx, bx, y + 3, fillW, barH, 4);
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+  // Value text
+  ctx.font = '600 12px "JetBrains Mono", monospace';
+  ctx.fillStyle = color;
+  ctx.textAlign = 'right';
+  ctx.fillText(Math.round(value) + suffix, x + w, y + 11);
+  ctx.textAlign = 'left';
+}
+
+function drawMiniHeatmap(ctx, x, y, w, heatmapData, th, isLight) {
+  if (!heatmapData || !heatmapData.length) return;
+  const cols = 24;
+  const rows = 7;
+  const gap = 2;
+  const cellW = (w - (cols - 1) * gap) / cols;
+  const cellH = Math.min(cellW, 10);
+  const maxVal = Math.max(1, ...heatmapData.flat());
+  const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+  const labelOffset = 14;
+
+  for (let day = 0; day < rows; day++) {
+    // Day label
+    ctx.font = '500 8px "JetBrains Mono", monospace';
+    ctx.fillStyle = th.textDim;
+    ctx.fillText(dayLabels[day], x, y + day * (cellH + gap) + cellH - 1);
+    for (let hour = 0; hour < cols; hour++) {
+      const val = heatmapData[day]?.[hour] || 0;
+      const cx = x + labelOffset + hour * (cellW + gap);
+      const cy = y + day * (cellH + gap);
+      drawRoundRect(ctx, cx, cy, cellW, cellH, 2);
+      if (val === 0) {
+        ctx.fillStyle = th.heatmapEmpty;
+      } else {
+        const intensity = val / maxVal;
+        if (isLight) {
+          ctx.fillStyle = `rgba(5,150,105,${0.25 + intensity * 0.75})`;
+        } else {
+          ctx.fillStyle = `rgba(34,211,168,${0.2 + intensity * 0.8})`;
+        }
+      }
+      ctx.fill();
+    }
+  }
+}
+
+function drawInsightRow(ctx, x, y, w, insight, th) {
+  const color = INSIGHT_COLORS[insight.type] || INSIGHT_COLORS.info;
+  // Dot indicator
+  ctx.beginPath();
+  ctx.arc(x + 6, y + 8, 4, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  // Text (truncate if needed)
+  ctx.font = '400 12px "DM Sans", sans-serif';
+  ctx.fillStyle = th.insightText;
+  let text = insight.text;
+  // Truncate to fit width
+  const maxW = w - 24;
+  while (ctx.measureText(text).width > maxW && text.length > 3) {
+    text = text.slice(0, -4) + '...';
+  }
+  ctx.fillText(text, x + 18, y + 12);
+}
+
+function renderShareCard(canvas) {
+  const W = 600, H = 800;
+  canvas.width = W * 2;
+  canvas.height = H * 2;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(2, 2);
+
+  const isLight = shareCardTheme === 'light';
+  const th = isLight ? SHARE_THEME.light : SHARE_THEME.dark;
+
+  const d = DATA;
+  const s = d.summary;
+  const t = d.tokenAnalytics;
+  const ls = d.lineSurvival;
+
+  // ── Background ──
+  const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+  bgGrad.addColorStop(0, th.bg1);
+  bgGrad.addColorStop(0.5, th.bg2);
+  bgGrad.addColorStop(1, th.bg1);
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle orbs
+  drawOrb(ctx, W * 0.2, H * 0.12, 200, th.orb1);
+  drawOrb(ctx, W * 0.85, H * 0.35, 180, th.orb2);
+  drawOrb(ctx, W * 0.3, H * 0.85, 160, th.orb3);
+
+  // Border
+  drawRoundRect(ctx, 0, 0, W, H, 16);
+  ctx.strokeStyle = th.border;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // ── Header with logo bars ──
+  let y = 36;
+  // Draw 3-bar logo
+  const barX = 32;
+  const barW = 5;
+  const barGap = 4;
+  const barBaseY = y + 26;
+  drawRoundRect(ctx, barX, barBaseY - 16, barW, 16, 2);
+  ctx.fillStyle = '#e67e22';
+  ctx.fill();
+  drawRoundRect(ctx, barX + barW + barGap, barBaseY - 26, barW, 26, 2);
+  ctx.fillStyle = '#2ecc71';
+  ctx.fill();
+  drawRoundRect(ctx, barX + (barW + barGap) * 2, barBaseY - 20, barW, 20, 2);
+  ctx.fillStyle = '#3498db';
+  ctx.fill();
+  // Title text after logo
+  const titleX = barX + (barW + barGap) * 3 + 8;
+  ctx.font = 'bold 28px "JetBrains Mono", monospace';
+  const titleGrad = ctx.createLinearGradient(titleX, y, titleX + 240, y + 28);
+  if (isLight) {
+    titleGrad.addColorStop(0, '#2563eb');
+    titleGrad.addColorStop(0.5, '#7c3aed');
+    titleGrad.addColorStop(1, '#0891b2');
+  } else {
+    titleGrad.addColorStop(0, '#3b82f6');
+    titleGrad.addColorStop(0.5, '#a855f7');
+    titleGrad.addColorStop(1, '#06b6d4');
+  }
+  ctx.fillStyle = titleGrad;
+  ctx.fillText('Codelens AI', titleX, y + 26);
+
+  y += 44;
+  ctx.font = '300 13px "DM Sans", sans-serif';
+  ctx.fillStyle = th.textMuted;
+  ctx.fillText('AI Coding Report Card', 32, y);
+
+  y += 20;
+  const fmtDate = iso => {
+    try { return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); }
+    catch { return iso; }
+  };
+  const dateLabel = (d.meta.startDate && d.meta.endDate)
+    ? fmtDate(d.meta.startDate) + '  –  ' + fmtDate(d.meta.endDate)
+    : 'Last ' + d.meta.daysAnalyzed + ' days';
+  ctx.font = '500 11px "JetBrains Mono", monospace';
+  ctx.fillStyle = th.textDim;
+  ctx.fillText(dateLabel, 32, y);
+
+  // Thin separator
+  y += 16;
+  ctx.strokeStyle = th.separator;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(32, y);
+  ctx.lineTo(W - 32, y);
+  ctx.stroke();
+
+  // ── Grade + Stats Row ──
+  y += 20;
+  drawGradeCircle(ctx, 80, y + 52, 42, s.overallGrade, th);
+
+  const boxW = 152;
+  const boxH = 52;
+  const boxGap = 12;
+  const boxStartX = 160;
+  // Deeper accent colors for light theme so they pop against white bg
+  const cOrange = isLight ? '#d97706' : '#f59e0b';
+  const cGreen  = isLight ? '#059669' : '#22d3a8';
+  const cBlue   = isLight ? '#2563eb' : '#3b82f6';
+  const cPurple = isLight ? '#7c3aed' : '#a855f7';
+  drawStatBox(ctx, boxStartX, y, boxW, boxH, '$' + s.totalCost.toFixed(2), 'Total Spend', cOrange, th);
+  drawStatBox(ctx, boxStartX + boxW + boxGap, y, boxW, boxH, String(s.totalCommits), 'Commits Shipped', cGreen, th);
+  drawStatBox(ctx, boxStartX, y + boxH + boxGap, boxW, boxH,
+    s.avgCostPerCommit != null ? '$' + s.avgCostPerCommit.toFixed(2) : 'N/A', 'Avg $/Commit', cBlue, th);
+  drawStatBox(ctx, boxStartX + boxW + boxGap, y + boxH + boxGap, boxW, boxH,
+    String(s.totalSessions), 'Sessions', cPurple, th);
+
+  // ── Efficiency Bars ──
+  y += (boxH + boxGap) * 2 + 24;
+  ctx.font = '600 10px "JetBrains Mono", monospace';
+  ctx.fillStyle = th.textDim;
+  ctx.letterSpacing = '0.08em';
+  ctx.fillText('EFFICIENCY', 32, y);
+  ctx.letterSpacing = '0';
+  y += 18;
+
+  // Each bar gets its own accent color for visual variety
+  const effColor = isLight ? '#0d9488' : '#06b6d4';    // cyan/teal
+  const cacheColor = isLight ? '#7c3aed' : '#a855f7';  // purple
+  const survColor = isLight ? '#059669' : '#22d3a8';    // green
+  drawProgressBar(ctx, 32, y, W - 64, 'Token Efficiency', t.tokenEfficiencyRate, '%', effColor, th);
+  y += 34;
+  drawProgressBar(ctx, 32, y, W - 64, 'Cache Hit Rate', t.cacheHitRate, '%', cacheColor, th);
+  y += 34;
+  drawProgressBar(ctx, 32, y, W - 64, 'Line Survival', ls.survivalRate, '%', survColor, th);
+
+  // ── Heatmap ──
+  y += 40;
+  ctx.font = '600 10px "JetBrains Mono", monospace';
+  ctx.fillStyle = th.textDim;
+  ctx.fillText('PRODUCTIVITY HEATMAP', 32, y);
+  y += 14;
+  drawMiniHeatmap(ctx, 32, y, W - 64, d.heatmap.commits, th, isLight);
+
+  // ── Top Insights ──
+  y += 100;
+  const topInsights = (d.insights || []).slice(0, 3);
+  if (topInsights.length > 0) {
+    ctx.font = '600 10px "JetBrains Mono", monospace';
+    ctx.fillStyle = th.textDim;
+    ctx.fillText('KEY INSIGHTS', 32, y);
+    y += 14;
+    for (const insight of topInsights) {
+      drawInsightRow(ctx, 32, y, W - 64, insight, th);
+      y += 28;
+    }
+  }
+
+  // ── Footer ──
+  ctx.font = '400 10px "DM Sans", sans-serif';
+  ctx.fillStyle = th.textDim;
+  ctx.fillText('Generated by Codelens AI  ·  codelensai-dev.vercel.app', 32, H - 24);
+
+  // Subtle footer separator
+  ctx.strokeStyle = th.separatorLight;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(32, H - 40);
+  ctx.lineTo(W - 32, H - 40);
+  ctx.stroke();
+}
+
+let shareCardTheme = 'dark';
+
+function updateShareThemeToggle() {
+  document.querySelectorAll('#share-theme-toggle button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.shareTheme === shareCardTheme);
+  });
+}
+
+function openShareModal() {
+  if (!DATA) return;
+  shareCardTheme = getTheme();
+  updateShareThemeToggle();
+  const modal = document.getElementById('share-modal');
+  modal.style.display = '';
+  document.body.style.overflow = 'hidden';
+  const canvas = document.getElementById('share-canvas');
+  document.fonts.ready.then(() => renderShareCard(canvas));
+}
+
+function closeShareModal() {
+  const modal = document.getElementById('share-modal');
+  modal.style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+async function copyShareCard() {
+  const canvas = document.getElementById('share-canvas');
+  try {
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    showShareToast('Copied to clipboard!');
+  } catch {
+    showShareToast('Clipboard not supported — downloading instead');
+    downloadShareCard();
+  }
+}
+
+function downloadShareCard() {
+  const canvas = document.getElementById('share-canvas');
+  const link = document.createElement('a');
+  link.download = 'codelens-ai-report-card.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+  showShareToast('Downloaded!');
+}
+
+function showShareToast(msg) {
+  const toast = document.getElementById('share-toast');
+  toast.textContent = msg;
+  toast.classList.add('visible');
+  setTimeout(() => toast.classList.remove('visible'), 2500);
+}
+
+// Wire up share modal events
+(function initShareModal() {
+  const shareBtn = document.getElementById('share-btn');
+  const shareModal = document.getElementById('share-modal');
+  const closeBtn = document.getElementById('share-modal-close');
+  const copyBtn = document.getElementById('share-copy-btn');
+  const downloadBtn = document.getElementById('share-download-btn');
+
+  if (shareBtn) shareBtn.addEventListener('click', openShareModal);
+  if (closeBtn) closeBtn.addEventListener('click', closeShareModal);
+  if (shareModal) shareModal.addEventListener('click', function(e) { if (e.target === shareModal) closeShareModal(); });
+  if (copyBtn) copyBtn.addEventListener('click', copyShareCard);
+  if (downloadBtn) downloadBtn.addEventListener('click', downloadShareCard);
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && shareModal && shareModal.style.display !== 'none') closeShareModal();
+  });
+
+  // Share card theme toggle
+  const themeToggle = document.getElementById('share-theme-toggle');
+  if (themeToggle) {
+    themeToggle.addEventListener('click', function(e) {
+      const btn = e.target.closest('[data-share-theme]');
+      if (!btn) return;
+      shareCardTheme = btn.dataset.shareTheme;
+      updateShareThemeToggle();
+      const canvas = document.getElementById('share-canvas');
+      renderShareCard(canvas);
+    });
+  }
+})();
 
 </script>
 </body>

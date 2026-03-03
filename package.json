@@ -31,7 +31,7 @@
   "bugs": {
     "url": "https://github.com/Akshat2634/Codelens-AI/issues"
   },
-  "homepage": "https://github.com/Akshat2634/Codelens-AI#readme",
+  "homepage": "https://codelensai-dev.vercel.app/",
   "engines": {
     "node": ">=18.0.0"
   },
