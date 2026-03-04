@@ -3,6 +3,5 @@ node_modules/
 *.log
 test-results/
 .claude/*
-!.claude/settings.local.json
 !.claude/skills/
 .agents/
