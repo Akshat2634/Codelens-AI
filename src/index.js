@@ -90,7 +90,8 @@ async function main() {
     .option('--no-open', 'do not auto-open browser')
     .option('--json', 'output raw JSON to stdout instead of starting server')
     .option('--project <name>', 'filter to specific project')
-    .option('--refresh', 'force full re-parse, ignore cache');
+    .option('--refresh', 'force full re-parse, ignore cache')
+    .option('--autonomy', 'print autonomy metrics table to stdout and exit');
 
   program.parse();
   const opts = program.opts();
@@ -112,6 +113,28 @@ async function main() {
   // Output
   if (opts.json) {
     process.stdout.write(JSON.stringify(payload, null, 2));
+    process.exit(0);
+  }
+
+  if (opts.autonomy) {
+    const am = payload.autonomyMetrics;
+    const GRADE_COLOR = { A: '\x1b[32m', B: '\x1b[36m', C: '\x1b[33m', D: '\x1b[33m', F: '\x1b[31m' };
+    const gc = GRADE_COLOR[am.overall.grade] || '\x1b[0m';
+    const line = '\u2500'.repeat(35);
+    console.log('');
+    console.log(`  ${gc}Autonomy Score: ${am.overall.grade}\x1b[0m (${am.overall.score}/100)`);
+    console.log(`  ${line}`);
+    console.log(`  Autopilot Ratio     ${am.autopilotRatio}x`);
+    console.log(`  Self-Heal Score     ${am.selfHealScore}%`);
+    console.log(`  Toolbelt Coverage   ${am.toolbeltCoverage}%`);
+    console.log(`  Commit Velocity     ${am.commitVelocity !== null ? am.commitVelocity + ' steps/commit' : 'N/A'}`);
+    console.log(`  ${line}`);
+    if (am.topVerificationCommands.length > 0) {
+      const top3 = am.topVerificationCommands.slice(0, 3)
+        .map(c => `${c.command} (${c.count})`).join(', ');
+      console.log(`  Top Tests: ${top3}`);
+    }
+    console.log('');
     process.exit(0);
   }
 

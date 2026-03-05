@@ -149,6 +149,110 @@ function computeLineSurvival(commitsByRepo) {
   return { totalAdded, totalChurned, surviving, survivalRate };
 }
 
+// ---- Autonomy metrics ----
+const KNOWN_TOOLS = [
+  'Bash', 'Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'LS',
+  'WebFetch', 'WebSearch', 'NotebookEdit', 'NotebookRead', 'TodoWrite', 'Agent',
+];
+const TOTAL_AVAILABLE_TOOLS = KNOWN_TOOLS.length; // 14
+
+function computeAutonomyGrade(score) {
+  if (score >= 80) return 'A';
+  if (score >= 60) return 'B';
+  if (score >= 40) return 'C';
+  if (score >= 20) return 'D';
+  return 'F';
+}
+
+function computeAutonomyMetrics(correlatedSessions) {
+  const perSession = correlatedSessions.map(s => {
+    const autopilotRatio = s.userMessageCount > 0
+      ? Math.round((s.assistantMessageCount / s.userMessageCount) * 100) / 100
+      : 0;
+
+    const selfHealScore = s.totalBashCalls > 0
+      ? Math.round((s.verificationBashCalls / s.totalBashCalls) * 100)
+      : 0;
+
+    const uniqueTools = Object.keys(s.toolCalls).length;
+    const toolbeltCoverage = Math.round((uniqueTools / TOTAL_AVAILABLE_TOOLS) * 100);
+
+    const totalToolCalls = Object.values(s.toolCalls).reduce((sum, c) => sum + c, 0);
+    const commitVelocity = s.commitCount > 0 ? Math.round(totalToolCalls / s.commitCount) : null;
+
+    return { sessionId: s.sessionId, autopilotRatio, selfHealScore, toolbeltCoverage, commitVelocity };
+  });
+
+  // Aggregates
+  const totalUser = correlatedSessions.reduce((s, c) => s + c.userMessageCount, 0);
+  const totalAssistant = correlatedSessions.reduce((s, c) => s + c.assistantMessageCount, 0);
+  const autopilotRatio = totalUser > 0
+    ? Math.round((totalAssistant / totalUser) * 100) / 100
+    : 0;
+
+  const totalBash = correlatedSessions.reduce((s, c) => s + (c.totalBashCalls || 0), 0);
+  const totalVerif = correlatedSessions.reduce((s, c) => s + (c.verificationBashCalls || 0), 0);
+  const selfHealScore = totalBash > 0 ? Math.round((totalVerif / totalBash) * 100) : 0;
+
+  const toolbeltCoverage = perSession.length > 0
+    ? Math.round(perSession.reduce((s, a) => s + a.toolbeltCoverage, 0) / perSession.length)
+    : 0;
+
+  const withCommits = perSession.filter(a => a.commitVelocity !== null);
+  const commitVelocity = withCommits.length > 0
+    ? Math.round(withCommits.reduce((s, a) => s + a.commitVelocity, 0) / withCommits.length)
+    : null;
+
+  // Composite score (0-100): clamp and weight each component
+  const autopilotScore = Math.round(Math.min(autopilotRatio / 5, 1) * 100);
+  const selfHealWeighted = selfHealScore;
+  const toolbeltWeighted = toolbeltCoverage;
+  const velocityScore = commitVelocity !== null
+    ? Math.round(Math.max(0, Math.min(1, 1 - (commitVelocity / 100))) * 100)
+    : 50; // neutral when no commits
+
+  const overallScore = Math.round(
+    autopilotScore * 0.25 +
+    selfHealWeighted * 0.30 +
+    toolbeltWeighted * 0.20 +
+    velocityScore * 0.25
+  );
+
+  // Top verification commands — extract the actual test/lint command, stripping cd/path prefixes
+  const verifCounts = {};
+  for (const s of correlatedSessions) {
+    for (const bc of (s.bashCommands || [])) {
+      if (bc.isVerification) {
+        // Strip "cd /path && ", "cd /path;", and "VAR=val " prefixes to get the real command
+        const stripped = bc.command
+          .replace(/^(?:cd\s+\S+\s*&&\s*)+/g, '')
+          .replace(/^(?:cd\s+\S+\s*;\s*)+/g, '')
+          .replace(/^(?:\w+=\S+\s+)+/g, '')
+          .trim();
+        const key = stripped.split(' ').slice(0, 3).join(' ') || bc.command.split(' ').slice(0, 3).join(' ');
+        verifCounts[key] = (verifCounts[key] || 0) + 1;
+      }
+    }
+  }
+  const topVerificationCommands = Object.entries(verifCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([command, count]) => ({ command, count }));
+
+  return {
+    overall: { score: overallScore, grade: computeAutonomyGrade(overallScore) },
+    autopilotRatio,
+    selfHealScore,
+    toolbeltCoverage,
+    commitVelocity,
+    totalBashCalls: totalBash,
+    totalVerificationCalls: totalVerif,
+    topVerificationCommands,
+    perSession,
+    breakdown: { autopilotScore, selfHealWeighted, toolbeltWeighted, velocityScore },
+  };
+}
+
 function computeEfficiencyGrade(costPerCommit, survivalRate) {
   // Grade based on cost per commit (more meaningful than raw token count)
   if (costPerCommit <= 2 && survivalRate >= 90) return 'A';
@@ -165,7 +269,7 @@ function computeSessionGrade(session) {
   return computeEfficiencyGrade(costPerCommit, 80);
 }
 
-function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics) {
+function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics) {
   const insights = [];
 
   // Orphaned session rate
@@ -350,6 +454,34 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
     }
   }
 
+  // ---- Autonomy insights ----
+  if (autonomyMetrics) {
+    const am = autonomyMetrics;
+    if (am.autopilotRatio >= 4) {
+      insights.push({
+        type: 'success',
+        text: `Your agent averaged ${am.autopilotRatio}x autopilot — it handled ${Math.round(am.autopilotRatio)} actions per prompt.`,
+      });
+    }
+    if (am.totalBashCalls > 5 && am.selfHealScore < 10) {
+      insights.push({
+        type: 'warning',
+        text: `Your agent ran ${am.totalBashCalls} bash commands but only ${am.selfHealScore}% were tests or lints — low self-healing.`,
+      });
+    } else if (am.selfHealScore >= 40) {
+      insights.push({
+        type: 'success',
+        text: `${am.selfHealScore}% of bash commands were tests/lints — your agent self-heals well.`,
+      });
+    }
+    if (am.toolbeltCoverage < 30 && correlatedSessions.length >= 3) {
+      insights.push({
+        type: 'tip',
+        text: `Your agent only used ${Math.round(am.toolbeltCoverage * TOTAL_AVAILABLE_TOOLS / 100)} of ${TOTAL_AVAILABLE_TOOLS} available tools — low toolbelt coverage.`,
+      });
+    }
+  }
+
   return insights;
 }
 
@@ -516,12 +648,6 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     mainBranchPct: p.commits > 0 ? Math.round((p.commitsOnMain / p.commits) * 100) : 0,
   }));
 
-  // Add grades to sessions
-  const sessionsWithGrades = correlatedSessions.map(s => ({
-    ...s,
-    grade: computeSessionGrade(s),
-  }));
-
   // ---- Cost breakdown by time period ----
   const now = new Date();
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -567,7 +693,24 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   // ---- Token analytics ----
   const tokenAnalytics = computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, totalLinesAdded, modelBreakdown);
 
-  const insights = generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics);
+  // ---- Autonomy metrics ----
+  const autonomyMetrics = computeAutonomyMetrics(correlatedSessions);
+
+  // Add grades + autonomy to sessions
+  const autonomyBySession = new Map(autonomyMetrics.perSession.map(a => [a.sessionId, a]));
+  const sessionsWithGrades = correlatedSessions.map(s => {
+    const a = autonomyBySession.get(s.sessionId);
+    return {
+      ...s,
+      grade: computeSessionGrade(s),
+      autopilotRatio: a?.autopilotRatio ?? 0,
+      selfHealScore: a?.selfHealScore ?? 0,
+      toolbeltCoverage: a?.toolbeltCoverage ?? 0,
+      commitVelocity: a?.commitVelocity ?? null,
+    };
+  });
+
+  const insights = generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics);
 
   return {
     meta: {
@@ -585,6 +728,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     },
     summary,
     tokenAnalytics,
+    autonomyMetrics,
     insights,
     daily,
     projects,

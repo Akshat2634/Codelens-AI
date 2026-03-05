@@ -134,5 +134,10 @@ export function createServer(initialPayload, rebuildFn) {
     res.json(payload.tokenAnalytics);
   });
 
+  // Autonomy metrics
+  app.get('/api/autonomy', (req, res) => {
+    res.json(payload.autonomyMetrics);
+  });
+
   return app;
 }
