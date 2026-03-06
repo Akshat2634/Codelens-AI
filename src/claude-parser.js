@@ -104,20 +104,65 @@ const NON_VERIFICATION_PATTERNS = [
   /^\s*echo\s+/,            // printing
   /^\s*ls\b/,               // listing
   /^\s*rm\s+/,              // file deletion
+  /^\s*cd\s+/,              // directory change (when standalone)
+  /^\s*mkdir\s+/,           // directory creation
+  /^\s*cp\s+/,              // file copy
+  /^\s*mv\s+/,              // file move
+  /^\s*touch\s+/,           // file creation
+  /^\s*chmod\s+/,           // permission change
+  /^\s*gh\s+pr\b/,          // GitHub PR operations
+  /^\s*gh\s+issue\b/,       // GitHub issue operations
+  /^\s*git\s+(add|commit|push|pull|checkout|branch|merge|stash|rebase)\b/, // git write ops
+  /^\s*npm\s+(install|i|ci|publish|init)\b/, // npm non-test commands
+  /^\s*pip\s+install\b/,    // pip install
+  /^\s*brew\s+/,            // homebrew
+  /^\s*curl\s+/,            // HTTP requests
+  /^\s*wget\s+/,            // downloads
+  /^\s*docker\s+/,          // docker commands
+  /^\s*kill\s+/,            // process kill
+  /^\s*pkill\s+/,           // process kill
+  /^\s*open\s+/,            // open files/URLs
+  /^\s*code\s+/,            // open in VS Code
+  /^\s*pbcopy\b/,           // clipboard
+  /^\s*sed\s+/,             // stream edit
+  /^\s*awk\s+/,             // text processing
+  /^\s*grep\s+/,            // search (not verification)
+  /^\s*wc\s+/,              // word count
+  /^\s*head\s+/,            // file preview
+  /^\s*tail\s+/,            // file preview
 ];
 
 // Patterns that identify test/lint/typecheck commands (for autonomy self-heal score)
 const VERIFICATION_PATTERNS = [
-  /\bnpm\s+(test|run\s+(test|lint|check|typecheck))\b/,
-  /\b(pnpm|yarn|bun)\s+(run\s+)?(test|lint|check|typecheck)\b/,
-  /\b(jest|vitest|mocha|ava)\b/,
-  /\b(pytest|python\s+-m\s+(pytest|unittest))\b/,
-  /\b(go\s+test|cargo\s+(test|clippy))\b/,
-  /\b(eslint|biome|prettier\b.*--check)/,
+  // JavaScript/TypeScript
+  /\bnpm\s+(test|run\s+(test|lint|check|typecheck|format:check))\b/,
+  /\b(pnpm|yarn|bun)\s+(run\s+)?(test|lint|check|typecheck|format:check)\b/,
+  /\b(jest|vitest|mocha|ava|cypress|playwright)\s/,
   /\btsc(\s+--noEmit|\s+-p)\b/,
-  /\b(mypy|ruff|flake8|pylint|rubocop)\b/,
+  /\b(eslint|biome|prettier\b.*--check)/,
   /\bnode\s+--check\b/,
-  /\bmake\s+(test|check|lint)\b/,
+  /\bnpx\s+(tsc|eslint|jest|vitest|prettier\s+--check)\b/,
+
+  // Python
+  /\b(pytest|python\s+-m\s+(pytest|unittest|mypy|ruff|flake8|pylint))\b/,
+  /\b(mypy|ruff\s+check|flake8|pylint|pyright|bandit)\b/,
+
+  // Go
+  /\bgo\s+(test|vet)\b/,
+  /\bgolangci-lint\b/,
+
+  // Rust
+  /\bcargo\s+(test|clippy|check)\b/,
+
+  // Ruby
+  /\b(rubocop|rspec|bundle\s+exec\s+(rspec|rubocop))\b/,
+
+  // Java/Kotlin
+  /\b(gradle|gradlew|mvn|maven)\s+(test|check|verify)\b/,
+
+  // General
+  /\bmake\s+(test|check|lint|verify)\b/,
+  /\bpre-commit\s+run\b/,
 ];
 
 function isVerificationCommand(command) {
