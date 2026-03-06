@@ -593,15 +593,15 @@
       color: var(--accent-blue);
     }
     @keyframes tooltipFade {
-      from { opacity: 0; transform: translateX(-50%) translateY(4px); }
-      to { opacity: 1; transform: translateX(-50%) translateY(0); }
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
     }
     .info-tip:hover::after {
       content: attr(data-tip);
       position: absolute;
       bottom: calc(100% + 10px);
-      left: 50%;
-      transform: translateX(-50%) translateY(0);
+      right: -12px;
+      transform: none;
       background: var(--tooltip-bg);
       backdrop-filter: blur(16px);
       color: var(--text-secondary);
@@ -610,6 +610,7 @@
       font-size: 0.75rem;
       font-weight: 400;
       width: 280px;
+      max-width: 80vw;
       line-height: 1.5;
       border: 1px solid var(--tooltip-border);
       z-index: 100;
