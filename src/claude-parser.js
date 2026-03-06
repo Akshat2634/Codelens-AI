@@ -96,6 +96,43 @@ function toRelativePath(absolutePath, repoPath) {
   return absolutePath.split('/').pop();
 }
 
+// Commands that are clearly NOT verification even if they contain matching keywords
+const NON_VERIFICATION_PATTERNS = [
+  /^\s*node\s+-e\b/,        // inline JS eval
+  /^\s*find\s+/,            // file search
+  /^\s*cat\s+/,             // file display
+  /^\s*echo\s+/,            // printing
+  /^\s*ls\b/,               // listing
+  /^\s*rm\s+/,              // file deletion
+];
+
+// Patterns that identify test/lint/typecheck commands (for autonomy self-heal score)
+const VERIFICATION_PATTERNS = [
+  /\bnpm\s+(test|run\s+(test|lint|check|typecheck))\b/,
+  /\b(pnpm|yarn|bun)\s+(run\s+)?(test|lint|check|typecheck)\b/,
+  /\b(jest|vitest|mocha|ava)\b/,
+  /\b(pytest|python\s+-m\s+(pytest|unittest))\b/,
+  /\b(go\s+test|cargo\s+(test|clippy))\b/,
+  /\b(eslint|biome|prettier\b.*--check)/,
+  /\btsc(\s+--noEmit|\s+-p)\b/,
+  /\b(mypy|ruff|flake8|pylint|rubocop)\b/,
+  /\bnode\s+--check\b/,
+  /\bmake\s+(test|check|lint)\b/,
+];
+
+function isVerificationCommand(command) {
+  if (!command || typeof command !== 'string') return false;
+  // Strip cd/path and env var prefixes to get the core command
+  const core = command
+    .replace(/^(?:cd\s+\S+\s*&&\s*)+/g, '')
+    .replace(/^(?:cd\s+\S+\s*;\s*)+/g, '')
+    .replace(/^(?:\w+=\S+\s+)+/g, '')
+    .trim();
+  // Exclude commands that are clearly not verification
+  if (NON_VERIFICATION_PATTERNS.some(p => p.test(core))) return false;
+  return VERIFICATION_PATTERNS.some(p => p.test(core));
+}
+
 function extractToolUse(session, msg) {
   const content = msg.content;
   if (!Array.isArray(content)) return;
@@ -107,6 +144,17 @@ function extractToolUse(session, msg) {
 
     // Count tool calls
     session.toolCalls[toolName] = (session.toolCalls[toolName] || 0) + 1;
+
+    // Track Bash commands for autonomy self-heal scoring
+    if (toolName === 'Bash') {
+      const command = block.input?.command || block.input?.content;
+      if (command) {
+        session.totalBashCalls++;
+        const isVerif = isVerificationCommand(command);
+        if (isVerif) session.verificationBashCalls++;
+        session.bashCommands.push({ command: command.slice(0, 200), isVerification: isVerif });
+      }
+    }
 
     // Track files written/read
     const filePath = block.input?.file_path;
@@ -145,6 +193,9 @@ function createEmptySession(sessionId) {
     filesRead: [],
     userMessageCount: 0,
     assistantMessageCount: 0,
+    bashCommands: [],
+    totalBashCalls: 0,
+    verificationBashCalls: 0,
   };
 }
 
@@ -379,6 +430,11 @@ function mergeSubagentIntoSession(parent, sub) {
   for (const [tool, count] of Object.entries(sub.toolCalls)) {
     parent.toolCalls[tool] = (parent.toolCalls[tool] || 0) + count;
   }
+
+  // Merge bash command tracking
+  parent.totalBashCalls += sub.totalBashCalls;
+  parent.verificationBashCalls += sub.verificationBashCalls;
+  parent.bashCommands.push(...sub.bashCommands);
 
   // Merge files
   for (const f of sub.filesWritten) {

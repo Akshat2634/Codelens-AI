@@ -79,6 +79,11 @@ This parses your `~/.claude/projects/` session data, analyzes your git repos, an
 | **Model Comparison**  | Efficiency breakdown across Opus, Sonnet, and Haiku             |
 | **Branch Awareness**  | What % of AI commits landed on production                       |
 | **Peak Hours**        | Hour-of-day x day-of-week productivity heatmap                  |
+| **Autonomy Score**    | Composite A-F grade measuring how independently the agent works |
+| **Autopilot Ratio**   | Assistant messages per user prompt (higher = more autonomous)   |
+| **Self-Heal Score**   | % of bash calls that are test/lint commands (self-verification) |
+| **Toolbelt Coverage** | % of available tools used per session (workflow breadth)        |
+| **Commit Velocity**   | Tool calls per commit (lower = more efficient)                  |
 
 ## CLI Options
 
@@ -90,6 +95,7 @@ claude-roi --no-open              # don't auto-open browser
 claude-roi --json                 # dump all metrics as JSON to stdout
 claude-roi --project techops      # filter to a specific project
 claude-roi --refresh              # force full re-parse (ignore cache)
+claude-roi --autonomy             # print autonomy score to terminal and exit
 ```
 
 ## Dashboard
@@ -102,7 +108,8 @@ The dashboard includes:
 - **Model comparison** — cost breakdown by Claude model
 - **Session length analysis** — which session sizes have the best ROI
 - **Productivity heatmap** — GitHub-style grid showing when you're most productive
-- **Sessions table** — sortable, expandable table with per-session metrics and matched commits
+- **Agent Autonomy** — autonomy score badge, autopilot ratio, self-heal score, toolbelt coverage, commit velocity, and top verification commands
+- **Sessions table** — sortable, expandable table with per-session metrics, matched commits, and autopilot ratio
 
 ## How It Works
 

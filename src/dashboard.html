@@ -1517,6 +1517,254 @@
     .share-toast.visible {
       opacity: 1;
     }
+
+    /* ── Autonomy Section ───────────────────────── */
+    @property --auto-deg {
+      syntax: '<angle>';
+      initial-value: 0deg;
+      inherits: false;
+    }
+    .autonomy-section { margin-bottom: 48px; }
+    .autonomy-section h2 {
+      font-family: var(--font-display);
+      font-size: 1rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-secondary);
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .autonomy-layout {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 24px;
+      align-items: stretch;
+    }
+    @media (max-width: 768px) {
+      .autonomy-layout { grid-template-columns: 1fr; }
+      .autonomy-score-hub { justify-self: center; max-width: 240px; }
+    }
+
+    /* Score hub — the big badge */
+    .autonomy-score-hub {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 28px 20px;
+      background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      position: relative;
+      overflow: hidden;
+    }
+    .autonomy-score-hub::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 50% 20%, var(--auto-glow, rgba(34, 211, 168, 0.08)), transparent 70%);
+      pointer-events: none;
+    }
+    .autonomy-ring {
+      width: 130px;
+      height: 130px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .autonomy-ring::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      padding: 5px;
+      background: conic-gradient(var(--auto-color) 0deg, var(--auto-color) var(--auto-deg, 0deg), var(--bg-hover) var(--auto-deg, 0deg));
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      animation: autoRingReveal 1.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+    }
+    @keyframes autoRingReveal {
+      from { --auto-deg: 0deg; }
+    }
+    .autonomy-ring .auto-grade {
+      font-family: var(--font-display);
+      font-size: 3rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .autonomy-score-label {
+      font-family: var(--font-display);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      text-align: center;
+    }
+    .autonomy-score-num {
+      font-family: var(--font-display);
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    /* Metric cards grid */
+    .autonomy-cards {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+    }
+    @media (max-width: 520px) {
+      .autonomy-cards { grid-template-columns: 1fr; }
+    }
+    .auto-metric {
+      background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .auto-metric:hover {
+      border-color: var(--glass-border-hover);
+      box-shadow: 0 4px 20px var(--shadow-card);
+    }
+    .auto-metric .metric-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .auto-metric .metric-name {
+      font-family: var(--font-display);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .auto-metric .metric-value {
+      font-family: var(--font-display);
+      font-size: 1.6rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .auto-metric .metric-bar {
+      height: 6px;
+      background: var(--overlay-medium);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .auto-metric .metric-bar .fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    }
+    .auto-metric .metric-sub {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* Breakdown bar */
+    .autonomy-breakdown {
+      margin-top: 20px;
+      grid-column: 1 / -1;
+    }
+    .autonomy-breakdown .breakdown-label {
+      font-family: var(--font-display);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+    .breakdown-bar {
+      display: flex;
+      height: 10px;
+      border-radius: 5px;
+      overflow: hidden;
+      background: var(--overlay-medium);
+    }
+    .breakdown-bar .seg {
+      height: 100%;
+      transition: width 0.8s ease;
+    }
+    .breakdown-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 8px;
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+    }
+    .breakdown-legend span {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .breakdown-legend .ldot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    /* Top commands */
+    .auto-commands {
+      margin-top: 16px;
+      grid-column: 1 / -1;
+      background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+    }
+    .auto-commands .cmd-title {
+      font-family: var(--font-display);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+    .auto-commands .cmd-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .auto-commands .cmd-tag {
+      font-family: var(--font-display);
+      font-size: 0.72rem;
+      padding: 4px 10px;
+      border-radius: 4px;
+      background: var(--overlay-strong);
+      color: var(--text-secondary);
+      border: 1px solid var(--overlay-intense);
+    }
+    .auto-commands .cmd-tag .cmd-count {
+      color: var(--accent-green);
+      font-weight: 600;
+      margin-left: 4px;
+    }
+
+    /* Autopilot badge in sessions table */
+    .autopilot-badge {
+      font-family: var(--font-display);
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--accent-cyan);
+    }
   </style>
 </head>
 <body>
@@ -1803,6 +2051,7 @@ function render() {
         <div id="heatmap-container"></div>
       </div>
     </div>
+    <div class="scroll-reveal">${renderAutonomySection(d.autonomyMetrics)}</div>
     <div class="scroll-reveal">${renderCacheEfficiency(t)}</div>
     <div class="scroll-reveal">${renderSurvival(d.lineSurvival)}</div>
     <div class="scroll-reveal">${renderSessionsTable(d.sessions)}</div>
@@ -2093,6 +2342,105 @@ function renderTokenFunFacts(facts) {
   </div>`;
 }
 
+function renderAutonomySection(am) {
+  if (!am) return '';
+  const g = am.overall.grade;
+  const s = am.overall.score;
+  const gradeColor = GRADE_VAR[g] || GRADE_VAR.F;
+  const gradeBg = GRADE_BG_VAR[g] || GRADE_BG_VAR.F;
+  const deg = Math.round((s / 100) * 360);
+
+  // Glow color map
+  const glowMap = { A: 'rgba(34,211,168,0.08)', B: 'rgba(59,130,246,0.08)', C: 'rgba(245,158,11,0.08)', D: 'rgba(240,136,62,0.08)', F: 'rgba(239,68,68,0.08)' };
+
+  // Velocity bar: lower is better, cap at 100 steps
+  const velPct = am.commitVelocity !== null ? Math.max(0, 100 - am.commitVelocity) : 0;
+  const velLabel = am.commitVelocity !== null
+    ? (am.commitVelocity <= 20 ? 'Blazing' : am.commitVelocity <= 50 ? 'Solid' : 'Heavy')
+    : 'N/A';
+
+  // Breakdown percentages (out of total weight = 100)
+  const bd = am.breakdown;
+  const bTotal = (bd.autopilotScore * 0.25 + bd.selfHealWeighted * 0.30 + bd.toolbeltWeighted * 0.20 + bd.velocityScore * 0.25) || 1;
+  const bAuto = Math.round((bd.autopilotScore * 0.25 / bTotal) * 100);
+  const bHeal = Math.round((bd.selfHealWeighted * 0.30 / bTotal) * 100);
+  const bTool = Math.round((bd.toolbeltWeighted * 0.20 / bTotal) * 100);
+  const bVel = 100 - bAuto - bHeal - bTool;
+
+  return `<div class="autonomy-section">
+    <h2>Agent Autonomy <i class="info-tip" data-tip="How independently your AI agent works. Measures autopilot ratio (actions per prompt), self-healing (test/lint usage), tool diversity, and commit efficiency.">i</i></h2>
+    <div class="autonomy-layout">
+      <div class="autonomy-score-hub" style="--auto-glow: ${glowMap[g] || glowMap.F};">
+        <div class="autonomy-ring" style="--auto-color: ${gradeColor}; --auto-deg: ${deg}deg;">
+          <div class="auto-grade" style="color: ${gradeColor};">${g}</div>
+        </div>
+        <div class="autonomy-score-num">${s} / 100</div>
+        <div class="autonomy-score-label">Autonomy Score</div>
+      </div>
+      <div>
+        <div class="autonomy-cards">
+          <div class="auto-metric">
+            <div class="metric-header">
+              <span class="metric-name">Autopilot Ratio <i class="info-tip" data-tip="Agent responses per user message. Higher means the agent does more per prompt. 5x = max score.">i</i></span>
+            </div>
+            <div class="metric-value" style="color: var(--accent-cyan);">${am.autopilotRatio}x</div>
+            <div class="metric-bar"><div class="fill" style="width: ${Math.min(am.autopilotRatio / 5 * 100, 100)}%; background: var(--accent-cyan);"></div></div>
+            <div class="metric-sub">${am.autopilotRatio >= 4 ? 'High autonomy' : am.autopilotRatio >= 2 ? 'Moderate' : 'Low — agent needs more prompts'}</div>
+          </div>
+          <div class="auto-metric">
+            <div class="metric-header">
+              <span class="metric-name">Self-Heal Score <i class="info-tip" data-tip="Percentage of Bash commands that are tests, lints, or type checks. Higher means the agent verifies its own work.">i</i></span>
+            </div>
+            <div class="metric-value" style="color: var(--accent-green);">${am.selfHealScore}%</div>
+            <div class="metric-bar"><div class="fill" style="width: ${am.selfHealScore}%; background: var(--accent-green);"></div></div>
+            <div class="metric-sub">${am.totalVerificationCalls} of ${am.totalBashCalls} bash calls were tests/lints</div>
+          </div>
+          <div class="auto-metric">
+            <div class="metric-header">
+              <span class="metric-name">Toolbelt Coverage <i class="info-tip" data-tip="Percentage of available tools (Read, Write, Edit, Bash, Grep, Glob, etc.) the agent uses per session. Higher diversity suggests more complete autonomous workflow.">i</i></span>
+            </div>
+            <div class="metric-value" style="color: var(--accent-purple);">${am.toolbeltCoverage}%</div>
+            <div class="metric-bar"><div class="fill" style="width: ${am.toolbeltCoverage}%; background: var(--accent-purple);"></div></div>
+            <div class="metric-sub">${am.toolbeltCoverage >= 70 ? 'Full toolbelt utilization' : am.toolbeltCoverage >= 40 ? 'Moderate diversity' : 'Narrow tool usage'}</div>
+          </div>
+          <div class="auto-metric">
+            <div class="metric-header">
+              <span class="metric-name">Commit Velocity <i class="info-tip" data-tip="Average tool calls needed per commit. Lower = more efficient agent. Under 20 is blazing fast.">i</i></span>
+            </div>
+            <div class="metric-value" style="color: var(--accent-blue);">${am.commitVelocity !== null ? am.commitVelocity : '—'}<span style="font-size:0.7rem;font-weight:500;color:var(--text-muted);margin-left:4px;">${am.commitVelocity !== null ? 'steps/commit' : ''}</span></div>
+            <div class="metric-bar"><div class="fill" style="width: ${velPct}%; background: var(--accent-blue);"></div></div>
+            <div class="metric-sub">${velLabel}</div>
+          </div>
+        </div>
+        <div class="autonomy-breakdown">
+          <div class="breakdown-label">Score Composition</div>
+          <div class="breakdown-bar">
+            <div class="seg" style="width: ${bAuto}%; background: var(--accent-cyan);" title="Autopilot ${bd.autopilotScore}"></div>
+            <div class="seg" style="width: ${bHeal}%; background: var(--accent-green);" title="Self-Heal ${bd.selfHealWeighted}"></div>
+            <div class="seg" style="width: ${bTool}%; background: var(--accent-purple);" title="Toolbelt ${bd.toolbeltWeighted}"></div>
+            <div class="seg" style="width: ${bVel}%; background: var(--accent-blue);" title="Velocity ${bd.velocityScore}"></div>
+          </div>
+          <div class="breakdown-legend">
+            <span><span class="ldot" style="background: var(--accent-cyan);"></span>Autopilot 25%</span>
+            <span><span class="ldot" style="background: var(--accent-green);"></span>Self-Heal 30%</span>
+            <span><span class="ldot" style="background: var(--accent-purple);"></span>Toolbelt 20%</span>
+            <span><span class="ldot" style="background: var(--accent-blue);"></span>Velocity 25%</span>
+          </div>
+        </div>
+        ${am.topVerificationCommands.length > 0 ? `
+        <div class="auto-commands">
+          <div class="cmd-title">Top Verification Commands</div>
+          <div class="cmd-list">
+            ${am.topVerificationCommands.slice(0, 6).map(c =>
+              `<span class="cmd-tag">${c.command}<span class="cmd-count">&times;${c.count}</span></span>`
+            ).join('')}
+          </div>
+        </div>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderCacheEfficiency(t) {
   const hitRate = t.cacheHitRate;
   const accentColor = hitRate >= 60 ? 'var(--accent-blue)' : hitRate >= 30 ? 'var(--accent-orange)' : 'var(--accent-red)';
@@ -2142,6 +2490,7 @@ function renderSessionsTable(sessions) {
             <th onclick="sortTable('projectName')" class="${sortCol === 'projectName' ? 'sorted' : ''}">Project${thArrow('projectName')}</th>
             <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')} <i class="info-tip" data-tip="Primary model used in the session. Models marked (sub) are subagents spawned for background tasks like code search and exploration.">i</i></th>
             <th onclick="sortTable('msgCount')" class="${sortCol === 'msgCount' ? 'sorted' : ''}">Msgs${thArrow('msgCount')} <i class="info-tip" data-tip="Total messages in the session (your messages + Claude's responses).">i</i></th>
+            <th onclick="sortTable('autopilotRatio')" class="${sortCol === 'autopilotRatio' ? 'sorted' : ''}">Autopilot${thArrow('autopilotRatio')} <i class="info-tip" data-tip="Agent responses per user message. Higher = more autonomous. 5x is excellent.">i</i></th>
             <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')} <i class="info-tip" data-tip="Estimated cost based on token usage and Anthropic's pricing. Calculated from input, output, cache read (90% discount), and cache write (25% premium) tokens.">i</i></th>
             <th onclick="sortTable('commitCount')" class="${sortCol === 'commitCount' ? 'sorted' : ''}">Commits${thArrow('commitCount')} <i class="info-tip" data-tip="Git commits that touch files Claude edited in this session. Falls back to time-window for chat-only sessions.">i</i></th>
             <th onclick="sortTable('linesAdded')" class="${sortCol === 'linesAdded' ? 'sorted' : ''}">Lines${thArrow('linesAdded')} <i class="info-tip" data-tip="Lines added / lines deleted in matched commits.">i</i></th>
@@ -2168,13 +2517,14 @@ function renderSessionsTable(sessions) {
                 <td>${s.projectName || '—'}</td>
                 <td>${modelDisplay}</td>
                 <td>${s.userMessageCount + s.assistantMessageCount}</td>
+                <td><span class="autopilot-badge">${s.autopilotRatio > 0 ? s.autopilotRatio + 'x' : '—'}</span></td>
                 <td>$${s.cost.totalCost.toFixed(2)}</td>
                 <td>${s.commitCount}</td>
                 <td><span style="color:var(--accent-green)">+${s.linesAdded.toLocaleString()}</span> / <span style="color:var(--accent-red)">-${s.linesDeleted.toLocaleString()}</span></td>
                 <td><span class="grade-badge" style="background:${gradeBg};color:${gradeColor};">${s.grade}</span></td>
               </tr>
               <tr class="expand-row" id="expand-${idx}">
-                <td colspan="8">
+                <td colspan="9">
                   <div class="expand-content">
                     ${s.commits.length > 0 ? s.commits.map(c => `
                       <div class="commit-item">
@@ -2556,7 +2906,7 @@ function bindEvents() {
     });
 
     // Animate bar fills
-    document.querySelectorAll('.survival-bar .fill, .waste-bar .fill').forEach(el => {
+    document.querySelectorAll('.survival-bar .fill, .waste-bar .fill, .metric-bar .fill').forEach(el => {
       const targetWidth = el.style.width;
       el.style.width = '0%';
       requestAnimationFrame(() => {
