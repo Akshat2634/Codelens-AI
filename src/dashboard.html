@@ -810,6 +810,19 @@
       transform: scale(1.1);
     }
     tr.orphaned { background: rgba(245, 158, 11, 0.06); }
+    .expand-chevron {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      margin-right: 6px;
+      vertical-align: middle;
+      transition: transform 0.2s ease;
+      color: var(--text-muted);
+      font-size: 0.7rem;
+      flex-shrink: 0;
+    }
+    tr:hover .expand-chevron { color: var(--accent-blue); }
+    tr.expanded .expand-chevron { transform: rotate(90deg); }
     .expand-row {
       display: none;
       background: var(--overlay-subtle);
@@ -2530,7 +2543,7 @@ function renderSessionsTable(sessions) {
   const thArrow = col => col === sortCol ? (sortOrder === 1 ? ' ^' : ' v') : '';
 
   return `<div class="sessions-section">
-    <h2>Sessions (${sessions.length})</h2>
+    <h2>Sessions (${sessions.length}) <span style="font-size:0.75rem;font-weight:400;color:var(--accent-blue);opacity:0.7;margin-left:6px;">&#9654; click a row to view git commits</span></h2>
     <div class="sessions-table-wrap">
       <table>
         <colgroup><col><col><col><col><col><col><col><col><col></colgroup>
@@ -2562,8 +2575,8 @@ function renderSessionsTable(sessions) {
               : primaryName;
             const rowClass = s.isOrphaned ? 'orphaned' : '';
             return `
-              <tr class="${rowClass}" style="cursor:pointer;" onclick="toggleExpand(${idx})">
-                <td>${formatDate(s.startTime)}</td>
+              <tr class="${rowClass}" style="cursor:pointer;" onclick="toggleExpand(${idx}, this)">
+                <td><span class="expand-chevron">&#9654;</span>${formatDate(s.startTime)}</td>
                 <td>${s.projectName || '—'}</td>
                 <td>${modelDisplay}</td>
                 <td>${s.userMessageCount + s.assistantMessageCount}</td>
@@ -2980,9 +2993,10 @@ function bindEvents() {
   }
 }
 
-window.toggleExpand = function(idx) {
+window.toggleExpand = function(idx, clickedRow) {
   const row = document.getElementById(`expand-${idx}`);
   if (row) row.classList.toggle('open');
+  if (clickedRow) clickedRow.classList.toggle('expanded');
 };
 
 window.sortTable = function(col) {
