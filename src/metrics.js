@@ -262,6 +262,45 @@ function computeEfficiencyGrade(costPerCommit, survivalRate) {
   return 'F';
 }
 
+function computeEfficiencyScore(costPerCommit, survivalRate, orphanedRate, totalCommits) {
+  if (totalCommits === 0) {
+    return {
+      score: 0, tier: 'Getting Started', letter: 'F',
+      explanation: 'No commits matched to sessions yet — this is normal for exploratory work.',
+      tip: 'Commits are matched by file overlap with Claude-edited files.',
+    };
+  }
+
+  // Score: 50 pts from cost efficiency (log scale) + 50 pts from survival rate
+  let costScore;
+  if (costPerCommit <= 2) costScore = 50;
+  else if (costPerCommit >= 50) costScore = 0;
+  else costScore = Math.max(0, 50 * (1 - Math.log(costPerCommit / 2) / Math.log(25)));
+  const survivalScore = Math.min(survivalRate, 100) / 100 * 50;
+  const score = Math.round(costScore + survivalScore);
+
+  const tier = score >= 80 ? 'Excellent' : score >= 60 ? 'Solid' : score >= 40 ? 'Developing' : score >= 20 ? 'Early' : 'Getting Started';
+  const letter = score >= 80 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : score >= 20 ? 'D' : 'F';
+
+  // Build explanation from actual metrics
+  const costAdj = costPerCommit <= 2 ? 'excellent' : costPerCommit <= 5 ? 'good' : costPerCommit <= 15 ? 'moderate' : 'high';
+  const explanation = `$${costPerCommit.toFixed(2)}/commit (${costAdj}) · ${Math.round(survivalRate)}% code survival`;
+
+  // Actionable tip based on weakest metric
+  let tip;
+  if (costScore < survivalScore) {
+    tip = 'Try shorter, focused sessions to reduce cost per commit.';
+  } else if (survivalRate < 50) {
+    tip = 'Review AI-generated code before committing to improve survival rate.';
+  } else if (orphanedRate > 40) {
+    tip = `${orphanedRate}% of sessions had no commits — some may be exploratory, which is fine.`;
+  } else {
+    tip = 'Keep it up — your efficiency is on track.';
+  }
+
+  return { score, tier, letter, explanation, tip };
+}
+
 function computeSessionGrade(session) {
   if (session.commitCount === 0) return 'F';
   const costPerCommit = session.cost.totalCost / session.commitCount;
@@ -508,9 +547,11 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   const lineSurvival = computeLineSurvival(commitsByRepo);
 
   const avgCost = totalCommits > 0 ? totalCost / totalCommits : 0;
+  const orphanedSessionRate = totalSessions > 0 ? Math.round((orphanedCount / totalSessions) * 100) : 0;
   const overallGrade = totalCommits > 0
     ? computeEfficiencyGrade(avgCost, lineSurvival.survivalRate)
     : 'F';
+  const efficiencyScore = computeEfficiencyScore(avgCost, lineSurvival.survivalRate, orphanedSessionRate, totalCommits);
 
   // ---- Daily timeline ----
   const dailyMap = new Map();
@@ -679,9 +720,10 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     avgCostPerLine: totalLinesAdded > 0 ? totalCost / totalLinesAdded : null,
     totalInputTokens,
     totalOutputTokens,
-    orphanedSessionRate: totalSessions > 0 ? Math.round((orphanedCount / totalSessions) * 100) : 0,
+    orphanedSessionRate,
     lineSurvivalRate: lineSurvival.survivalRate,
     overallGrade,
+    efficiencyScore,
     totalCommitsOnMain,
     mainBranchPct: totalCommits > 0 ? Math.round((totalCommitsOnMain / totalCommits) * 100) : 0,
     organicCommitCount: organicCommits.length,
