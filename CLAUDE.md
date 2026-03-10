@@ -2,11 +2,11 @@
 
 ## Project Overview
 
-**Codelens AI** (`claude-roi` on npm) is a CLI tool that measures ROI from AI coding agents by correlating Claude Code token usage with git commit output. It parses Claude Code session files, analyzes git history, and serves an interactive dashboard at `http://localhost:3457`.
+**Codelens AI** (`codelens-ai` on npm) is a CLI tool that measures ROI from AI coding agents by correlating Claude Code token usage with git commit output. It parses Claude Code session files, analyzes git history, and serves an interactive dashboard at `http://localhost:3457`.
 
-**Version:** 0.6.0
+**Version:** 0.8.2
 **License:** MIT
-**npm package:** `claude-roi`
+**npm package:** `codelens-ai` (alias: `claude-roi`)
 
 ## Tech Stack
 
@@ -63,13 +63,14 @@ Claude Sessions (JSONL) → claude-parser.js → [Cache] → git-analyzer.js
 ## CLI Usage
 
 ```bash
-npx claude-roi                  # defaults: 30 days, port 3457
-npx claude-roi --days 90        # custom lookback
-npx claude-roi --port 8080      # custom port
-npx claude-roi --no-open        # don't auto-open browser
-npx claude-roi --json           # dump raw JSON to stdout
-npx claude-roi --project X      # filter by project name
-npx claude-roi --refresh        # force full re-parse
+npx codelens-ai                 # defaults: 30 days, port 3457
+npx codelens-ai --days 90       # custom lookback
+npx codelens-ai --port 8080     # custom port
+npx codelens-ai --no-open       # don't auto-open browser
+npx codelens-ai --json          # dump raw JSON to stdout
+npx codelens-ai --project X     # filter by project name
+npx codelens-ai --refresh       # force full re-parse
+npx claude-roi                  # backward-compatible alias
 ```
 
 ## Development Commands
