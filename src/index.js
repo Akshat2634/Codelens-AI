@@ -99,7 +99,7 @@ async function main() {
   const days = parseInt(opts.days, 10);
 
   const invokedAs = path.basename(process.argv[1]);
-  if (invokedAs === 'claude-roi') {
+  if (invokedAs.includes('claude-roi')) {
     console.log(`\x1b[33m⚠  claude-roi has been renamed to codelens-ai\x1b[0m`);
     console.log(`   Switch to: \x1b[36mnpx codelens-ai\x1b[0m`);
     console.log('');
@@ -109,7 +109,7 @@ async function main() {
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
   const payload = await buildPayload(claudeDir, days, opts.project, opts.refresh);
-  if (payload) payload.meta.invokedAs = invokedAs;
+  if (payload) payload.meta.invokedAs = invokedAs.includes('claude-roi') ? 'claude-roi' : 'codelens-ai';
 
   if (!payload) {
     console.log('\x1b[33mNo Claude Code sessions found.\x1b[0m');
