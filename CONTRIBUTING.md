@@ -1,6 +1,6 @@
-# Contributing to claude-roi
+# Contributing to codelens-ai
 
-Thank you for your interest in contributing to claude-roi! This guide will help you get started.
+Thank you for your interest in contributing to codelens-ai! This guide will help you get started.
 
 ## How to Contribute
 

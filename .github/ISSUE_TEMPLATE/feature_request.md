@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest an idea for claude-roi
+about: Suggest an idea for codelens-ai
 title: ''
 labels: enhancement
 assignees: ''

@@ -12,29 +12,31 @@ Codelens AI ties Claude Code token usage to actual git output. It reads your loc
 
 ## Installation
 
+> **Previously published as `claude-roi`.** That package is deprecated — use `npx codelens-ai` going forward.
+
 ### Option 1: Run directly (no install)
 
 ```bash
-npx claude-roi
+npx codelens-ai
 ```
 
 ### Option 2: Install globally
 
 ```bash
 # npm
-npm install -g claude-roi
+npm install -g codelens-ai
 
 # pnpm
-pnpm add -g claude-roi
+pnpm add -g codelens-ai
 
 # yarn
-yarn global add claude-roi
+yarn global add codelens-ai
 ```
 
 Then run anywhere:
 
 ```bash
-claude-roi
+codelens-ai
 ```
 
 ### Option 3: Clone and run from source
@@ -63,7 +65,7 @@ node src/index.js
 ## Quick Start
 
 ```bash
-npx claude-roi
+npx codelens-ai
 ```
 
 This parses your `~/.claude/projects/` session data, analyzes your git repos, and opens a dashboard at `http://localhost:3457`.
@@ -88,14 +90,14 @@ This parses your `~/.claude/projects/` session data, analyzes your git repos, an
 ## CLI Options
 
 ```bash
-claude-roi                        # default: last 30 days, port 3457
-claude-roi --days 90              # look back 90 days
-claude-roi --port 8080            # custom port
-claude-roi --no-open              # don't auto-open browser
-claude-roi --json                 # dump all metrics as JSON to stdout
-claude-roi --project techops      # filter to a specific project
-claude-roi --refresh              # force full re-parse (ignore cache)
-claude-roi --autonomy             # print autonomy score to terminal and exit
+codelens-ai                        # default: last 30 days, port 3457
+codelens-ai --days 90              # look back 90 days
+codelens-ai --port 8080            # custom port
+codelens-ai --no-open              # don't auto-open browser
+codelens-ai --json                 # dump all metrics as JSON to stdout
+codelens-ai --project techops      # filter to a specific project
+codelens-ai --refresh              # force full re-parse (ignore cache)
+codelens-ai --autonomy             # print autonomy score to terminal and exit
 ```
 
 ## Dashboard
@@ -121,7 +123,7 @@ The dashboard includes:
 
 ### Caching
 
-Parsed session data is cached at `~/.cache/claude-roi/parsed-sessions.json`. On subsequent runs, only new or modified JSONL files are re-parsed, making startup near-instant. Use `--refresh` to force a full re-parse.
+Parsed session data is cached at `~/.cache/agent-analytics/parsed-sessions.json`. On subsequent runs, only new or modified JSONL files are re-parsed, making startup near-instant. Use `--refresh` to force a full re-parse.
 
 ### Cost Calculation
 
@@ -170,7 +172,7 @@ git push --follow-tags
 
 This automatically publishes to npm and creates a GitHub Release with auto-generated notes.
 
-**Setup (one-time):** Configure [trusted publishing](https://docs.npmjs.com/trusted-publishers/) on npm for the `claude-roi` package, linking it to the GitHub Actions workflow. No tokens or secrets needed.
+**Setup (one-time):** Configure [trusted publishing](https://docs.npmjs.com/trusted-publishers/) on npm for the `codelens-ai` package, linking it to the GitHub Actions workflow. No tokens or secrets needed.
 
 ## Contributing
 

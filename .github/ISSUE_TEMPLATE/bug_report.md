@@ -12,7 +12,7 @@ A clear description of what the bug is.
 
 ## Steps to Reproduce
 
-1. Run `claude-roi ...`
+1. Run `codelens-ai ...`
 2. Navigate to '...'
 3. See error
 
@@ -32,7 +32,7 @@ If applicable, add screenshots of the dashboard or terminal output.
 
 - **Node.js version**: (run `node --version`)
 - **OS**: (e.g., macOS 15, Ubuntu 24.04, Windows 11)
-- **claude-roi version**: (run `claude-roi --version`)
+- **codelens-ai version**: (run `codelens-ai --version`)
 
 ## Additional Context
 

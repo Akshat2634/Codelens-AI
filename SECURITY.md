@@ -25,7 +25,7 @@ This tool:
 
 - Reads local files from `~/.claude/projects/` (read-only)
 - Runs a local HTTP server on localhost (not exposed to network by default)
-- Stores cache at `~/.cache/claude-roi/`
+- Stores cache at `~/.cache/codelens-ai/`
 - Loads Chart.js and Inter font from CDN in the dashboard
 
 ## Known Limitations
