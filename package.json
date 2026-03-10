@@ -1,6 +1,6 @@
 {
   "name": "codelens-ai",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "Correlate AI coding agent token usage with git output to measure ROI",
   "type": "module",
   "bin": {
