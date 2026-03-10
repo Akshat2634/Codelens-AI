@@ -12,7 +12,7 @@ Codelens AI ties Claude Code token usage to actual git output. It reads your loc
 
 ## Installation
 
-> **Previously published as `claude-roi`.** That package is deprecated — use `npx codelens-ai` going forward.
+> **Previously published as `claude-roi`.** That package is deprecated — use `npx codelens-ai` going forward. The `claude-roi` command still works as a backward-compatible alias.
 
 ### Option 1: Run directly (no install)
 
