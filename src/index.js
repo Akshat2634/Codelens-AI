@@ -82,8 +82,8 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false) {
 async function main() {
   const program = new Command();
   program
-    .name('claude-roi')
-    .description('Correlate Claude Code token usage with git output to measure AI coding agent ROI')
+    .name('codelens-ai')
+    .description('Correlate AI coding agent token usage with git output to measure ROI')
     .version(VERSION)
     .option('-p, --port <number>', 'port to serve dashboard', '3457')
     .option('-d, --days <number>', 'number of days to look back', '30')
@@ -98,11 +98,18 @@ async function main() {
   const port = parseInt(opts.port, 10);
   const days = parseInt(opts.days, 10);
 
-  console.log(`\x1b[36mclaude-roi\x1b[0m v${VERSION}`);
+  const invokedAs = path.basename(process.argv[1]);
+  if (invokedAs === 'claude-roi') {
+    console.log(`\x1b[33m⚠  claude-roi has been renamed to codelens-ai\x1b[0m`);
+    console.log(`   Switch to: \x1b[36mnpx codelens-ai\x1b[0m`);
+    console.log('');
+  }
+  console.log(`\x1b[36mcodelens-ai\x1b[0m v${VERSION}`);
 
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
   const payload = await buildPayload(claudeDir, days, opts.project, opts.refresh);
+  if (payload) payload.meta.invokedAs = invokedAs;
 
   if (!payload) {
     console.log('\x1b[33mNo Claude Code sessions found.\x1b[0m');
@@ -154,7 +161,7 @@ async function main() {
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      console.error(`\x1b[31mPort ${port} is already in use.\x1b[0m Try: claude-roi --port ${port + 1}`);
+      console.error(`\x1b[31mPort ${port} is already in use.\x1b[0m Try: codelens-ai --port ${port + 1}`);
       process.exit(1);
     }
     throw err;

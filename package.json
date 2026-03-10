@@ -1,9 +1,10 @@
 {
-  "name": "claude-roi",
+  "name": "codelens-ai",
   "version": "0.8.2",
-  "description": "Correlate Claude Code token usage with git output to measure AI coding agent ROI",
+  "description": "Correlate AI coding agent token usage with git output to measure ROI",
   "type": "module",
   "bin": {
+    "codelens-ai": "src/index.js",
     "claude-roi": "src/index.js"
   },
   "main": "./src/index.js",
@@ -13,7 +14,10 @@
     "test": "npx playwright test"
   },
   "keywords": [
+    "codelens",
     "claude",
+    "codex",
+    "cursor",
     "ai",
     "roi",
     "productivity",

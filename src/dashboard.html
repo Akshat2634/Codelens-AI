@@ -1860,6 +1860,203 @@
       </div>
     </header>
 
+    <style>
+      @keyframes dep-in {
+        0%   { opacity: 0; transform: translateX(32px) scale(0.96); }
+        60%  { opacity: 1; transform: translateX(-4px) scale(1.01); }
+        100% { opacity: 1; transform: translateX(0) scale(1); }
+      }
+      @keyframes dep-out {
+        0%   { opacity: 1; transform: translateX(0) scale(1); }
+        100% { opacity: 0; transform: translateX(32px) scale(0.96); }
+      }
+      @keyframes dep-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.25), 0 16px 48px rgba(0,0,0,0.5); }
+        50%       { box-shadow: 0 0 0 6px rgba(245,158,11,0), 0 16px 48px rgba(0,0,0,0.5); }
+      }
+      @keyframes dep-scan {
+        0%   { transform: translateY(-100%); }
+        100% { transform: translateY(400%); }
+      }
+      #deprecation-banner {
+        display: none;
+        position: fixed;
+        bottom: 28px;
+        right: 28px;
+        z-index: 9999;
+        width: 280px;
+        max-width: calc(100vw - 40px);
+        background: linear-gradient(160deg, var(--glass-bg-from) 0%, var(--glass-bg-to) 100%);
+        border: 1px solid rgba(245,158,11,0.45);
+        border-radius: 12px;
+        overflow: hidden;
+        font-family: var(--font-body);
+        backdrop-filter: blur(20px) saturate(1.4);
+        -webkit-backdrop-filter: blur(20px) saturate(1.4);
+      }
+      #deprecation-banner.visible {
+        animation: dep-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards,
+                   dep-pulse 2.4s ease-in-out 0.5s infinite;
+      }
+      #deprecation-banner.hiding {
+        animation: dep-out 0.22s ease-in forwards;
+      }
+      /* Light theme overrides */
+      [data-theme="light"] #deprecation-banner {
+        background: linear-gradient(160deg, rgba(255,252,245,0.97) 0%, rgba(255,248,230,0.95) 100%);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(245,158,11,0.15);
+      }
+      [data-theme="light"] #dep-message { color: #475569; }
+      [data-theme="light"] #dep-message strong { color: #0f172a; }
+      [data-theme="light"] #dep-cmd-row {
+        background: rgba(6,182,212,0.06);
+        border-color: rgba(6,182,212,0.3);
+      }
+      [data-theme="light"] #dep-copy {
+        background: rgba(6,182,212,0.1);
+        border-color: rgba(6,182,212,0.25);
+        color: #475569;
+      }
+      [data-theme="light"] #dep-copy:hover { background: rgba(6,182,212,0.2); color: #0891b2; }
+      #dep-scanline {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+        border-radius: 12px;
+        z-index: 0;
+      }
+      #dep-scanline::after {
+        content: '';
+        position: absolute;
+        left: 0; right: 0;
+        height: 40%;
+        background: linear-gradient(to bottom, transparent, rgba(245,158,11,0.04), transparent);
+        animation: dep-scan 3.5s linear infinite;
+      }
+      #dep-top-bar {
+        height: 3px;
+        background: linear-gradient(90deg, transparent 0%, var(--accent-orange) 40%, var(--accent-cyan) 100%);
+        position: relative;
+        z-index: 1;
+      }
+      #dep-body {
+        padding: 14px 16px 16px;
+        position: relative;
+        z-index: 1;
+      }
+      #dep-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
+      #dep-label {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      #dep-dot {
+        width: 7px; height: 7px;
+        border-radius: 50%;
+        background: var(--accent-orange);
+        box-shadow: 0 0 8px var(--accent-orange);
+        flex-shrink: 0;
+        animation: dep-pulse 1.8s ease-in-out infinite;
+      }
+      #dep-title {
+        font-family: var(--font-display);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--accent-orange);
+      }
+      #dep-close {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+        padding: 3px;
+        border-radius: 4px;
+        transition: color 0.15s, background 0.15s;
+      }
+      #dep-close:hover { color: var(--text-secondary); background: var(--overlay-strong); }
+      #dep-message {
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.55;
+        margin-bottom: 12px;
+      }
+      #dep-message strong { color: var(--text-primary); font-weight: 600; }
+      #dep-cmd-row {
+        display: flex;
+        align-items: stretch;
+        gap: 0;
+        border: 1px solid rgba(6,182,212,0.25);
+        border-radius: 8px;
+        overflow: hidden;
+        background: rgba(6,182,212,0.04);
+      }
+      #dep-cmd {
+        flex: 1;
+        font-family: var(--font-display);
+        font-size: 11.5px;
+        font-weight: 500;
+        color: var(--accent-cyan);
+        padding: 8px 10px;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #dep-copy {
+        background: rgba(6,182,212,0.08);
+        border: none;
+        border-left: 1px solid rgba(6,182,212,0.2);
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 0 12px;
+        font-size: 13px;
+        transition: background 0.15s, color 0.15s;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      #dep-copy:hover { background: rgba(6,182,212,0.18); color: var(--accent-cyan); }
+      #dep-copy-label {
+        font-family: var(--font-display);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+    </style>
+    <div id="deprecation-banner">
+      <div id="dep-scanline"></div>
+      <div id="dep-top-bar"></div>
+      <div id="dep-body">
+        <div id="dep-header">
+          <div id="dep-label">
+            <div id="dep-dot"></div>
+            <span id="dep-title">Package Renamed</span>
+          </div>
+          <button id="dep-close">✕</button>
+        </div>
+        <div id="dep-message">
+          <strong>claude-roi</strong> is deprecated. Switch to the new agent-neutral package:
+        </div>
+        <div id="dep-cmd-row">
+          <span id="dep-cmd">npx codelens-ai</span>
+          <button id="dep-copy" title="Copy to clipboard">
+            <span id="dep-copy-label">Copy</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div id="app">
       <div class="loading">
         <div class="spinner"></div>
@@ -2050,6 +2247,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const res = await fetch('/api/all');
     DATA = await res.json();
+    if (DATA.meta?.invokedAs === 'claude-roi') {
+      const banner = document.getElementById('deprecation-banner');
+      banner.style.display = 'block';
+      requestAnimationFrame(() => banner.classList.add('visible'));
+      document.getElementById('dep-close').addEventListener('click', () => {
+        banner.classList.add('hiding');
+        banner.addEventListener('animationend', () => banner.style.display = 'none', { once: true });
+      });
+      document.getElementById('dep-copy').addEventListener('click', () => {
+        navigator.clipboard.writeText('npx codelens-ai').then(() => {
+          const lbl = document.getElementById('dep-copy-label');
+          const btn = document.getElementById('dep-copy');
+          lbl.textContent = '✓ Done';
+          btn.style.color = 'var(--accent-green)';
+          btn.style.background = 'rgba(34,211,168,0.12)';
+          setTimeout(() => { lbl.textContent = 'Copy'; btn.style.color = ''; btn.style.background = ''; }, 1800);
+        });
+      });
+    }
     render();
   } catch (err) {
     document.getElementById('app').innerHTML = `
