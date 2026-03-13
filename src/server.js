@@ -25,14 +25,14 @@ export function createServer(initialPayload, rebuildFn) {
   app.post('/api/refresh', async (req, res) => {
     if (!rebuildFn) return res.status(501).json({ error: 'Refresh not available' });
     try {
-      console.log('\x1b[36m[refresh]\x1b[0m Re-parsing sessions and recomputing metrics...');
+      console.log('  \x1b[36m▸\x1b[0m \x1b[36m[refresh]\x1b[0m Re-parsing sessions and recomputing metrics...');
       const newPayload = await rebuildFn();
       if (!newPayload) return res.status(404).json({ error: 'No sessions found after refresh' });
       payload = newPayload;
-      console.log('\x1b[32m[refresh]\x1b[0m Done');
+      console.log('  \x1b[32m✔\x1b[0m \x1b[32m[refresh]\x1b[0m Done');
       res.json({ ok: true });
     } catch (err) {
-      console.error('\x1b[31m[refresh]\x1b[0m Error:', err.message);
+      console.error('  \x1b[31m✖\x1b[0m \x1b[31m[refresh]\x1b[0m Error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });
