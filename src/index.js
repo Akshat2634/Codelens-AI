@@ -15,6 +15,20 @@ const { version: VERSION } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8')
 );
 
+// ── pretty CLI output helpers ──
+const c = {
+  reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m',
+  green: '\x1b[32m', yellow: '\x1b[33m', cyan: '\x1b[36m', red: '\x1b[31m',
+};
+const icon = {
+  ok: `${c.green}✔${c.reset}`,
+  dot: `${c.cyan}◆${c.reset}`,
+  arrow: `${c.cyan}▸${c.reset}`,
+  warn: `${c.yellow}⚠${c.reset}`,
+  err: `${c.red}✖${c.reset}`,
+};
+const fmt = (ms) => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+
 async function buildPayload(claudeDir, days, project, forceRefresh = false) {
   // Step 1: Parse sessions (with caching)
   let sessions;
@@ -23,7 +37,7 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false) {
 
   if (forceRefresh) {
     deleteCache();
-    console.log('Cache cleared, performing full parse...');
+    console.log(`  ${icon.arrow} Cache cleared, performing full parse...`);
   }
 
   const cached = forceRefresh ? null : loadCache();
@@ -38,18 +52,18 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false) {
     if (newCount === 0 && modifiedCount === 0 && deletedCount === 0) {
       sessions = cached.sessions;
       fileIndex = cached.fileIndex;
-      console.log(`Parsing sessions... ${cached.sessions.length} cached (${Date.now() - startParse}ms)`);
+      console.log(`  ${icon.ok} Parsing sessions ${c.dim}── ${cached.sessions.length} cached (${fmt(Date.now() - startParse)})${c.reset}`);
     } else {
       const { sessions: freshSessions, fileIndex: freshIndex } = await parseAllProjects(claudeDir, days, project);
       sessions = freshSessions;
       fileIndex = freshIndex;
-      console.log(`Parsing sessions... ${newCount} new, ${modifiedCount} updated, ${Math.max(0, cachedCount)} cached (${Date.now() - startParse}ms)`);
+      console.log(`  ${icon.ok} Parsing sessions ${c.dim}── ${newCount} new, ${modifiedCount} updated, ${Math.max(0, cachedCount)} cached (${fmt(Date.now() - startParse)})${c.reset}`);
     }
   } else {
     const result = await parseAllProjects(claudeDir, days, project);
     sessions = result.sessions;
     fileIndex = result.fileIndex;
-    console.log(`Parsing sessions... ${sessions.length} parsed (${Date.now() - startParse}ms)`);
+    console.log(`  ${icon.ok} Parsing sessions ${c.dim}── ${sessions.length} parsed (${fmt(Date.now() - startParse)})${c.reset}`);
   }
 
   if (sessions.length === 0) {
@@ -63,11 +77,11 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false) {
   for (const repoPath of repoPathsSet) {
     commitsByRepo[repoPath] = analyzeGitRepo(repoPath, days);
   }
-  console.log(`Analyzing ${repoPathsSet.size} git repo(s)... done (${Date.now() - startGit}ms)`);
+  console.log(`  ${icon.ok} Analyzing git repos ${c.dim}── ${repoPathsSet.size} repos (${fmt(Date.now() - startGit)})${c.reset}`);
 
   // Step 3: Correlate sessions with commits
   const { correlatedSessions, organicCommits } = correlateSessions(sessions, commitsByRepo);
-  console.log('Correlating sessions with commits... done');
+  console.log(`  ${icon.ok} Correlating sessions ${c.dim}── done${c.reset}`);
 
   // Step 4: Compute metrics
   const payload = computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days);
@@ -100,11 +114,10 @@ async function main() {
 
   const invokedAs = path.basename(process.argv[1]);
   if (invokedAs.includes('claude-roi')) {
-    console.log(`\x1b[33m⚠  claude-roi has been renamed to codelens-ai\x1b[0m`);
-    console.log(`   Switch to: \x1b[36mnpx codelens-ai\x1b[0m`);
-    console.log('');
+    console.log(`  ${icon.warn} ${c.yellow}claude-roi has been renamed to codelens-ai${c.reset}`);
+    console.log(`    Switch to: ${c.cyan}npx codelens-ai${c.reset}\n`);
   }
-  console.log(`\x1b[36mcodelens-ai\x1b[0m v${VERSION}`);
+  console.log(`${icon.dot} ${c.bold}${c.cyan}codelens-ai${c.reset} v${VERSION}\n`);
 
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
@@ -112,8 +125,8 @@ async function main() {
   if (payload) payload.meta.invokedAs = invokedAs.includes('claude-roi') ? 'claude-roi' : 'codelens-ai';
 
   if (!payload) {
-    console.log('\x1b[33mNo Claude Code sessions found.\x1b[0m');
-    console.log('Make sure you have used Claude Code and session files exist in ~/.claude/projects/');
+    console.log(`  ${icon.warn} ${c.yellow}No Claude Code sessions found.${c.reset}`);
+    console.log(`    Make sure you have used Claude Code and session files exist in ~/.claude/projects/`);
     process.exit(0);
   }
 
@@ -138,7 +151,7 @@ async function main() {
     console.log(`  ${line}`);
     if (am.topVerificationCommands.length > 0) {
       const top3 = am.topVerificationCommands.slice(0, 3)
-        .map(c => `${c.command} (${c.count})`).join(', ');
+        .map(cmd => `${cmd.command} (${cmd.count})`).join(', ');
       console.log(`  Top Tests: ${top3}`);
     }
     console.log('');
@@ -150,7 +163,7 @@ async function main() {
   const app = createServer(payload, rebuild);
   const server = app.listen(port, () => {
     const url = `http://localhost:${port}`;
-    console.log(`\x1b[32mDashboard:\x1b[0m ${url}`);
+    console.log(`\n  ${icon.ok} ${c.green}Dashboard:${c.reset} ${c.bold}${url}${c.reset}`);
 
     if (opts.open !== false) {
       import('open').then(mod => mod.default(url)).catch(() => {
@@ -161,7 +174,7 @@ async function main() {
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      console.error(`\x1b[31mPort ${port} is already in use.\x1b[0m Try: codelens-ai --port ${port + 1}`);
+      console.error(`  ${icon.err} ${c.red}Port ${port} is already in use.${c.reset} Try: codelens-ai --port ${port + 1}`);
       process.exit(1);
     }
     throw err;
@@ -169,6 +182,6 @@ async function main() {
 }
 
 main().catch(err => {
-  console.error('\x1b[31mError:\x1b[0m', err.message);
+  console.error(`  ${icon.err} ${c.red}Error:${c.reset}`, err.message);
   process.exit(1);
 });
