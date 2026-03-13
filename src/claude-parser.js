@@ -249,6 +249,8 @@ async function parseSessionFile(filePath) {
   const session = createEmptySession(sessionId);
   const seenRequestIds = new Set();
   const modelTokens = {}; // model -> { input, output, cacheRead, cacheCreate }
+  const dailyModelTokens = {}; // dateStr -> model -> { input, output, cacheRead, cacheCreate }
+  let lastSeenTimestamp = null;
 
   const rl = createInterface({
     input: createReadStream(filePath),
@@ -279,6 +281,7 @@ async function parseSessionFile(filePath) {
 
       // Track timestamps
       if (obj.timestamp) {
+        lastSeenTimestamp = obj.timestamp;
         if (!session.startTime || obj.timestamp < session.startTime) {
           session.startTime = obj.timestamp;
         }
@@ -308,6 +311,7 @@ async function parseSessionFile(filePath) {
 
     // Track timestamps
     if (obj.timestamp) {
+      lastSeenTimestamp = obj.timestamp;
       if (!session.startTime || obj.timestamp < session.startTime) {
         session.startTime = obj.timestamp;
       }
@@ -344,6 +348,21 @@ async function parseSessionFile(filePath) {
         modelTokens[model].output += output;
         modelTokens[model].cacheRead += cacheRead;
         modelTokens[model].cacheCreate += cacheCreate;
+
+        // Track per-day per-model tokens for daily usage attribution
+        const msgTs = obj.timestamp || lastSeenTimestamp;
+        if (msgTs) {
+          const dt = new Date(msgTs);
+          const dateStr = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+          if (!dailyModelTokens[dateStr]) dailyModelTokens[dateStr] = {};
+          if (!dailyModelTokens[dateStr][model]) {
+            dailyModelTokens[dateStr][model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 };
+          }
+          dailyModelTokens[dateStr][model].input += input;
+          dailyModelTokens[dateStr][model].output += output;
+          dailyModelTokens[dateStr][model].cacheRead += cacheRead;
+          dailyModelTokens[dateStr][model].cacheCreate += cacheCreate;
+        }
       }
 
       session.assistantMessageCount++;
@@ -396,6 +415,27 @@ async function parseSessionFile(filePath) {
     }
 
     session.cost = { inputCost, outputCost, cacheReadCost, cacheCreationCost, totalCost };
+  }
+
+  // Compute per-day usage with accurate per-model cost
+  session.dailyUsage = {};
+  for (const [dateStr, models] of Object.entries(dailyModelTokens)) {
+    let dayCost = 0;
+    let dayInput = 0, dayOutput = 0, dayCacheRead = 0, dayCacheCreate = 0;
+    for (const [model, tokens] of Object.entries(models)) {
+      dayCost += calculateCost(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model);
+      dayInput += tokens.input;
+      dayOutput += tokens.output;
+      dayCacheRead += tokens.cacheRead;
+      dayCacheCreate += tokens.cacheCreate;
+    }
+    session.dailyUsage[dateStr] = {
+      inputTokens: dayInput,
+      outputTokens: dayOutput,
+      cacheReadTokens: dayCacheRead,
+      cacheCreationTokens: dayCacheCreate,
+      cost: dayCost,
+    };
   }
 
   // Calculate duration
@@ -480,6 +520,21 @@ function mergeSubagentIntoSession(parent, sub) {
   parent.totalBashCalls += sub.totalBashCalls;
   parent.verificationBashCalls += sub.verificationBashCalls;
   parent.bashCommands.push(...sub.bashCommands);
+
+  // Merge daily usage
+  if (sub.dailyUsage) {
+    if (!parent.dailyUsage) parent.dailyUsage = {};
+    for (const [dateStr, dayData] of Object.entries(sub.dailyUsage)) {
+      if (!parent.dailyUsage[dateStr]) {
+        parent.dailyUsage[dateStr] = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 0 };
+      }
+      parent.dailyUsage[dateStr].inputTokens += dayData.inputTokens;
+      parent.dailyUsage[dateStr].outputTokens += dayData.outputTokens;
+      parent.dailyUsage[dateStr].cacheReadTokens += dayData.cacheReadTokens;
+      parent.dailyUsage[dateStr].cacheCreationTokens += dayData.cacheCreationTokens;
+      parent.dailyUsage[dateStr].cost += dayData.cost;
+    }
+  }
 
   // Merge files
   for (const f of sub.filesWritten) {

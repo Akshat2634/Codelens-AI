@@ -649,6 +649,11 @@
       bottom: auto;
       top: calc(100% + 8px);
     }
+    /* First column tooltip: anchor left so it doesn't clip outside the table */
+    thead th:first-child .info-tip:hover::after {
+      right: auto;
+      left: -12px;
+    }
     /* Make table header tooltip icons more visible */
     thead .info-tip {
       background: var(--glass-border-hover);
@@ -743,9 +748,9 @@
       table-layout: fixed;
     }
     /* Column widths: Date | Project | Model | Msgs | Autopilot | Cost | Commits | Lines | Grade */
-    table col:nth-child(1) { width: 13%; }
-    table col:nth-child(2) { width: 14%; }
-    table col:nth-child(3) { width: 18%; }
+    table col:nth-child(1) { width: 15%; }
+    table col:nth-child(2) { width: 13%; }
+    table col:nth-child(3) { width: 17%; }
     table col:nth-child(4) { width: 7%; }
     table col:nth-child(5) { width: 10%; }
     table col:nth-child(6) { width: 8%; }
@@ -1855,6 +1860,7 @@
       <p class="tagline">Correlates your AI coding agent's token spend with actual git output — see what shipped, what churned, and what it cost.</p>
       <div class="meta-info">
         <span class="badge" id="date-range"></span>
+        <span class="badge" id="timezone-badge"></span>
         <span class="badge">All data stays local</span>
         <span class="badge">No tracking, no telemetry</span>
       </div>
@@ -2282,6 +2288,9 @@ function render() {
     ? `${fmtDate(d.meta.startDate)} – ${fmtDate(d.meta.endDate)}`
     : `Last ${d.meta.daysAnalyzed} days`;
   document.getElementById('date-range').textContent = dateLabel;
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const tzShort = new Date().toLocaleTimeString(undefined, { timeZoneName: 'short' }).split(' ').pop();
+  document.getElementById('timezone-badge').textContent = `${tzShort} (${tz})`;
   const summary = d.summary;
   const t = d.tokenAnalytics;
 
@@ -2765,7 +2774,7 @@ function renderSessionsTable(sessions) {
         <colgroup><col><col><col><col><col><col><col><col><col></colgroup>
         <thead>
           <tr>
-            <th onclick="sortTable('startTime')" class="${sortCol === 'startTime' ? 'sorted' : ''}">Date${thArrow('startTime')}</th>
+            <th onclick="sortTable('startTime')" class="${sortCol === 'startTime' ? 'sorted' : ''}">Date${thArrow('startTime')} <i class="info-tip" data-tip="Session start time in your local timezone. Multi-day sessions show an arrow (↳) with the end date below.">i</i></th>
             <th onclick="sortTable('projectName')" class="${sortCol === 'projectName' ? 'sorted' : ''}">Project${thArrow('projectName')}</th>
             <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')} <i class="info-tip" data-tip="Primary model used in the session. Models marked (sub) are subagents spawned for background tasks like code search and exploration.">i</i></th>
             <th onclick="sortTable('msgCount')" class="${sortCol === 'msgCount' ? 'sorted' : ''}">Msgs${thArrow('msgCount')} <i class="info-tip" data-tip="Total messages in the session (your messages + Claude's responses).">i</i></th>
@@ -2792,7 +2801,7 @@ function renderSessionsTable(sessions) {
             const rowClass = s.isOrphaned ? 'orphaned' : '';
             return `
               <tr class="${rowClass}" style="cursor:pointer;" onclick="toggleExpand(${idx}, this)">
-                <td><span class="expand-chevron">&#9654;</span>${formatDate(s.startTime)}</td>
+                <td><span class="expand-chevron">&#9654;</span>${formatDateRange(s.startTime, s.endTime)}</td>
                 <td>${s.projectName || '—'}</td>
                 <td>${modelDisplay}</td>
                 <td>${s.userMessageCount + s.assistantMessageCount}</td>
@@ -2852,6 +2861,18 @@ function formatDate(iso) {
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
+function formatDateRange(startIso, endIso) {
+  if (!startIso) return '—';
+  const start = new Date(startIso);
+  const end = endIso ? new Date(endIso) : null;
+  const startStr = formatDate(startIso);
+  if (!end) return startStr;
+  const sameDay = start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth() && start.getDate() === end.getDate();
+  if (sameDay) return startStr;
+  const endDateStr = end.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+  return `<div style="line-height:1.3;">${startStr}<br><span style="color:var(--accent-blue);font-size:0.7rem;opacity:0.8;">↳ ${endDateStr}</span></div>`;
+}
+
 function initCharts() {
   const isLight = getTheme() === 'light';
   Chart.defaults.color = isLight ? '#475569' : '#94a3b8';
@@ -2873,7 +2894,7 @@ function initCharts() {
   new Chart(document.getElementById('chart-token-burn'), {
     type: 'bar',
     data: {
-      labels: dailyTokens.map(d => d.date),
+      labels: dailyTokens.map(d => new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })),
       datasets: [
         {
           label: 'Input',
@@ -2947,7 +2968,7 @@ function initCharts() {
   timelineChart = new Chart(document.getElementById('chart-timeline'), {
     type: 'line',
     data: {
-      labels: daily.map(d => d.date),
+      labels: daily.map(d => new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })),
       datasets: [
         {
           label: 'Cost ($)',

@@ -555,23 +555,44 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
 
   // ---- Daily timeline ----
   const dailyMap = new Map();
-  for (const session of correlatedSessions) {
-    const d = new Date(session.startTime);
-    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const ensureDay = (date) => {
     if (!dailyMap.has(date)) {
       dailyMap.set(date, { date, cost: 0, sessions: 0, commits: 0, linesAdded: 0, linesDeleted: 0, netLines: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0 });
     }
-    const day = dailyMap.get(date);
-    day.cost += session.cost.totalCost;
-    day.sessions++;
-    day.commits += session.commitCount;
-    day.linesAdded += session.linesAdded;
-    day.linesDeleted += session.linesDeleted;
-    day.netLines += session.netLines;
-    day.inputTokens += session.totalInputTokens;
-    day.outputTokens += session.totalOutputTokens;
-    day.cacheReadTokens += session.cacheReadTokens;
-    day.totalTokens += session.totalInputTokens + session.totalOutputTokens + session.cacheReadTokens + session.cacheCreationTokens;
+    return dailyMap.get(date);
+  };
+  const toDateStr = (ts) => {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  for (const session of correlatedSessions) {
+    const startDate = toDateStr(session.startTime);
+
+    // Distribute cost and tokens across actual usage days via dailyUsage
+    const usage = session.dailyUsage && Object.keys(session.dailyUsage).length > 0
+      ? session.dailyUsage
+      : { [startDate]: { inputTokens: session.totalInputTokens, outputTokens: session.totalOutputTokens, cacheReadTokens: session.cacheReadTokens, cacheCreationTokens: session.cacheCreationTokens, cost: session.cost.totalCost } };
+    for (const [date, dayData] of Object.entries(usage)) {
+      const day = ensureDay(date);
+      day.cost += dayData.cost;
+      day.inputTokens += dayData.inputTokens;
+      day.outputTokens += dayData.outputTokens;
+      day.cacheReadTokens += dayData.cacheReadTokens;
+      day.totalTokens += dayData.inputTokens + dayData.outputTokens + dayData.cacheReadTokens + (dayData.cacheCreationTokens || 0);
+    }
+
+    // Session count attributed to start date
+    ensureDay(startDate).sessions++;
+
+    // Commits attributed to their own timestamps
+    for (const commit of session.commits) {
+      const commitDate = toDateStr(commit.timestamp);
+      const cDay = ensureDay(commitDate);
+      cDay.commits++;
+      cDay.linesAdded += commit.totalAdded || 0;
+      cDay.linesDeleted += commit.totalDeleted || 0;
+      cDay.netLines += (commit.totalAdded || 0) - (commit.totalDeleted || 0);
+    }
   }
   const daily = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));
 
@@ -660,9 +681,14 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
       const hour = d.getHours();
       heatmap[dayOfWeek][hour]++;
     }
-    // Cost is still attributed to session start time
-    const sd = new Date(session.startTime);
-    heatmapCost[sd.getDay()][sd.getHours()] += session.cost.totalCost;
+    // Distribute cost across actual usage days via dailyUsage
+    const usage = session.dailyUsage && Object.keys(session.dailyUsage).length > 0
+      ? session.dailyUsage
+      : { [toDateStr(session.startTime)]: { cost: session.cost.totalCost } };
+    for (const [dateStr, dayData] of Object.entries(usage)) {
+      const dd = new Date(dateStr + 'T12:00:00'); // noon local to get correct day-of-week
+      heatmapCost[dd.getDay()][12] += dayData.cost;
+    }
   }
 
   // ---- Per-project breakdown ----
@@ -699,13 +725,27 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   const mkPeriod = () => ({ cost: 0, sessions: 0, commits: 0, tokens: 0 });
   const costByPeriod = { today: mkPeriod(), week: mkPeriod(), month: mkPeriod(), allTime: mkPeriod() };
   for (const session of correlatedSessions) {
+    const startDateStr = toDateStr(session.startTime);
+
+    // Distribute cost and tokens across actual usage days
+    const usage = session.dailyUsage && Object.keys(session.dailyUsage).length > 0
+      ? session.dailyUsage
+      : { [startDateStr]: { inputTokens: session.totalInputTokens, outputTokens: session.totalOutputTokens, cacheReadTokens: session.cacheReadTokens, cacheCreationTokens: session.cacheCreationTokens, cost: session.cost.totalCost } };
+    for (const [dateStr, dayData] of Object.entries(usage)) {
+      const dDate = new Date(dateStr + 'T12:00:00');
+      const dTok = dayData.inputTokens + dayData.outputTokens + dayData.cacheReadTokens + (dayData.cacheCreationTokens || 0);
+      costByPeriod.allTime.cost += dayData.cost; costByPeriod.allTime.tokens += dTok;
+      if (dDate >= startOfMonth) { costByPeriod.month.cost += dayData.cost; costByPeriod.month.tokens += dTok; }
+      if (dDate >= startOfWeek) { costByPeriod.week.cost += dayData.cost; costByPeriod.week.tokens += dTok; }
+      if (dateStr === todayStr) { costByPeriod.today.cost += dayData.cost; costByPeriod.today.tokens += dTok; }
+    }
+
+    // Sessions count once (on start date), commits count on their own dates
+    costByPeriod.allTime.sessions++; costByPeriod.allTime.commits += session.commitCount;
     const sDate = new Date(session.startTime);
-    const sDateStr = `${sDate.getFullYear()}-${String(sDate.getMonth() + 1).padStart(2, '0')}-${String(sDate.getDate()).padStart(2, '0')}`;
-    const sTok = session.totalInputTokens + session.totalOutputTokens + session.cacheReadTokens + session.cacheCreationTokens;
-    costByPeriod.allTime.cost += session.cost.totalCost; costByPeriod.allTime.sessions++; costByPeriod.allTime.commits += session.commitCount; costByPeriod.allTime.tokens += sTok;
-    if (sDate >= startOfMonth) { costByPeriod.month.cost += session.cost.totalCost; costByPeriod.month.sessions++; costByPeriod.month.commits += session.commitCount; costByPeriod.month.tokens += sTok; }
-    if (sDate >= startOfWeek) { costByPeriod.week.cost += session.cost.totalCost; costByPeriod.week.sessions++; costByPeriod.week.commits += session.commitCount; costByPeriod.week.tokens += sTok; }
-    if (sDateStr === todayStr) { costByPeriod.today.cost += session.cost.totalCost; costByPeriod.today.sessions++; costByPeriod.today.commits += session.commitCount; costByPeriod.today.tokens += sTok; }
+    if (sDate >= startOfMonth) { costByPeriod.month.sessions++; costByPeriod.month.commits += session.commitCount; }
+    if (sDate >= startOfWeek) { costByPeriod.week.sessions++; costByPeriod.week.commits += session.commitCount; }
+    if (startDateStr === todayStr) { costByPeriod.today.sessions++; costByPeriod.today.commits += session.commitCount; }
   }
 
   const summary = {
