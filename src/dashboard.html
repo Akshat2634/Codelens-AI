@@ -2245,6 +2245,8 @@ let sortCol = 'startTime';
 let sortOrder = -1;
 let timelineChart = null;
 let timelineLogScale = false;
+let tokenBurnChart = null;
+let tokenBurnPercentMode = false;
 
 document.addEventListener('DOMContentLoaded', async () => {
   initTheme();
@@ -2308,6 +2310,7 @@ function render() {
       <div class="chart-card full-width">
         <div class="chart-header">
           <h3>Token Burn Rate <i class="info-tip" data-tip="Daily token consumption stacked by type (input/output/cache). Dashed orange line shows cumulative total — watch it climb.">i</i></h3>
+          <button class="scale-toggle" onclick="toggleTokenBurnPercent()">Split view</button>
         </div>
         <div class="chart-container"><canvas id="chart-token-burn"></canvas></div>
       </div>
@@ -2327,8 +2330,8 @@ function render() {
         <div class="chart-container"><canvas id="chart-tools"></canvas></div>
       </div>
       <div class="chart-card">
-        <h3>Session Length vs Efficiency <i class="info-tip" data-tip="Sessions grouped by message count (1-50, 51-100, etc). Blue bars = average cost per commit for that group. Purple bars = number of sessions. Find your sweet spot — the group with the lowest blue bar.">i</i></h3>
-        <div class="chart-container"><canvas id="chart-buckets"></canvas></div>
+        <h3>Cost per Commit by Model <i class="info-tip" data-tip="Compare how much each model costs per commit. Lower blue bars = better value. Purple bars show commit volume for confidence. Use this to decide which model to use for different tasks.">i</i></h3>
+        <div class="chart-container"><canvas id="chart-model-efficiency"></canvas></div>
       </div>
       <div class="chart-card">
         <h3>Productivity Heatmap <i class="info-tip" data-tip="Each cell = commits produced during that hour and day of week. Darker green = more commits. Find your peak productivity windows.">i</i></h3>
@@ -2891,7 +2894,7 @@ function initCharts() {
   let cumulative = 0;
   const cumulativeData = dailyTokens.map(d => { cumulative += (d.totalTokens || 0); return cumulative; });
 
-  new Chart(document.getElementById('chart-token-burn'), {
+  tokenBurnChart = new Chart(document.getElementById('chart-token-burn'), {
     type: 'bar',
     data: {
       labels: dailyTokens.map(d => new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })),
@@ -3123,25 +3126,29 @@ function initCharts() {
     },
   });
 
-  // Session buckets
-  const buckets = DATA.sessionBuckets;
-  const bucketLabels = Object.keys(buckets);
-  new Chart(document.getElementById('chart-buckets'), {
+  // Cost per Commit by Model
+  const modelEff = DATA.modelBreakdown;
+  const modelEffLabels = Object.keys(modelEff).filter(k => modelEff[k].commits > 0);
+  const modelEffColors = { opus: '#a855f7', sonnet: '#3b82f6', haiku: '#22d3a8', unknown: '#94a3b8' };
+  new Chart(document.getElementById('chart-model-efficiency'), {
     type: 'bar',
     data: {
-      labels: bucketLabels,
+      labels: modelEffLabels.map(m => m.charAt(0).toUpperCase() + m.slice(1) + ' ($' + modelEff[m].cost.toFixed(0) + ' total)'),
       datasets: [
         {
           label: 'Avg $/Commit',
-          data: bucketLabels.map(b => buckets[b].avgCostPerCommit),
-          backgroundColor: '#3b82f6',
+          data: modelEffLabels.map(m => modelEff[m].avgCostPerCommit),
+          backgroundColor: modelEffLabels.map(m => modelEffColors[m] || '#94a3b8'),
           borderRadius: 4,
           yAxisID: 'y',
         },
         {
-          label: 'Sessions',
-          data: bucketLabels.map(b => buckets[b].sessions),
-          backgroundColor: 'rgba(168,85,247,0.4)',
+          label: 'Commits',
+          data: modelEffLabels.map(m => Math.round(modelEff[m].commits)),
+          backgroundColor: modelEffLabels.map(m => {
+            const c = modelEffColors[m] || '#94a3b8';
+            return c + '40';
+          }),
           borderRadius: 4,
           yAxisID: 'y1',
         },
@@ -3150,10 +3157,30 @@ function initCharts() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { position: 'top' } },
+      plugins: {
+        legend: { position: 'top' },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              if (ctx.datasetIndex === 0) return ` Avg $/Commit: $${ctx.parsed.y.toFixed(2)}`;
+              return ` Commits: ${ctx.parsed.y}`;
+            },
+            afterBody: (items) => {
+              const idx = items[0].dataIndex;
+              const m = modelEffLabels[idx];
+              const d = modelEff[m];
+              const lines = [];
+              lines.push(`Sessions: ${d.sessions}`);
+              lines.push(`Total: $${d.cost.toFixed(2)} | ${formatTokens(d.tokens)} tokens`);
+              if (d.tokensPerCommit) lines.push(`${formatTokens(d.tokensPerCommit)} tokens/commit`);
+              return lines;
+            },
+          },
+        },
+      },
       scales: {
-        y: { type: 'linear', position: 'left', title: { display: true, text: 'Avg $/Commit' } },
-        y1: { type: 'linear', position: 'right', title: { display: true, text: 'Sessions' }, grid: { drawOnChartArea: false } },
+        y: { type: 'linear', position: 'left', title: { display: true, text: 'Avg $/Commit' }, ticks: { callback: v => '$' + v.toFixed(1) } },
+        y1: { type: 'linear', position: 'right', title: { display: true, text: 'Commits' }, grid: { drawOnChartArea: false } },
       },
     },
   });
@@ -3263,8 +3290,91 @@ window.toggleTimelineScale = function() {
   timelineChart.options.scales.y.type = scaleType;
   timelineChart.options.scales.y1.type = scaleType;
   timelineChart.update();
-  const btn = document.querySelector('.scale-toggle');
+  const btn = document.querySelector('#chart-timeline').closest('.chart-card').querySelector('.scale-toggle');
   if (btn) btn.textContent = timelineLogScale ? 'Linear scale' : 'Log scale';
+};
+
+window.toggleTokenBurnPercent = function() {
+  if (!tokenBurnChart) return;
+  tokenBurnPercentMode = !tokenBurnPercentMode;
+  const dailyTokens = DATA.daily;
+  if (tokenBurnPercentMode) {
+    // Switch to split line view — each token type gets its own line
+    tokenBurnChart.data.datasets[0].type = 'line';
+    tokenBurnChart.data.datasets[0].borderColor = 'rgba(59, 130, 246, 1)';
+    tokenBurnChart.data.datasets[0].backgroundColor = 'rgba(59, 130, 246, 0.1)';
+    tokenBurnChart.data.datasets[0].fill = true;
+    tokenBurnChart.data.datasets[0].stack = undefined;
+    tokenBurnChart.data.datasets[0].borderWidth = 2;
+    tokenBurnChart.data.datasets[0].pointRadius = 2;
+    tokenBurnChart.data.datasets[0].tension = 0.3;
+
+    tokenBurnChart.data.datasets[1].type = 'line';
+    tokenBurnChart.data.datasets[1].borderColor = 'rgba(168, 85, 247, 1)';
+    tokenBurnChart.data.datasets[1].backgroundColor = 'rgba(168, 85, 247, 0.1)';
+    tokenBurnChart.data.datasets[1].fill = true;
+    tokenBurnChart.data.datasets[1].stack = undefined;
+    tokenBurnChart.data.datasets[1].borderWidth = 2;
+    tokenBurnChart.data.datasets[1].pointRadius = 2;
+    tokenBurnChart.data.datasets[1].tension = 0.3;
+
+    tokenBurnChart.data.datasets[2].type = 'line';
+    tokenBurnChart.data.datasets[2].borderColor = 'rgba(6, 182, 212, 1)';
+    tokenBurnChart.data.datasets[2].backgroundColor = 'rgba(6, 182, 212, 0.1)';
+    tokenBurnChart.data.datasets[2].fill = true;
+    tokenBurnChart.data.datasets[2].stack = undefined;
+    tokenBurnChart.data.datasets[2].borderWidth = 2;
+    tokenBurnChart.data.datasets[2].pointRadius = 2;
+    tokenBurnChart.data.datasets[2].tension = 0.3;
+
+    tokenBurnChart.data.datasets[3].hidden = true;
+    tokenBurnChart.options.scales.x.stacked = false;
+    tokenBurnChart.options.scales.y.stacked = false;
+    tokenBurnChart.options.scales.y.type = 'logarithmic';
+    tokenBurnChart.options.scales.y.title.text = 'Tokens / Day (log)';
+    tokenBurnChart.options.scales.y1.display = false;
+  } else {
+    // Restore stacked bar view
+    tokenBurnChart.data.datasets[0].type = 'bar';
+    tokenBurnChart.data.datasets[0].backgroundColor = 'rgba(59, 130, 246, 0.8)';
+    tokenBurnChart.data.datasets[0].stack = 'tokens';
+    tokenBurnChart.data.datasets[0].borderRadius = 2;
+    delete tokenBurnChart.data.datasets[0].borderColor;
+    delete tokenBurnChart.data.datasets[0].fill;
+    delete tokenBurnChart.data.datasets[0].borderWidth;
+    delete tokenBurnChart.data.datasets[0].pointRadius;
+    delete tokenBurnChart.data.datasets[0].tension;
+
+    tokenBurnChart.data.datasets[1].type = 'bar';
+    tokenBurnChart.data.datasets[1].backgroundColor = 'rgba(168, 85, 247, 0.8)';
+    tokenBurnChart.data.datasets[1].stack = 'tokens';
+    tokenBurnChart.data.datasets[1].borderRadius = 2;
+    delete tokenBurnChart.data.datasets[1].borderColor;
+    delete tokenBurnChart.data.datasets[1].fill;
+    delete tokenBurnChart.data.datasets[1].borderWidth;
+    delete tokenBurnChart.data.datasets[1].pointRadius;
+    delete tokenBurnChart.data.datasets[1].tension;
+
+    tokenBurnChart.data.datasets[2].type = 'bar';
+    tokenBurnChart.data.datasets[2].backgroundColor = 'rgba(6, 182, 212, 0.6)';
+    tokenBurnChart.data.datasets[2].stack = 'tokens';
+    tokenBurnChart.data.datasets[2].borderRadius = 2;
+    delete tokenBurnChart.data.datasets[2].borderColor;
+    delete tokenBurnChart.data.datasets[2].fill;
+    delete tokenBurnChart.data.datasets[2].borderWidth;
+    delete tokenBurnChart.data.datasets[2].pointRadius;
+    delete tokenBurnChart.data.datasets[2].tension;
+
+    tokenBurnChart.data.datasets[3].hidden = false;
+    tokenBurnChart.options.scales.x.stacked = true;
+    tokenBurnChart.options.scales.y.stacked = true;
+    tokenBurnChart.options.scales.y.type = 'linear';
+    tokenBurnChart.options.scales.y.title.text = 'Tokens / Day';
+    tokenBurnChart.options.scales.y1.display = true;
+  }
+  tokenBurnChart.update();
+  const btn = document.querySelector('#chart-token-burn').closest('.chart-card').querySelector('.scale-toggle');
+  if (btn) btn.textContent = tokenBurnPercentMode ? 'Stacked' : 'Split view';
 };
 
 /* ── Share Report Card ─────────────────────────── */
