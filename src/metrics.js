@@ -581,8 +581,10 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
       day.totalTokens += dayData.inputTokens + dayData.outputTokens + dayData.cacheReadTokens + (dayData.cacheCreationTokens || 0);
     }
 
-    // Session count attributed to start date
-    ensureDay(startDate).sessions++;
+    // Session count attributed to each day it had activity
+    for (const date of Object.keys(usage)) {
+      ensureDay(date).sessions++;
+    }
 
     // Commits attributed to their own timestamps
     for (const commit of session.commits) {
@@ -740,12 +742,25 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
       if (dateStr === todayStr) { costByPeriod.today.cost += dayData.cost; costByPeriod.today.tokens += dTok; }
     }
 
-    // Sessions count once (on start date), commits count on their own dates
-    costByPeriod.allTime.sessions++; costByPeriod.allTime.commits += session.commitCount;
-    const sDate = new Date(session.startTime);
-    if (sDate >= startOfMonth) { costByPeriod.month.sessions++; costByPeriod.month.commits += session.commitCount; }
-    if (sDate >= startOfWeek) { costByPeriod.week.sessions++; costByPeriod.week.commits += session.commitCount; }
-    if (startDateStr === todayStr) { costByPeriod.today.sessions++; costByPeriod.today.commits += session.commitCount; }
+    // Sessions count if they had any activity in the period (via dailyUsage dates)
+    const usageDates = Object.keys(usage);
+    const hasActivityToday = usageDates.includes(todayStr);
+    const hasActivityThisWeek = usageDates.some(d => new Date(d + 'T12:00:00') >= startOfWeek);
+    const hasActivityThisMonth = usageDates.some(d => new Date(d + 'T12:00:00') >= startOfMonth);
+    costByPeriod.allTime.sessions++;
+    if (hasActivityThisMonth) costByPeriod.month.sessions++;
+    if (hasActivityThisWeek) costByPeriod.week.sessions++;
+    if (hasActivityToday) costByPeriod.today.sessions++;
+
+    // Commits count by their actual commit date, not session start date
+    for (const commit of (session.commits || [])) {
+      const commitDateStr = toDateStr(commit.timestamp);
+      const commitDate = new Date(commitDateStr + 'T12:00:00');
+      costByPeriod.allTime.commits++;
+      if (commitDate >= startOfMonth) costByPeriod.month.commits++;
+      if (commitDate >= startOfWeek) costByPeriod.week.commits++;
+      if (commitDateStr === todayStr) costByPeriod.today.commits++;
+    }
   }
 
   const summary = {
