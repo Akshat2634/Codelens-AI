@@ -1,6 +1,6 @@
 {
   "name": "codelens-ai",
-  "version": "0.8.12",
+  "version": "0.8.13",
   "description": "Correlate AI coding agent token usage with git output to measure ROI",
   "type": "module",
   "bin": {
@@ -47,5 +47,8 @@
   "devDependencies": {
     "@playwright/test": "^1.56.1",
     "playwright": "^1.58.2"
+  },
+  "overrides": {
+    "path-to-regexp": "^8.4.0"
   }
 }
