@@ -34,6 +34,10 @@ jobs:
           npm pkg set name=claude-roi
           npm publish --access public
           npm pkg set name=codelens-ai
+
+      - name: Deprecate claude-roi on npm
+        run: |
+          sleep 10
           npm deprecate claude-roi "Renamed to codelens-ai. Use: npx codelens-ai"
 
       - name: Create GitHub Release
