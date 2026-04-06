@@ -29,17 +29,6 @@ jobs:
       - name: Publish codelens-ai to npm
         run: npm publish --provenance --access public
 
-      - name: Publish claude-roi alias to npm
-        run: |
-          npm pkg set name=claude-roi
-          npm publish --access public
-          npm pkg set name=codelens-ai
-
-      - name: Deprecate claude-roi on npm
-        run: |
-          sleep 10
-          npm deprecate claude-roi "Renamed to codelens-ai. Use: npx codelens-ai"
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
