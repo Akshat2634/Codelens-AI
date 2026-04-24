@@ -139,5 +139,10 @@ export function createServer(initialPayload, rebuildFn) {
     res.json(payload.autonomyMetrics);
   });
 
+  // Weekly narrative report (this week vs prior)
+  app.get('/api/narrative', (req, res) => {
+    res.json(payload.weeklyNarrative || null);
+  });
+
   return app;
 }

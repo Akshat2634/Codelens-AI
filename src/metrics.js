@@ -104,6 +104,135 @@ function generateTokenFunFacts(totalAllTokens, totalOutputTokens) {
   return facts;
 }
 
+function buildWeeklyNarrative(correlatedSessions, daily, autonomyMetrics) {
+  if (!correlatedSessions.length) return null;
+
+  const now = Date.now();
+  const WEEK_MS = 7 * 24 * 3600 * 1000;
+  const thisStart = now - WEEK_MS;
+  const lastStart = now - 2 * WEEK_MS;
+
+  const aggregate = (startMs, endMs) => {
+    const ss = correlatedSessions.filter(s => {
+      const t = new Date(s.startTime).getTime();
+      return t >= startMs && t < endMs;
+    });
+    const cost = ss.reduce((a, b) => a + b.cost.totalCost, 0);
+    const commits = ss.reduce((a, b) => a + b.commitCount, 0);
+    const linesAdded = ss.reduce((a, b) => a + b.linesAdded, 0);
+    const tokens = ss.reduce((a, b) => a + b.totalInputTokens + b.totalOutputTokens + b.cacheReadTokens + b.cacheCreationTokens, 0);
+    const msgUser = ss.reduce((a, b) => a + b.userMessageCount, 0);
+    const msgAssistant = ss.reduce((a, b) => a + b.assistantMessageCount, 0);
+    const autopilot = msgUser > 0 ? msgAssistant / msgUser : 0;
+    const costPerCommit = commits > 0 ? cost / commits : null;
+
+    const modelCost = {};
+    const modelLines = {};
+    for (const s of ss) {
+      const sessionTokens = Object.values(s.modelBreakdown).reduce((sum, d) => sum + d.tokens, 0);
+      for (const [m, data] of Object.entries(s.modelBreakdown)) {
+        const fam = getModelFamily(m) || 'unknown';
+        modelCost[fam] = (modelCost[fam] || 0) + data.cost;
+        const share = sessionTokens > 0 ? data.tokens / sessionTokens : 0;
+        modelLines[fam] = (modelLines[fam] || 0) + s.linesAdded * share;
+      }
+    }
+    const dominantModel = Object.entries(modelCost).sort((a, b) => b[1] - a[1])[0] || null;
+
+    return { sessions: ss.length, cost, commits, linesAdded, tokens, autopilot, costPerCommit, dominantModel, modelCost, modelLines };
+  };
+
+  const thisWeek = aggregate(thisStart, now);
+  const lastWeek = aggregate(lastStart, thisStart);
+
+  if (thisWeek.sessions === 0) return null;
+
+  const deltaPct = (curr, prev) => {
+    if (prev === null || prev === undefined || prev === 0 || curr === null || curr === undefined) return null;
+    return Math.round(((curr - prev) / prev) * 100);
+  };
+
+  // Headline
+  let headline;
+  if (thisWeek.commits > 0 && thisWeek.costPerCommit !== null) {
+    headline = `You shipped ${thisWeek.commits} commit${thisWeek.commits === 1 ? '' : 's'} at $${thisWeek.costPerCommit.toFixed(2)} each`;
+    const d = deltaPct(thisWeek.costPerCommit, lastWeek.costPerCommit);
+    if (d !== null) {
+      if (d <= -15) headline += ` — ${Math.abs(d)}% cheaper than last week.`;
+      else if (d >= 15) headline += ` — ${d}% pricier than last week.`;
+      else headline += ` — on par with last week.`;
+    } else if (lastWeek.sessions === 0) {
+      headline += ` — first week of measured activity.`;
+    } else {
+      headline += `.`;
+    }
+  } else {
+    headline = `${thisWeek.sessions} session${thisWeek.sessions === 1 ? '' : 's'} this week — no commits matched yet.`;
+  }
+
+  const metrics = [
+    { label: 'Commits', value: String(thisWeek.commits), deltaPct: deltaPct(thisWeek.commits, lastWeek.commits), direction: 'higher-better' },
+    { label: 'Spend', value: '$' + thisWeek.cost.toFixed(2), deltaPct: deltaPct(thisWeek.cost, lastWeek.cost), direction: 'lower-better' },
+    { label: 'Cost/Commit', value: thisWeek.costPerCommit !== null ? '$' + thisWeek.costPerCommit.toFixed(2) : '—', deltaPct: deltaPct(thisWeek.costPerCommit, lastWeek.costPerCommit), direction: 'lower-better' },
+    { label: 'Lines Added', value: thisWeek.linesAdded.toLocaleString(), deltaPct: deltaPct(thisWeek.linesAdded, lastWeek.linesAdded), direction: 'higher-better' },
+  ];
+
+  const bullets = [];
+  if (thisWeek.dominantModel && thisWeek.cost > 0) {
+    const [fam, famCost] = thisWeek.dominantModel;
+    const costPct = Math.round((famCost / thisWeek.cost) * 100);
+    const famLines = thisWeek.modelLines[fam] || 0;
+    const linesPct = thisWeek.linesAdded > 0 ? Math.round((famLines / thisWeek.linesAdded) * 100) : 0;
+    if (linesPct > 0) {
+      bullets.push(`${capitalise(fam)} carried ${costPct}% of spend and ~${linesPct}% of lines shipped.`);
+    } else {
+      bullets.push(`${capitalise(fam)} carried ${costPct}% of this week's cost.`);
+    }
+  }
+  if (thisWeek.autopilot > 0) {
+    bullets.push(`Autopilot ratio: ${thisWeek.autopilot.toFixed(1)}x — your agent handled ${thisWeek.autopilot.toFixed(1)} actions per prompt.`);
+  }
+
+  // Best day inside the week
+  const dailyInWeek = daily.filter(d => {
+    const t = new Date(d.date + 'T12:00:00').getTime();
+    return t >= thisStart && t < now;
+  });
+  const bestDay = dailyInWeek.filter(d => d.commits > 0).sort((a, b) => b.commits - a.commits)[0];
+  if (bestDay) {
+    const dn = new Date(bestDay.date + 'T12:00:00');
+    const dayLabel = dn.toLocaleDateString(undefined, { weekday: 'long' });
+    bullets.push(`${dayLabel} was your most productive day — ${bestDay.commits} commit${bestDay.commits === 1 ? '' : 's'} for $${bestDay.cost.toFixed(2)}.`);
+  }
+
+  // Efficiency trend flag
+  if (thisWeek.commits >= 3 && lastWeek.costPerCommit !== null && thisWeek.costPerCommit !== null) {
+    const d = deltaPct(thisWeek.costPerCommit, lastWeek.costPerCommit);
+    if (d !== null && d <= -20) bullets.push(`Your efficiency jumped meaningfully — keep the momentum.`);
+    else if (d !== null && d >= 20) bullets.push(`Cost-per-commit is trending up — consider shorter, focused sessions.`);
+  }
+
+  return {
+    headline,
+    weekRange: { start: new Date(thisStart).toISOString(), end: new Date(now).toISOString() },
+    metrics,
+    bullets,
+    thisWeek: {
+      sessions: thisWeek.sessions,
+      cost: Math.round(thisWeek.cost * 100) / 100,
+      commits: thisWeek.commits,
+      linesAdded: thisWeek.linesAdded,
+      costPerCommit: thisWeek.costPerCommit !== null ? Math.round(thisWeek.costPerCommit * 100) / 100 : null,
+    },
+    priorWeek: {
+      sessions: lastWeek.sessions,
+      cost: Math.round(lastWeek.cost * 100) / 100,
+      commits: lastWeek.commits,
+      costPerCommit: lastWeek.costPerCommit !== null ? Math.round(lastWeek.costPerCommit * 100) / 100 : null,
+    },
+  };
+}
+
 function computeLineSurvival(commitsByRepo) {
   let totalAdded = 0;
   let totalChurned = 0;
@@ -309,219 +438,167 @@ function computeSessionGrade(session) {
 }
 
 function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics) {
-  const insights = [];
+  // Insights are deliberately curated to avoid repeating what's already shown
+  // on hero cards (cost/tokens/cache), the weekly narrative (best day, autopilot,
+  // dominant model), or the autonomy section (self-heal, toolbelt, bash counts).
+  // Lower priority number = higher urgency. Capped at 8 after sorting.
+  const candidates = [];
 
-  // Orphaned session rate
+  // 1. Orphaned session rate — critical if high
   const orphanedCount = correlatedSessions.filter(s => s.isOrphaned).length;
-  if (orphanedCount > 0) {
+  if (orphanedCount > 0 && correlatedSessions.length > 0) {
     const pct = Math.round((orphanedCount / correlatedSessions.length) * 100);
-    insights.push({
+    if (pct >= 30) {
+      candidates.push({
+        priority: 1,
+        type: 'warning',
+        text: `${pct}% of sessions (${orphanedCount}/${correlatedSessions.length}) produced zero commits — likely wasted effort.`,
+      });
+    } else if (pct > 0) {
+      candidates.push({
+        priority: 3,
+        type: 'info',
+        text: `${pct}% of sessions (${orphanedCount}/${correlatedSessions.length}) produced zero commits.`,
+      });
+    }
+  }
+
+  // 2. Self-heal warning — critical behavioral signal
+  if (autonomyMetrics && autonomyMetrics.totalBashCalls > 20 && autonomyMetrics.selfHealScore < 10) {
+    candidates.push({
+      priority: 1,
       type: 'warning',
-      text: `${pct}% of your sessions (${orphanedCount}/${correlatedSessions.length}) produced zero commits — potential wasted effort.`,
+      text: `Only ${autonomyMetrics.selfHealScore}% of ${autonomyMetrics.totalBashCalls} bash commands were tests or lints — low self-healing.`,
+    });
+  } else if (autonomyMetrics && autonomyMetrics.selfHealScore >= 40 && autonomyMetrics.totalBashCalls > 10) {
+    candidates.push({
+      priority: 3,
+      type: 'success',
+      text: `${autonomyMetrics.selfHealScore}% of bash commands were tests/lints — solid self-healing habit.`,
     });
   }
 
-  // Model comparison
-  const modelFamilies = Object.entries(modelBreakdown).filter(([, d]) => d.sessions > 0);
+  // 3. Model cost efficiency — actionable comparison
+  const modelFamilies = Object.entries(modelBreakdown).filter(([, d]) => d.sessions > 0 && d.avgCostPerCommit);
   if (modelFamilies.length > 1) {
-    const sorted = modelFamilies.sort((a, b) => (a[1].avgCostPerCommit || Infinity) - (b[1].avgCostPerCommit || Infinity));
+    const sorted = [...modelFamilies].sort((a, b) => a[1].avgCostPerCommit - b[1].avgCostPerCommit);
     const best = sorted[0];
     const worst = sorted[sorted.length - 1];
-    if (best[1].avgCostPerCommit && worst[1].avgCostPerCommit) {
-      const ratio = (worst[1].avgCostPerCommit / best[1].avgCostPerCommit).toFixed(1);
-      insights.push({
+    const ratio = worst[1].avgCostPerCommit / best[1].avgCostPerCommit;
+    if (ratio >= 2) {
+      candidates.push({
+        priority: 2,
         type: 'info',
-        text: `${capitalise(worst[0])} sessions cost ${ratio}x more per commit than ${capitalise(best[0])}.`,
+        text: `${capitalise(worst[0])} costs ${ratio.toFixed(1)}x more per commit than ${capitalise(best[0])}.`,
       });
     }
   }
 
-  // Session length sweet spot
+  // 4. Session length sweet spot — actionable tip
   const bucketEntries = Object.entries(sessionBuckets).filter(([, d]) => d.sessions > 0 && d.avgCostPerCommit !== null);
   if (bucketEntries.length > 1) {
-    const bestBucket = bucketEntries.reduce((a, b) =>
-      (a[1].avgCostPerCommit || Infinity) < (b[1].avgCostPerCommit || Infinity) ? a : b
-    );
-    insights.push({
-      type: 'tip',
-      text: `Sessions with ${bestBucket[0]} messages have the best cost-per-commit ($${bestBucket[1].avgCostPerCommit.toFixed(2)}).`,
-    });
-  }
-
-  // Peak productivity hours
-  if (summary.totalCommits > 0) {
-    // Best day of week
-    const bestDay = summary.bestDay;
-    const worstDay = summary.worstDay;
-    if (bestDay) {
-      insights.push({
-        type: 'success',
-        text: `${bestDay.date} was your most productive AI day — ${bestDay.commits} commits for $${bestDay.cost.toFixed(2)}.`,
-      });
-    }
-    if (worstDay && worstDay.date !== bestDay?.date) {
-      insights.push({
-        type: 'warning',
-        text: `${worstDay.date} had the worst ROI — ${worstDay.commits} commits for $${worstDay.cost.toFixed(2)}.`,
+    const sorted = [...bucketEntries].sort((a, b) => a[1].avgCostPerCommit - b[1].avgCostPerCommit);
+    const best = sorted[0];
+    const worst = sorted[sorted.length - 1];
+    if (best[1].avgCostPerCommit && worst[1].avgCostPerCommit && worst[1].avgCostPerCommit >= best[1].avgCostPerCommit * 1.5) {
+      candidates.push({
+        priority: 2,
+        type: 'tip',
+        text: `Sessions of ${best[0]} messages are your sweet spot — $${best[1].avgCostPerCommit.toFixed(2)} per commit.`,
       });
     }
   }
 
-  // Commits on main
-  const totalOnMain = correlatedSessions.reduce((s, cs) => s + cs.commitsOnMain, 0);
-  if (summary.totalCommits > 0) {
-    const pct = Math.round((totalOnMain / summary.totalCommits) * 100);
-    let mainText;
-    if (pct < 30) {
-      mainText = `${pct}% of AI-assisted commits landed on production — this is normal if you primarily work on feature branches.`;
-    } else if (pct >= 70) {
-      mainText = `${pct}% of AI-assisted commits landed directly on production.`;
-    } else {
-      mainText = `${pct}% of AI-assisted commits landed on production.`;
-    }
-    insights.push({
-      type: pct >= 50 ? 'success' : 'info',
-      text: mainText,
-    });
-  }
-
-  // Cost distribution
-  if (summary.totalCost > 0) {
-    const top20 = correlatedSessions
-      .sort((a, b) => b.cost.totalCost - a.cost.totalCost)
-      .slice(0, Math.max(1, Math.ceil(correlatedSessions.length * 0.2)));
-    const top20Cost = top20.reduce((s, c) => s + c.cost.totalCost, 0);
-    const pct = Math.round((top20Cost / summary.totalCost) * 100);
-    if (pct >= 60) {
-      insights.push({
+  // 5. Cost concentration — useful 80/20 awareness
+  if (summary.totalCost > 0 && correlatedSessions.length >= 10) {
+    const sorted = [...correlatedSessions].sort((a, b) => b.cost.totalCost - a.cost.totalCost);
+    const top20 = sorted.slice(0, Math.ceil(correlatedSessions.length * 0.2));
+    const pct = Math.round((top20.reduce((s, c) => s + c.cost.totalCost, 0) / summary.totalCost) * 100);
+    if (pct >= 70) {
+      candidates.push({
+        priority: 2,
         type: 'info',
-        text: `Top 20% of sessions account for ${pct}% of total cost.`,
+        text: `Top 20% of sessions drove ${pct}% of total cost — a few heavy sessions dominate spend.`,
       });
     }
   }
 
-  // Average session duration insight
-  const avgDuration = correlatedSessions.reduce((s, c) => s + c.durationMinutes, 0) / correlatedSessions.length;
-  if (avgDuration > 0) {
-    insights.push({
-      type: 'info',
-      text: `Average session duration: ${formatDuration(Math.round(avgDuration))}.`,
-    });
+  // 6. Main branch ratio — context-dependent
+  if (summary.totalCommits >= 5) {
+    const pct = summary.mainBranchPct;
+    if (pct >= 70) {
+      candidates.push({
+        priority: 3,
+        type: 'success',
+        text: `${pct}% of AI-assisted commits landed on the default branch.`,
+      });
+    } else if (pct <= 15) {
+      candidates.push({
+        priority: 3,
+        type: 'info',
+        text: `Only ${pct}% of commits reached the default branch — most work lives on feature branches.`,
+      });
+    }
   }
 
-  // Average commit delay (time between session end and commit)
+  // 7. Commit latency — behavioral signal (unique, not on any card)
   const delays = [];
   for (const session of correlatedSessions) {
-    if (session.commits.length === 0) continue;
+    if (!session.commits.length) continue;
     const sessionEnd = new Date(session.endTime).getTime();
     for (const c of session.commits) {
       const delay = c.timestampMs - sessionEnd;
       if (delay >= 0) delays.push(delay);
     }
   }
-  if (delays.length > 0) {
+  if (delays.length >= 5) {
     const avgDelayMs = delays.reduce((s, d) => s + d, 0) / delays.length;
-    const avgDelayHours = avgDelayMs / (1000 * 60 * 60);
-    if (avgDelayHours < 1) {
-      insights.push({ type: 'success', text: `On average, commits happen ${formatDuration(Math.round(avgDelayHours * 60))} after a session ends.` });
-    } else {
-      insights.push({ type: 'info', text: `On average, commits happen ${avgDelayHours.toFixed(1)} hours after a session ends.` });
+    const avgDelayMin = avgDelayMs / 60000;
+    if (avgDelayMin < 5) {
+      candidates.push({
+        priority: 3,
+        type: 'success',
+        text: `Commits land fast — ${Math.max(1, Math.round(avgDelayMin))} min after session end on average.`,
+      });
+    } else if (avgDelayMin > 120) {
+      candidates.push({
+        priority: 3,
+        type: 'info',
+        text: `Commits land ~${(avgDelayMin / 60).toFixed(1)}h after sessions end — you sit on AI work before shipping.`,
+      });
     }
   }
 
-  // Uncommitted files insight
-  const totalUncommitted = correlatedSessions.reduce((s, c) => s + (c.uncommittedFiles?.length || 0), 0);
-  const totalWritten = correlatedSessions.reduce((s, c) => s + (c.filesWritten?.length || 0), 0);
-  if (totalWritten > 0 && totalUncommitted > 0) {
-    const pct = Math.round((totalUncommitted / totalWritten) * 100);
-    if (pct >= 20) {
-      insights.push({ type: 'info', text: `${pct}% of files Claude edited (${totalUncommitted}/${totalWritten}) were not found in any commit.` });
-    }
-  }
-
-  // ---- Token-specific insights ----
-  if (tokenAnalytics && tokenAnalytics.totalAllTokens > 0) {
-    const t = tokenAnalytics;
-
-    // Token efficiency overview
-    const wastePct = t.totalAllTokens > 0
-      ? Math.round((t.tokensOrphaned / t.totalAllTokens) * 100) : 0;
-    insights.push({
-      type: wastePct > 20 ? 'warning' : 'info',
-      text: `You burned ${formatBigNumber(t.totalAllTokens)} tokens — ${t.tokenEfficiencyRate}% shipped code, ${wastePct}% was WASTED in sessions that produced nothing.`,
+  // 8. Toolbelt coverage — actionable for under-utilized setups
+  if (autonomyMetrics && autonomyMetrics.toolbeltCoverage < 30 && correlatedSessions.length >= 5) {
+    const used = Math.round(autonomyMetrics.toolbeltCoverage * TOTAL_AVAILABLE_TOOLS / 100);
+    candidates.push({
+      priority: 2,
+      type: 'tip',
+      text: `Your agent used ${used} of ${TOTAL_AVAILABLE_TOOLS} available tools — low toolbelt coverage.`,
     });
+  }
 
-    // Orphaned session token waste (alarming if >20%)
-    if (wastePct > 20) {
-      const orphanedCount = correlatedSessions.filter(s => s.isOrphaned).length;
-      insights.push({
-        type: 'warning',
-        text: `${formatBigNumber(t.tokensOrphaned)} tokens went up in smoke across ${orphanedCount} orphaned sessions. That's $${t.costOrphaned.toFixed(2)} burned with zero output.`,
-      });
-    }
-
-    // Cache savings
-    if (t.cacheHitRate > 0) {
-      insights.push({
-        type: 'success',
-        text: `Cache saved you ${formatBigNumber(t.totalCacheReadTokens)} tokens (${t.cacheHitRate}% of input) — $${t.cacheSavingsDollars.toFixed(2)} you didn't have to spend.`,
-      });
-    }
-
-    // Model token efficiency comparison
-    const modelFamiliesForTokens = Object.entries(modelBreakdown)
-      .filter(([, d]) => d.tokensPerCommit !== null);
-    if (modelFamiliesForTokens.length > 1) {
-      const sorted = [...modelFamiliesForTokens].sort((a, b) => a[1].tokensPerCommit - b[1].tokensPerCommit);
-      const best = sorted[0];
-      const worst = sorted[sorted.length - 1];
-      if (best[1].tokensPerCommit && worst[1].tokensPerCommit) {
-        const ratio = (worst[1].tokensPerCommit / best[1].tokensPerCommit).toFixed(1);
-        insights.push({
-          type: 'info',
-          text: `${capitalise(best[0])} burns ${formatBigNumber(best[1].tokensPerCommit)} tokens/commit vs ${formatBigNumber(worst[1].tokensPerCommit)} for ${capitalise(worst[0])} — ${ratio}x difference.`,
-        });
-      }
-    }
-
-    // Tokens per commit tip
-    if (t.tokensPerCommit > 100000) {
-      insights.push({
-        type: 'tip',
-        text: `You burn ${formatBigNumber(t.tokensPerCommit)} tokens per commit. Consider breaking work into smaller, focused sessions.`,
+  // 9. Model token efficiency — distinct from cost ratio (tokens ≠ cost)
+  const modelsForTokens = Object.entries(modelBreakdown).filter(([, d]) => d.tokensPerCommit);
+  if (modelsForTokens.length > 1) {
+    const sorted = [...modelsForTokens].sort((a, b) => a[1].tokensPerCommit - b[1].tokensPerCommit);
+    const best = sorted[0], worst = sorted[sorted.length - 1];
+    const ratio = worst[1].tokensPerCommit / best[1].tokensPerCommit;
+    if (ratio >= 3) {
+      candidates.push({
+        priority: 3,
+        type: 'info',
+        text: `${capitalise(best[0])} uses ${formatBigNumber(best[1].tokensPerCommit)} tokens/commit vs ${formatBigNumber(worst[1].tokensPerCommit)} for ${capitalise(worst[0])}.`,
       });
     }
   }
 
-  // ---- Autonomy insights ----
-  if (autonomyMetrics) {
-    const am = autonomyMetrics;
-    if (am.autopilotRatio >= 4) {
-      insights.push({
-        type: 'success',
-        text: `Your agent averaged ${am.autopilotRatio}x autopilot — it handled ${Math.round(am.autopilotRatio)} actions per prompt.`,
-      });
-    }
-    if (am.totalBashCalls > 5 && am.selfHealScore < 10) {
-      insights.push({
-        type: 'warning',
-        text: `Your agent ran ${am.totalBashCalls} bash commands but only ${am.selfHealScore}% were tests or lints — low self-healing.`,
-      });
-    } else if (am.selfHealScore >= 40) {
-      insights.push({
-        type: 'success',
-        text: `${am.selfHealScore}% of bash commands were tests/lints — your agent self-heals well.`,
-      });
-    }
-    if (am.toolbeltCoverage < 30 && correlatedSessions.length >= 3) {
-      insights.push({
-        type: 'tip',
-        text: `Your agent only used ${Math.round(am.toolbeltCoverage * TOTAL_AVAILABLE_TOOLS / 100)} of ${TOTAL_AVAILABLE_TOOLS} available tools — low toolbelt coverage.`,
-      });
-    }
-  }
-
-  return insights;
+  // Sort by priority (warnings first), cap at 8 to keep the section scannable
+  return candidates
+    .sort((a, b) => a.priority - b.priority)
+    .slice(0, 8)
+    .map(({ priority, ...rest }) => rest);
 }
 
 function capitalise(s) {
@@ -809,6 +886,8 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
 
   const insights = generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics);
 
+  const weeklyNarrative = buildWeeklyNarrative(correlatedSessions, daily, autonomyMetrics);
+
   return {
     meta: {
       generatedAt: new Date().toISOString(),
@@ -835,6 +914,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     sessionBuckets,
     lineSurvival,
     heatmap: { commits: heatmap, cost: heatmapCost },
+    weeklyNarrative,
     organicCommits,
   };
 }
