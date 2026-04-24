@@ -1,6 +1,6 @@
 import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
-import { createInterface } from 'node:readline';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
 
 // Pricing per million tokens — from https://docs.anthropic.com/en/docs/about-claude/pricing
 // Cache reads = 0.1x base input, Cache writes (5min) = 1.25x base input
@@ -643,4 +643,12 @@ export async function parseAllProjects(claudeDir, days, projectFilter) {
   return { sessions: deduped, fileIndex };
 }
 
-export { calculateCost, getModelFamily, PRICING };
+export {
+  calculateCost,
+  calculateCostBreakdown,
+  getModelFamily,
+  getPricingTier,
+  isVerificationCommand,
+  PRICING,
+  toRelativePath,
+};

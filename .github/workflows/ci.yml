@@ -29,15 +29,51 @@ jobs:
       - name: Security audit
         run: npm audit --audit-level=high
 
+      - name: Lint (Biome)
+        run: npm run lint
+
       - name: Syntax check all source files
         run: |
           for f in src/*.js; do
             node --check "$f"
           done
 
-      - name: Verify CLI starts without error
-        run: node src/index.js --json 2>&1 || true
+      - name: Unit tests
+        run: npm run test:unit
 
-      # Playwright integration tests require Claude Code session data
-      # and cannot run in CI without fixtures. Run locally with:
-      #   npm test
+      - name: Verify CLI starts without error
+        run: node src/index.js --json --claude-dir tests/fixtures/claude-projects --days 30 > /dev/null
+
+  e2e:
+    # Run Playwright smoke suite only once per PR (not across every Node version)
+    # against fixture-backed sessions. Full dashboard coverage lives in
+    # tests/local/ and is run manually with `npm run test:e2e:local`.
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Smoke E2E (fixtures)
+        env:
+          CI: "1"
+        run: npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

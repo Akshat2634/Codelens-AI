@@ -9,19 +9,11 @@ function formatBigNumber(n) {
   return n.toString();
 }
 
-function formatDuration(minutes) {
-  if (minutes < 60) return `${minutes} minutes`;
-  const hrs = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  if (mins === 0) return `${hrs} hr${hrs > 1 ? 's' : ''}`;
-  return `${hrs} hr${hrs > 1 ? 's' : ''} ${mins} min`;
-}
-
 function sessionTokens(s) {
   return s.totalInputTokens + s.totalOutputTokens + s.cacheReadTokens + s.cacheCreationTokens;
 }
 
-function computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, totalLinesAdded, modelBreakdown) {
+function computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, totalLinesAdded, _modelBreakdown) {
   // Aggregate token stats
   const totalInputTokens = correlatedSessions.reduce((s, c) => s + c.totalInputTokens, 0);
   const totalOutputTokens = correlatedSessions.reduce((s, c) => s + c.totalOutputTokens, 0);
@@ -93,7 +85,7 @@ function computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, t
   };
 }
 
-function generateTokenFunFacts(totalAllTokens, totalOutputTokens) {
+function generateTokenFunFacts(_totalAllTokens, totalOutputTokens) {
   const facts = [];
   // ~0.75 words per token for English text
   const approxWords = Math.round(totalOutputTokens * 0.75);
@@ -104,7 +96,7 @@ function generateTokenFunFacts(totalAllTokens, totalOutputTokens) {
   return facts;
 }
 
-function buildWeeklyNarrative(correlatedSessions, daily, autonomyMetrics) {
+function buildWeeklyNarrative(correlatedSessions, daily, _autonomyMetrics) {
   if (!correlatedSessions.length) return null;
 
   const now = Date.now();
@@ -437,7 +429,7 @@ function computeSessionGrade(session) {
   return computeEfficiencyGrade(costPerCommit, 80);
 }
 
-function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics) {
+function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, _tokenAnalytics, autonomyMetrics) {
   // Insights are deliberately curated to avoid repeating what's already shown
   // on hero cards (cost/tokens/cache), the weekly narrative (best day, autopilot,
   // dominant model), or the autonomy section (self-heal, toolbelt, bash counts).

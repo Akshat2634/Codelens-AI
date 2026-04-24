@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
-import { Command } from 'commander';
-import path from 'node:path';
-import os from 'node:os';
-import { parseAllProjects } from './claude-parser.js';
-import { analyzeGitRepo, getGitUser } from './git-analyzer.js';
-import { correlateSessions } from './correlator.js';
-import { computeMetrics } from './metrics.js';
-import { loadCache, saveCache, deleteCache, getStaleFiles } from './cache.js';
-import { createServer } from './server.js';
 import { readFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { Command } from 'commander';
+import { deleteCache, getStaleFiles, loadCache, saveCache } from './cache.js';
+import { parseAllProjects } from './claude-parser.js';
+import { correlateSessions } from './correlator.js';
+import { analyzeGitRepo, getGitUser } from './git-analyzer.js';
+import { computeMetrics } from './metrics.js';
+import { createServer } from './server.js';
 
 const { version: VERSION } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8')
@@ -105,7 +105,8 @@ async function main() {
     .option('--json', 'output raw JSON to stdout instead of starting server')
     .option('--project <name>', 'filter to specific project')
     .option('--refresh', 'force full re-parse, ignore cache')
-    .option('--autonomy', 'print autonomy metrics table to stdout and exit');
+    .option('--autonomy', 'print autonomy metrics table to stdout and exit')
+    .option('--claude-dir <path>', 'override path to Claude Code projects directory (for testing/CI)');
 
   program.parse();
   const opts = program.opts();
@@ -119,7 +120,9 @@ async function main() {
   }
   console.log(`${icon.dot} ${c.bold}${c.cyan}codelens-ai${c.reset} v${VERSION}\n`);
 
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+  const claudeDir = opts.claudeDir
+    ? path.resolve(opts.claudeDir)
+    : path.join(os.homedir(), '.claude', 'projects');
 
   const payload = await buildPayload(claudeDir, days, opts.project, opts.refresh);
   if (payload) payload.meta.invokedAs = invokedAs.includes('claude-roi') ? 'claude-roi' : 'codelens-ai';
