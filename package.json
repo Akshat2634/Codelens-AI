@@ -11,7 +11,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node src/index.js --no-open",
-    "lint": "biome check src/ tests/",
+    "lint": "biome check --error-on-warnings src/ tests/",
     "lint:fix": "biome check --write src/ tests/",
     "test:unit": "node --test tests/unit/*.test.js",
     "test:e2e": "playwright test",
