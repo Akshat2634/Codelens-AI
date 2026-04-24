@@ -131,6 +131,7 @@ Token costs are version-aware and calculated per model (see [Anthropic pricing](
 
 | Model | Input | Output | Cache Read | Cache Write |
 | --- | --- | --- | --- | --- |
+| Opus 4.7 | $5/M | $25/M | $0.50/M | $6.25/M |
 | Opus 4.6 | $5/M | $25/M | $0.50/M | $6.25/M |
 | Opus 4.5 | $5/M | $25/M | $0.50/M | $6.25/M |
 | Opus 4.0/4.1 (legacy) | $15/M | $75/M | $1.50/M | $18.75/M |
