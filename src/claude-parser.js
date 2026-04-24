@@ -5,6 +5,8 @@ import path from 'node:path';
 // Pricing per million tokens — from https://docs.anthropic.com/en/docs/about-claude/pricing
 // Cache reads = 0.1x base input, Cache writes (5min) = 1.25x base input
 const PRICING = {
+  // Opus 4.7: $5 input, $25 output (same as 4.6)
+  'opus-47':    { input: 5,     output: 25,    cacheRead: 0.50,   cacheWrite: 6.25   },
   // Opus 4.6: $5 input, $25 output
   'opus-46':    { input: 5,     output: 25,    cacheRead: 0.50,   cacheWrite: 6.25   },
   // Opus 4.5: $5 input, $25 output
@@ -37,6 +39,7 @@ function getPricingTier(modelName) {
   const lower = modelName.toLowerCase();
   // Opus: check most specific version first
   if (lower.includes('opus')) {
+    if (lower.includes('4-7') || lower.includes('4.7')) return 'opus-47';
     if (lower.includes('4-6') || lower.includes('4.6')) return 'opus-46';
     if (lower.includes('4-5') || lower.includes('4.5')) return 'opus-45';
     return 'opus-old';
