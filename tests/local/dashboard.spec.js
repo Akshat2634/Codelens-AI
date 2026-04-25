@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
 
@@ -131,7 +131,7 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
     test('commits card displays count and lines added', async ({ page }) => {
       const commitsCard = page.locator('.stat-card.commits-card');
       const value = await commitsCard.locator('.value').textContent();
-      expect(parseInt(value)).toBeGreaterThanOrEqual(0);
+      expect(parseInt(value, 10)).toBeGreaterThanOrEqual(0);
       await expect(commitsCard.locator('.sub')).toContainText('lines added');
     });
 
@@ -1337,10 +1337,10 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
     });
 
     test('sorting by different columns re-renders the table', async ({ page }) => {
-      const firstRowDateBefore = await page.locator('.sessions-table-wrap tbody tr:not(.expand-row)').first().locator('td').first().textContent();
+      const _firstRowDateBefore = await page.locator('.sessions-table-wrap tbody tr:not(.expand-row)').first().locator('td').first().textContent();
       // Sort by Cost
       await page.locator('th').filter({ hasText: 'Cost' }).click();
-      const firstRowDateAfter = await page.locator('.sessions-table-wrap tbody tr:not(.expand-row)').first().locator('td').first().textContent();
+      const _firstRowDateAfter = await page.locator('.sessions-table-wrap tbody tr:not(.expand-row)').first().locator('td').first().textContent();
       // After sorting by cost, the first row should likely be different
       // (unless all sessions have the same cost)
       // Just verify the table re-rendered without errors

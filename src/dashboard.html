@@ -6,7 +6,7 @@
   <title>Codelens AI — Agent Productivity Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='8' y='14' width='4' height='12' rx='1.5' fill='%23e67e22'/%3E%3Crect x='14' y='6' width='4' height='20' rx='1.5' fill='%232ecc71'/%3E%3Crect x='20' y='10' width='4' height='16' rx='1.5' fill='%233498db'/%3E%3C/svg%3E">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
   <script>
     (function() {
       var pref = localStorage.getItem('codelens-theme') || 'system';
@@ -485,25 +485,34 @@
     }
     .insight-list {
       display: grid;
+      grid-template-columns: repeat(2, 1fr);
       gap: 8px;
+    }
+    @media (max-width: 720px) {
+      .insight-list { grid-template-columns: 1fr; }
     }
     .insight {
       display: flex;
       align-items: flex-start;
       gap: 10px;
-      padding: 14px 18px;
+      padding: 12px 16px;
       background: var(--overlay-light);
       border: 1px solid var(--overlay-medium);
       border-radius: var(--radius-sm);
-      font-size: 0.88rem;
+      font-size: 0.85rem;
+      line-height: 1.45;
       transition: background 0.2s, border-color 0.2s, transform 0.2s;
     }
     .insight:hover {
       background: var(--overlay-medium);
       border-color: var(--overlay-intense);
-      transform: translateX(4px);
+      transform: translateX(2px);
     }
-    .insight .icon { font-size: 1.1rem; flex-shrink: 0; }
+    .insight .icon { font-size: 1rem; flex-shrink: 0; line-height: 1.4; }
+    .insight.warning { border-left: 2px solid var(--accent-orange); }
+    .insight.success { border-left: 2px solid var(--accent-green); }
+    .insight.info    { border-left: 2px solid var(--accent-blue); }
+    .insight.tip     { border-left: 2px solid var(--accent-purple); }
     .insight.warning .icon { color: var(--accent-orange); }
     .insight.success .icon { color: var(--accent-green); }
     .insight.info .icon { color: var(--accent-blue); }
@@ -1822,6 +1831,111 @@
       font-weight: 600;
       color: var(--accent-cyan);
     }
+
+    /* ── Weekly Narrative ──────────────────────────── */
+    .narrative {
+      position: relative;
+      margin-bottom: 40px;
+      padding: 28px 32px;
+      border-radius: var(--radius);
+      background:
+        linear-gradient(135deg, rgba(59, 130, 246, 0.06), rgba(168, 85, 247, 0.04));
+      border: 1px solid var(--glass-border);
+      overflow: hidden;
+    }
+    .narrative::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 80% at 100% 0%, rgba(168, 85, 247, 0.12), transparent);
+      pointer-events: none;
+    }
+    .narrative-kicker {
+      font-family: var(--font-display);
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent-purple);
+      margin-bottom: 10px;
+      display: flex; align-items: center; gap: 8px;
+      position: relative;
+    }
+    .narrative-kicker::before {
+      content: '';
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent-purple);
+      box-shadow: 0 0 10px var(--accent-purple);
+    }
+    .narrative-headline {
+      font-family: var(--font-body);
+      font-size: clamp(1.35rem, 2.4vw, 1.75rem);
+      font-weight: 600;
+      line-height: 1.3;
+      color: var(--text-primary);
+      margin-bottom: 20px;
+      position: relative;
+      letter-spacing: -0.015em;
+    }
+    .narrative-metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 14px;
+      margin-bottom: 16px;
+      position: relative;
+    }
+    .narrative-metric {
+      padding: 14px 16px;
+      border-radius: var(--radius-sm);
+      background: var(--overlay-light);
+      border: 1px solid var(--glass-border);
+    }
+    .narrative-metric .nm-label {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .narrative-metric .nm-value {
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1;
+    }
+    .narrative-metric .nm-delta {
+      display: inline-block;
+      margin-top: 8px;
+      font-family: var(--font-display);
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+    .narrative-metric .nm-delta.up { color: var(--accent-green); }
+    .narrative-metric .nm-delta.down { color: var(--accent-red); }
+    .narrative-metric .nm-delta.flat { color: var(--text-muted); }
+    .narrative-bullets {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      position: relative;
+    }
+    .narrative-bullets li {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      padding-left: 18px;
+      position: relative;
+    }
+    .narrative-bullets li::before {
+      content: '›';
+      position: absolute;
+      left: 4px;
+      color: var(--accent-purple);
+      font-weight: 700;
+    }
+
   </style>
 </head>
 <body>
@@ -2300,12 +2414,12 @@ function render() {
   const rd = (n) => !initialRenderDone ? `reveal reveal-delay-${n}` : '';
 
   document.getElementById('app').innerHTML = `
-    <div class="${rd(1)}">${renderHeroStats(summary)}</div>
-    <div class="${rd(2)}">${renderCostByPeriod(summary.costByPeriod)}</div>
-    <div class="${rd(3)}">${renderTokenHeroStats(t)}</div>
-    <div class="${rd(4)}">${renderTokenFunnel(t)}</div>
-    <div class="${rd(5)}">${renderTokenFunFacts(t.funFacts)}</div>
-    <div class="${rd(6)}">${renderInsights(d.insights)}</div>
+    <div class="${rd(1)}">${renderWeeklyNarrative(d.weeklyNarrative)}</div>
+    <div class="${rd(2)}">${renderHeroStats(summary)}</div>
+    <div class="${rd(3)}">${renderCostByPeriod(summary.costByPeriod)}</div>
+    <div class="${rd(4)}">${renderTokenHeroStats(t)}</div>
+    <div class="${rd(5)}">${renderTokenFunnel(t)}</div>
+    <div class="scroll-reveal">${renderInsights(d.insights)}</div>
     <div class="charts-grid scroll-reveal">
       <div class="chart-card full-width">
         <div class="chart-header">
@@ -2349,6 +2463,47 @@ function render() {
     initHeatmap();
   }
   bindEvents();
+}
+
+function renderWeeklyNarrative(n) {
+  if (!n || !n.headline) return '';
+  const metricsHtml = (n.metrics || []).map(m => {
+    let deltaHtml = '';
+    if (m.deltaPct !== null && m.deltaPct !== undefined) {
+      const better = m.direction === 'higher-better'
+        ? m.deltaPct > 0
+        : m.deltaPct < 0;
+      const flat = Math.abs(m.deltaPct) < 2;
+      const cls = flat ? 'flat' : (better ? 'up' : 'down');
+      const sign = m.deltaPct > 0 ? '+' : '';
+      const arrow = flat ? '•' : (better ? '▲' : '▼');
+      deltaHtml = `<span class="nm-delta ${cls}">${arrow} ${sign}${m.deltaPct}% vs last week</span>`;
+    } else {
+      deltaHtml = `<span class="nm-delta flat">— new</span>`;
+    }
+    return `<div class="narrative-metric">
+      <div class="nm-label">${m.label}</div>
+      <div class="nm-value">${m.value}</div>
+      ${deltaHtml}
+    </div>`;
+  }).join('');
+  const bulletsHtml = (n.bullets || []).map(b => `<li>${escapeHtml(b)}</li>`).join('');
+  return `<div class="narrative">
+    <div class="narrative-kicker">Weekly Report</div>
+    <div class="narrative-headline">${escapeHtml(n.headline)}</div>
+    ${metricsHtml ? `<div class="narrative-metrics">${metricsHtml}</div>` : ''}
+    ${bulletsHtml ? `<ul class="narrative-bullets">${bulletsHtml}</ul>` : ''}
+  </div>`;
+}
+
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 function renderHeroStats(s) {
@@ -2613,21 +2768,6 @@ function renderTokenFunnel(t) {
           <span><span class="dot" style="background:var(--accent-red);"></span>WASTED (${pOrph}%) — long sessions, zero output</span>
         </div>
       </div>
-    </div>
-  </div>`;
-}
-
-function renderTokenFunFacts(facts) {
-  if (!facts || facts.length === 0) return '';
-  return `<div class="insights" style="margin-bottom:24px;">
-    <h2>Scale Check</h2>
-    <div class="insight-list">
-      ${facts.map(f => `
-        <div class="insight info">
-          <span class="icon">~</span>
-          <span>${f}</span>
-        </div>
-      `).join('')}
     </div>
   </div>`;
 }

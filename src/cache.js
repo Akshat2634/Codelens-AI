@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
-import path from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'agent-analytics');
 const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 5;
 
 export function loadCache() {
   if (!existsSync(CACHE_FILE)) {
@@ -71,7 +71,7 @@ export function getStaleFiles(claudeDir, cachedFileIndex) {
         } else if (mtime > cachedFileIndex[filePath]) {
           modifiedFiles.push(filePath);
         }
-      } catch { continue; }
+      } catch { }
     }
   }
 

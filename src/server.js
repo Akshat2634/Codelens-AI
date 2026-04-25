@@ -1,7 +1,7 @@
-import express from 'express';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import express from 'express';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -12,17 +12,17 @@ export function createServer(initialPayload, rebuildFn) {
   // Serve dashboard HTML
   const dashboardHtml = readFileSync(path.join(__dirname, 'dashboard.html'), 'utf-8');
 
-  app.get('/', (req, res) => {
+  app.get('/', (_req, res) => {
     res.type('html').send(dashboardHtml);
   });
 
   // Full payload (single fetch for dashboard)
-  app.get('/api/all', (req, res) => {
+  app.get('/api/all', (_req, res) => {
     res.json(payload);
   });
 
   // Re-run the full pipeline: clear cache, re-parse sessions, re-analyze git, recompute metrics
-  app.post('/api/refresh', async (req, res) => {
+  app.post('/api/refresh', async (_req, res) => {
     if (!rebuildFn) return res.status(501).json({ error: 'Refresh not available' });
     try {
       console.log('  \x1b[36m▸\x1b[0m \x1b[36m[refresh]\x1b[0m Re-parsing sessions and recomputing metrics...');
@@ -38,7 +38,7 @@ export function createServer(initialPayload, rebuildFn) {
   });
 
   // Hero stats + insights
-  app.get('/api/summary', (req, res) => {
+  app.get('/api/summary', (_req, res) => {
     res.json({
       ...payload.meta,
       ...payload.summary,
@@ -47,14 +47,14 @@ export function createServer(initialPayload, rebuildFn) {
   });
 
   // Daily timeline data for charts
-  app.get('/api/timeline', (req, res) => {
+  app.get('/api/timeline', (_req, res) => {
     res.json(payload.daily);
   });
 
   // All sessions with pagination
   app.get('/api/sessions', (req, res) => {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 50;
     const sortBy = req.query.sort || 'startTime';
     const order = req.query.order === 'asc' ? 1 : -1;
     const mainOnly = req.query.mainOnly === 'true';
@@ -93,12 +93,12 @@ export function createServer(initialPayload, rebuildFn) {
   });
 
   // Model comparison data
-  app.get('/api/models', (req, res) => {
+  app.get('/api/models', (_req, res) => {
     res.json(payload.modelBreakdown);
   });
 
   // Hour x day heatmap
-  app.get('/api/heatmap', (req, res) => {
+  app.get('/api/heatmap', (_req, res) => {
     res.json(payload.heatmap);
   });
 
@@ -110,33 +110,38 @@ export function createServer(initialPayload, rebuildFn) {
   });
 
   // Projects breakdown
-  app.get('/api/projects', (req, res) => {
+  app.get('/api/projects', (_req, res) => {
     res.json(payload.projects);
   });
 
   // Session buckets
-  app.get('/api/buckets', (req, res) => {
+  app.get('/api/buckets', (_req, res) => {
     res.json(payload.sessionBuckets);
   });
 
   // Tool usage
-  app.get('/api/tools', (req, res) => {
+  app.get('/api/tools', (_req, res) => {
     res.json(payload.toolBreakdown);
   });
 
   // Line survival
-  app.get('/api/survival', (req, res) => {
+  app.get('/api/survival', (_req, res) => {
     res.json(payload.lineSurvival);
   });
 
   // Token analytics
-  app.get('/api/tokens', (req, res) => {
+  app.get('/api/tokens', (_req, res) => {
     res.json(payload.tokenAnalytics);
   });
 
   // Autonomy metrics
-  app.get('/api/autonomy', (req, res) => {
+  app.get('/api/autonomy', (_req, res) => {
     res.json(payload.autonomyMetrics);
+  });
+
+  // Weekly narrative report (this week vs prior)
+  app.get('/api/narrative', (_req, res) => {
+    res.json(payload.weeklyNarrative || null);
   });
 
   return app;

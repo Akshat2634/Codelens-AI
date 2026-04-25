@@ -11,7 +11,12 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node src/index.js --no-open",
-    "test": "npx playwright test"
+    "lint": "biome check --error-on-warnings src/ tests/",
+    "lint:fix": "biome check --write src/ tests/",
+    "test:unit": "node --test tests/unit/*.test.js",
+    "test:e2e": "playwright test",
+    "test:e2e:local": "E2E_DIR=./tests/local playwright test",
+    "test": "npm run lint && npm run test:unit && CI=1 npm run test:e2e"
   },
   "keywords": [
     "codelens",
@@ -45,8 +50,9 @@
     "open": "^10.0.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.56.1",
-    "playwright": "^1.58.2"
+    "@biomejs/biome": "^2.4.13",
+    "@playwright/test": "^1.59.1",
+    "playwright": "^1.59.1"
   },
   "overrides": {
     "path-to-regexp": "^8.4.0"

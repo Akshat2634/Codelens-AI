@@ -1,0 +1,41 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.13/schema.json",
+  "files": {
+    "includes": [
+      "src/**/*.js",
+      "tests/**/*.js",
+      "!**/dashboard.html",
+      "!**/node_modules/**",
+      "!**/fixtures/**"
+    ]
+  },
+  "formatter": {
+    "enabled": false
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "suspicious": {
+        "noExplicitAny": "off",
+        "noAssignInExpressions": "off"
+      },
+      "style": {
+        "noParameterAssign": "off",
+        "useTemplate": "off",
+        "useConst": "warn",
+        "noUselessElse": "off"
+      },
+      "correctness": {
+        "noUnusedVariables": "warn"
+      },
+      "complexity": {
+        "noForEach": "off",
+        "useLiteralKeys": "off"
+      }
+    }
+  },
+  "javascript": {
+    "globals": ["DATA", "Chart", "process"]
+  }
+}

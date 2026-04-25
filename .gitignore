@@ -2,6 +2,7 @@ node_modules/
 .cache/
 *.log
 test-results/
+playwright-report/
 .claude/*
 !.claude/skills/
 .agents/
