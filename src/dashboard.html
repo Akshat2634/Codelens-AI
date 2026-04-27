@@ -3240,10 +3240,14 @@ function initCharts() {
     },
   });
 
-  // Tool usage horizontal bar
+  // Tool usage horizontal bar — show every tool the agent invoked
   const tools = DATA.toolBreakdown;
-  const toolEntries = Object.entries(tools).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  new Chart(document.getElementById('chart-tools'), {
+  const toolEntries = Object.entries(tools).sort((a, b) => b[1] - a[1]);
+  const toolsCanvas = document.getElementById('chart-tools');
+  if (toolEntries.length > 10) {
+    toolsCanvas.parentElement.style.height = (toolEntries.length * 26) + 'px';
+  }
+  new Chart(toolsCanvas, {
     type: 'bar',
     data: {
       labels: toolEntries.map(([t]) => t),
