@@ -96,7 +96,7 @@ function generateTokenFunFacts(_totalAllTokens, totalOutputTokens) {
   return facts;
 }
 
-function buildWeeklyNarrative(correlatedSessions, daily, _autonomyMetrics) {
+function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics) {
   if (!correlatedSessions.length) return null;
 
   const now = Date.now();
@@ -104,32 +104,57 @@ function buildWeeklyNarrative(correlatedSessions, daily, _autonomyMetrics) {
   const thisStart = now - WEEK_MS;
   const lastStart = now - 2 * WEEK_MS;
 
+  // Lines added for a single commit, mirroring the correlator's session-level
+  // overlap rule (filesWritten ∩ commit.files), so headline numbers match
+  // session.linesAdded in aggregate.
+  const commitLinesAdded = (s, c) => {
+    const sessionFiles = new Set(s.filesWritten || []);
+    return sessionFiles.size > 0
+      ? c.files.filter(f => sessionFiles.has(f.path)).reduce((a, f) => a + f.added, 0)
+      : c.totalAdded;
+  };
+
   const aggregate = (startMs, endMs) => {
+    // Session-level metrics (cost, tokens, msgs, model spend) bucket by session start.
     const ss = correlatedSessions.filter(s => {
       const t = new Date(s.startTime).getTime();
       return t >= startMs && t < endMs;
     });
     const cost = ss.reduce((a, b) => a + b.cost.totalCost, 0);
-    const commits = ss.reduce((a, b) => a + b.commitCount, 0);
-    const linesAdded = ss.reduce((a, b) => a + b.linesAdded, 0);
     const tokens = ss.reduce((a, b) => a + b.totalInputTokens + b.totalOutputTokens + b.cacheReadTokens + b.cacheCreationTokens, 0);
     const msgUser = ss.reduce((a, b) => a + b.userMessageCount, 0);
     const msgAssistant = ss.reduce((a, b) => a + b.assistantMessageCount, 0);
     const autopilot = msgUser > 0 ? msgAssistant / msgUser : 0;
-    const costPerCommit = commits > 0 ? cost / commits : null;
 
     const modelCost = {};
-    const modelLines = {};
     for (const s of ss) {
-      const sessionTokens = Object.values(s.modelBreakdown).reduce((sum, d) => sum + d.tokens, 0);
       for (const [m, data] of Object.entries(s.modelBreakdown)) {
         const fam = getModelFamily(m) || 'unknown';
         modelCost[fam] = (modelCost[fam] || 0) + data.cost;
-        const share = sessionTokens > 0 ? data.tokens / sessionTokens : 0;
-        modelLines[fam] = (modelLines[fam] || 0) + s.linesAdded * share;
       }
     }
     const dominantModel = Object.entries(modelCost).sort((a, b) => b[1] - a[1])[0] || null;
+
+    // Output metrics (commits, lines, lines-by-model) bucket by commit author time.
+    let commits = 0;
+    let linesAdded = 0;
+    const modelLines = {};
+    for (const s of correlatedSessions) {
+      const sessionTokens = Object.values(s.modelBreakdown).reduce((sum, d) => sum + d.tokens, 0);
+      for (const c of (s.commits || [])) {
+        if (c.timestampMs < startMs || c.timestampMs >= endMs) continue;
+        commits++;
+        const cLines = commitLinesAdded(s, c);
+        linesAdded += cLines;
+        for (const [m, data] of Object.entries(s.modelBreakdown)) {
+          const fam = getModelFamily(m) || 'unknown';
+          const share = sessionTokens > 0 ? data.tokens / sessionTokens : 0;
+          modelLines[fam] = (modelLines[fam] || 0) + cLines * share;
+        }
+      }
+    }
+
+    const costPerCommit = commits > 0 ? cost / commits : null;
 
     return { sessions: ss.length, cost, commits, linesAdded, tokens, autopilot, costPerCommit, dominantModel, modelCost, modelLines };
   };
@@ -185,16 +210,27 @@ function buildWeeklyNarrative(correlatedSessions, daily, _autonomyMetrics) {
     bullets.push(`Autopilot ratio: ${thisWeek.autopilot.toFixed(1)}x — your agent handled ${thisWeek.autopilot.toFixed(1)} actions per prompt.`);
   }
 
-  // Best day inside the week
-  const dailyInWeek = daily.filter(d => {
-    const t = new Date(d.date + 'T12:00:00').getTime();
-    return t >= thisStart && t < now;
-  });
-  const bestDay = dailyInWeek.filter(d => d.commits > 0).sort((a, b) => b.commits - a.commits)[0];
-  if (bestDay) {
-    const dn = new Date(bestDay.date + 'T12:00:00');
+  // Best day inside the week — bucket by commit author time. Cost for the day
+  // is attributed proportionally: each commit inherits sessionCost / commitCount
+  // from its parent session so the dollar figure tracks the commits shown.
+  const commitsByDay = {};
+  for (const s of correlatedSessions) {
+    const perCommitCost = s.commitCount > 0 ? s.cost.totalCost / s.commitCount : 0;
+    for (const c of (s.commits || [])) {
+      if (c.timestampMs < thisStart || c.timestampMs >= now) continue;
+      const dt = new Date(c.timestampMs);
+      const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+      if (!commitsByDay[key]) commitsByDay[key] = { commits: 0, cost: 0 };
+      commitsByDay[key].commits++;
+      commitsByDay[key].cost += perCommitCost;
+    }
+  }
+  const bestDayEntry = Object.entries(commitsByDay).sort((a, b) => b[1].commits - a[1].commits)[0];
+  if (bestDayEntry) {
+    const [dateStr, { commits: dCommits, cost: dCost }] = bestDayEntry;
+    const dn = new Date(dateStr + 'T12:00:00');
     const dayLabel = dn.toLocaleDateString(undefined, { weekday: 'long' });
-    bullets.push(`${dayLabel} was your most productive day — ${bestDay.commits} commit${bestDay.commits === 1 ? '' : 's'} for $${bestDay.cost.toFixed(2)}.`);
+    bullets.push(`${dayLabel} was your most productive day — ${dCommits} commit${dCommits === 1 ? '' : 's'} for $${dCost.toFixed(2)}.`);
   }
 
   // Efficiency trend flag
@@ -878,7 +914,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
 
   const insights = generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics);
 
-  const weeklyNarrative = buildWeeklyNarrative(correlatedSessions, daily, autonomyMetrics);
+  const weeklyNarrative = buildWeeklyNarrative(correlatedSessions, autonomyMetrics);
 
   return {
     meta: {
