@@ -18,9 +18,12 @@ export default defineConfig({
     trace: isCI ? 'retain-on-failure' : 'off',
   },
   // Boot the CLI against fixture sessions so CI has something to render.
+  // Regenerate fixtures first so their timestamps are current-relative —
+  // committed JSONL files bake Date.now() at generation time and age out of
+  // the dashboard's rolling 7-day window.
   webServer: isCI
     ? {
-        command: `node src/index.js --no-open --port ${CI_PORT} --claude-dir tests/fixtures/claude-projects --days 30 --refresh`,
+        command: `node tests/fixtures/build-fixtures.js && node src/index.js --no-open --port ${CI_PORT} --claude-dir tests/fixtures/claude-projects --days 30 --refresh`,
         url: `http://localhost:${CI_PORT}/api/all`,
         reuseExistingServer: false,
         timeout: 30_000,
