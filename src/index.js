@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Command } from 'commander';
+import { writeArtifacts } from './artifacts.js';
 import { deleteCache, getStaleFiles, loadCache, saveCache } from './cache.js';
 import { parseAllProjects } from './claude-parser.js';
 import { correlateSessions } from './correlator.js';
@@ -126,6 +127,8 @@ async function main() {
     .option('--refresh', 'force full re-parse, ignore cache')
     .option('--plan <plan>', 'billing model for cost figures: api | pro | max5x | max20x | free', 'api')
     .option('--blame', 'compute true git-blame line survival + code half-life (slower; opt-in)')
+    .option('--digest [path]', 'write a self-contained weekly digest HTML file (default ./codelens-digest.html) and exit')
+    .option('--badge [dir]', 'write an embeddable ROI badge (codelens-badge.svg + .md) to dir (default .) and exit')
     .option('--autonomy', 'print autonomy metrics table to stdout and exit')
     .option('--claude-dir <path>', 'override path to Claude Code projects directory (for testing/CI)');
 
@@ -159,6 +162,18 @@ async function main() {
   // Output
   if (opts.json) {
     process.stdout.write(JSON.stringify(payload, null, 2));
+    process.exit(0);
+  }
+
+  if (opts.digest || opts.badge) {
+    const digestPath = opts.digest ? (typeof opts.digest === 'string' ? opts.digest : 'codelens-digest.html') : null;
+    const badgeDir = opts.badge ? (typeof opts.badge === 'string' ? opts.badge : '.') : null;
+    const written = writeArtifacts(payload, { digestPath, badgeDir });
+    if (written.digest) console.log(`  ${icon.ok} ${c.green}Weekly digest:${c.reset} ${written.digest}`);
+    if (written.badgeSvg) {
+      console.log(`  ${icon.ok} ${c.green}ROI badge:${c.reset} ${written.badgeSvg}`);
+      console.log(`    ${c.dim}Markdown snippet written to ${written.badgeMarkdown}${c.reset}`);
+    }
     process.exit(0);
   }
 
