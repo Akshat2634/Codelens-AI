@@ -250,6 +250,32 @@ test('reconciliation aggregates commit confidence and line populations', () => {
   assert.equal(r.lines.organic, 50);            // unmatched commit
 });
 
+test('subscription plan mode computes effective cost + utilization', () => {
+  const session = mkCorrelated({
+    cost: { totalCost: 50, inputCost: 25, outputCost: 20, cacheReadCost: 3, cacheCreationCost: 2 },
+    commits: [{
+      hash: 'p1', timestamp: '2026-04-20T10:30:00.000Z', timestampMs: new Date('2026-04-20T10:30:00.000Z').getTime(),
+      subject: 's', branches: ['main'], onMain: true,
+      files: [{ path: 'src/foo.js', added: 100, deleted: 0 }], totalAdded: 100, totalDeleted: 0,
+    }],
+    commitCount: 1, commitsOnMain: 1, linesAdded: 100,
+  });
+  const cbr = { '/repo': { commits: session.commits, defaultBranch: 'main' } };
+
+  // No plan → summary.plan is null (backward compatible)
+  assert.equal(computeMetrics([session], [], cbr, 30).summary.plan, null);
+
+  // max5 = $100/mo, 30-day window → windowCost $100; totalCost $50; 1 commit; 100 surviving lines
+  const m = computeMetrics([session], [], cbr, 30, { name: 'max5', monthlyCost: 100 });
+  const p = m.summary.plan;
+  assert.ok(p, 'plan should be populated');
+  assert.equal(p.windowCost, 100);
+  assert.equal(p.apiEquivalentCost, 50);
+  assert.equal(p.utilizationRatio, 0.5);          // 50 API-equiv / 100 fee
+  assert.equal(p.effectiveCostPerCommit, 100);     // 100 fee / 1 commit
+  assert.equal(p.effectiveCostPerSurvivingLine, 1); // 100 fee / 100 surviving lines
+});
+
 test('weeklyNarrative populated when this-week sessions exist', () => {
   const now = Date.now();
   const recent = mkCorrelated({

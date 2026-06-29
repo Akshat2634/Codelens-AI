@@ -643,7 +643,7 @@ function capitalise(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days) {
+export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days, planConfig = null) {
   // ---- Summary ----
   const totalCost = correlatedSessions.reduce((s, c) => s + c.cost.totalCost, 0);
   const totalSessions = correlatedSessions.length;
@@ -914,10 +914,30 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     },
   };
 
+  // Subscription "effective cost" mode (only when a plan is supplied). Reframes
+  // API-equivalent spend against the flat fee actually paid, prorated to the
+  // analyzed window. utilizationRatio = API-equivalent value / fee — an estimate
+  // of value extracted, NOT realized savings (subscription users pay the flat fee
+  // regardless of usage).
+  const plan = planConfig ? (() => {
+    const windowCost = planConfig.monthlyCost * (days / 30);
+    return {
+      name: planConfig.name,
+      monthlyCost: planConfig.monthlyCost,
+      windowDays: days,
+      windowCost: Math.round(windowCost * 100) / 100,
+      apiEquivalentCost: Math.round(totalCost * 100) / 100,
+      utilizationRatio: windowCost > 0 ? Math.round((totalCost / windowCost) * 100) / 100 : null,
+      effectiveCostPerCommit: totalCommits > 0 ? Math.round((windowCost / totalCommits) * 100) / 100 : null,
+      effectiveCostPerSurvivingLine: lineSurvival.surviving > 0 ? Math.round((windowCost / lineSurvival.surviving) * 10000) / 10000 : null,
+    };
+  })() : null;
+
   const summary = {
     totalCost,
     pricingEstimatedPct: totalCost > 0 ? Math.round((pricingEstimatedCost / totalCost) * 100) : 0,
     reconciliation,
+    plan,
     totalSessions,
     totalCommits,
     totalLinesAdded,
