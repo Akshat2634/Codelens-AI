@@ -1,4 +1,24 @@
 import { getModelFamily, PLAN_PRICING } from './claude-parser.js';
+import { isAttributable } from './correlator.js';
+
+// Map a file path to a human language label by extension (for per-language durability).
+const EXT_LANG = {
+  js: 'JavaScript', jsx: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript',
+  ts: 'TypeScript', tsx: 'TypeScript', py: 'Python', go: 'Go', rs: 'Rust',
+  rb: 'Ruby', java: 'Java', kt: 'Kotlin', swift: 'Swift', c: 'C', h: 'C',
+  cpp: 'C++', cc: 'C++', cs: 'C#', php: 'PHP', sh: 'Shell', bash: 'Shell',
+  html: 'HTML', css: 'CSS', scss: 'CSS', vue: 'Vue', svelte: 'Svelte',
+  json: 'JSON', yaml: 'YAML', yml: 'YAML', toml: 'Config', md: 'Markdown',
+  sql: 'SQL', tf: 'Terraform',
+};
+function extOf(p) {
+  const base = p.split('/').pop() || '';
+  const i = base.lastIndexOf('.');
+  return i > 0 ? base.slice(i + 1).toLowerCase() : '';
+}
+function langOf(p) {
+  return EXT_LANG[extOf(p)] || (extOf(p) ? extOf(p).toUpperCase() : 'Other');
+}
 
 const CHURN_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -262,15 +282,17 @@ function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics) {
 function computeLineSurvival(commitsByRepo) {
   let totalAdded = 0;
   let totalChurned = 0;
+  const byLang = new Map(); // language -> { added, churned }
 
   for (const analysis of Object.values(commitsByRepo)) {
     const userCommits = analysis.commits;
     if (!userCommits.length) continue;
 
-    // Group commits by file
+    // Group commits by file (excluding generated/lock/minified files)
     const fileTimeline = new Map();
     for (const commit of userCommits) {
       for (const file of commit.files) {
+        if (!isAttributable(file.path)) continue;
         if (!fileTimeline.has(file.path)) fileTimeline.set(file.path, []);
         fileTimeline.get(file.path).push({
           timestampMs: commit.timestampMs,
@@ -281,15 +303,20 @@ function computeLineSurvival(commitsByRepo) {
     }
 
     // For each file, check for churn within 24h
-    for (const entries of fileTimeline.values()) {
+    for (const [filePath, entries] of fileTimeline) {
+      const lang = langOf(filePath);
+      if (!byLang.has(lang)) byLang.set(lang, { added: 0, churned: 0 });
+      const lb = byLang.get(lang);
       entries.sort((a, b) => a.timestampMs - b.timestampMs);
       for (let i = 0; i < entries.length; i++) {
         totalAdded += entries[i].added;
+        lb.added += entries[i].added;
         if (i + 1 < entries.length) {
           const gap = entries[i + 1].timestampMs - entries[i].timestampMs;
           if (gap <= CHURN_WINDOW_MS) {
             const churned = Math.min(entries[i + 1].deleted, entries[i].added);
             totalChurned += churned;
+            lb.churned += churned;
           }
         }
       }
@@ -301,7 +328,147 @@ function computeLineSurvival(commitsByRepo) {
   const rawRate = totalAdded > 0 ? (surviving / totalAdded) * 100 : 100;
   const survivalRate = Math.round(rawRate / 5) * 5;
 
-  return { totalAdded, totalChurned, surviving, survivalRate };
+  const byLanguage = [...byLang.entries()]
+    .map(([language, d]) => ({
+      language,
+      added: d.added,
+      churned: d.churned,
+      surviving: d.added - d.churned,
+      survivalRatePct: d.added > 0 ? Math.round(((d.added - d.churned) / d.added) * 100) : 100,
+    }))
+    .filter(l => l.added >= 10)
+    .sort((a, b) => b.added - a.added)
+    .slice(0, 12);
+
+  return { totalAdded, totalChurned, surviving, survivalRate, byLanguage };
+}
+
+// Outcome (did it stick?) metrics derived from commit subjects — the quality
+// counterweight to raw throughput. Revert rate, fix rate, and bug-fix-follow-on
+// ("rework") rate are the local analogs of DORA change-failure-rate / Faros rework.
+const REWORK_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+function computeQualityOutcomes(correlatedSessions, commitsByRepo, organicCommits) {
+  const aiCommits = [];
+  for (const s of correlatedSessions) for (const c of (s.commits || [])) aiCommits.push(c);
+
+  let totalUserCommits = 0, reverts = 0, fixes = 0, added = 0, deleted = 0;
+  const byFile = new Map(); // path -> [{ ts, isFix, hash }]
+  for (const analysis of Object.values(commitsByRepo)) {
+    for (const c of (analysis.commits || [])) {
+      totalUserCommits++;
+      if (c.isRevert) reverts++;
+      if (c.isFix) fixes++;
+      added += c.totalAdded || 0;
+      deleted += c.totalDeleted || 0;
+      for (const f of c.files) {
+        if (!isAttributable(f.path)) continue;
+        if (!byFile.has(f.path)) byFile.set(f.path, []);
+        byFile.get(f.path).push({ ts: c.timestampMs, isFix: c.isFix, hash: c.hash });
+      }
+    }
+  }
+  for (const arr of byFile.values()) arr.sort((a, b) => a.ts - b.ts);
+
+  // Bug-fix-follow-on: an AI-correlated commit later followed (within the rework
+  // window) by a fix commit touching one of the same files.
+  let aiWithFollowupFix = 0;
+  for (const c of aiCommits) {
+    let found = false;
+    for (const f of c.files) {
+      if (!isAttributable(f.path)) continue;
+      for (const e of (byFile.get(f.path) || [])) {
+        if (e.hash !== c.hash && e.isFix && e.ts > c.timestampMs && e.ts - c.timestampMs <= REWORK_WINDOW_MS) {
+          found = true; break;
+        }
+      }
+      if (found) break;
+    }
+    if (found) aiWithFollowupFix++;
+  }
+
+  const aiOrphanCommitCount = organicCommits.filter(c => c.aiAuthored).length;
+  const pct = (n, d) => d > 0 ? Math.round((n / d) * 1000) / 10 : 0;
+  return {
+    totalUserCommits,
+    revertCount: reverts,
+    revertRatePct: pct(reverts, totalUserCommits),
+    fixCount: fixes,
+    fixRatePct: pct(fixes, totalUserCommits),
+    aiCommitCount: aiCommits.length,
+    aiCommitsWithFollowupFix: aiWithFollowupFix,
+    reworkRatePct: pct(aiWithFollowupFix, aiCommits.length),
+    deletionRatio: added > 0 ? Math.round((deleted / added) * 100) / 100 : 0,
+    aiOrphanCommitCount,
+  };
+}
+
+// Streak of consecutive days (ending today/yesterday) with AI-assisted committed
+// output, plus the longest streak in the window — the GitHub-graph engagement loop.
+function computeStreaks(daily) {
+  const activeDates = new Set(daily.filter(d => d.commits > 0).map(d => d.date));
+  if (activeDates.size === 0) return { current: 0, longest: 0 };
+  const sorted = [...activeDates].sort();
+  let longest = 1, run = 1;
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = new Date(sorted[i - 1] + 'T12:00:00').getTime();
+    const cur = new Date(sorted[i] + 'T12:00:00').getTime();
+    const dayGap = Math.round((cur - prev) / 86400000);
+    run = dayGap === 1 ? run + 1 : 1;
+    if (run > longest) longest = run;
+  }
+  // Current streak: walk back from today (allowing today to be inactive yet).
+  let current = 0;
+  const cursor = new Date();
+  cursor.setHours(12, 0, 0, 0);
+  const key = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (!activeDates.has(key(cursor))) cursor.setDate(cursor.getDate() - 1); // today not done yet is fine
+  while (activeDates.has(key(cursor))) {
+    current++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return { current, longest };
+}
+
+// Waste & burn: flag high spend-rate sessions and test-fail-retry loops from the
+// bash command stream. Burn is measured as COST per active minute (cache-read tokens
+// are huge but ~free, so a token-rate would be meaningless). Deliberately does NOT
+// flag "many tool calls + zero commits" as waste — planning/research/chat-only
+// sessions legitimately look like that.
+function computeWaste(correlatedSessions) {
+  const costRate = (s) => (s.activeMinutes || 0) >= 1 ? s.cost.totalCost / s.activeMinutes : 0;
+  const sortedRates = correlatedSessions
+    .filter(s => (s.activeMinutes || 0) >= 1)
+    .map(costRate)
+    .sort((a, b) => a - b);
+  const median = sortedRates.length ? sortedRates[Math.floor(sortedRates.length / 2)] : 0;
+  const burnThreshold = median * 3;
+
+  const highBurn = [];
+  const overIterated = [];
+  for (const s of correlatedSessions) {
+    const active = s.activeMinutes || 0;
+    const rate = costRate(s);
+    // High burn = spend-rate far above the user's own median AND no surviving output
+    if (burnThreshold > 0 && rate > burnThreshold && s.commitCount === 0 && active >= 5) {
+      highBurn.push({ sessionId: s.sessionId, projectName: s.projectName, costPerActiveMin: Math.round(rate * 100) / 100, cost: Math.round(s.cost.totalCost * 100) / 100 });
+    }
+    // Over-iteration = the same verification command repeated many times
+    const verifCounts = {};
+    for (const bc of (s.bashCommands || [])) {
+      if (!bc.isVerification) continue;
+      const key = bc.command.split(' ').slice(0, 4).join(' ');
+      verifCounts[key] = (verifCounts[key] || 0) + 1;
+    }
+    const maxRepeat = Math.max(0, ...Object.values(verifCounts));
+    if (maxRepeat >= 5) {
+      overIterated.push({ sessionId: s.sessionId, projectName: s.projectName, repeats: maxRepeat });
+    }
+  }
+  return {
+    medianCostPerActiveMin: Math.round(median * 100) / 100,
+    highBurnSessions: highBurn.sort((a, b) => b.costPerActiveMin - a.costPerActiveMin).slice(0, 10),
+    overIteratedSessions: overIterated.sort((a, b) => b.repeats - a.repeats).slice(0, 10),
+  };
 }
 
 // ---- Autonomy metrics ----
@@ -452,7 +619,7 @@ function computeSessionGrade(session) {
   return 'F';
 }
 
-function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics, costControl) {
+function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics, costControl, qualityOutcomes) {
   // Insights are deliberately curated to avoid repeating what's already shown
   // on hero cards (cost/tokens/cache), the weekly narrative (best day, autopilot,
   // dominant model), or the autonomy section (self-heal, toolbelt, bash counts).
@@ -612,6 +779,30 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
     }
   }
 
+  // 8. Rework / revert rate — the quality counterweight to throughput
+  if (qualityOutcomes && qualityOutcomes.aiCommitCount >= 5) {
+    if (qualityOutcomes.reworkRatePct >= 10) {
+      candidates.push({
+        priority: 1,
+        type: 'warning',
+        text: `${qualityOutcomes.reworkRatePct}% of AI-assisted commits got a fix-up within a week — high rework, review more before committing.`,
+      });
+    } else if (qualityOutcomes.reworkRatePct > 0 && qualityOutcomes.reworkRatePct < 4) {
+      candidates.push({
+        priority: 3,
+        type: 'success',
+        text: `Only ${qualityOutcomes.reworkRatePct}% of AI-assisted commits needed a follow-up fix — durable output.`,
+      });
+    }
+  }
+  if (qualityOutcomes && qualityOutcomes.totalUserCommits >= 10 && qualityOutcomes.revertRatePct >= 5) {
+    candidates.push({
+      priority: 2,
+      type: 'info',
+      text: `${qualityOutcomes.revertRatePct}% of commits were reverts — above the <4% healthy range.`,
+    });
+  }
+
   // 9. Model token efficiency — distinct from cost ratio (tokens ≠ cost)
   const modelsForTokens = Object.entries(modelBreakdown).filter(([, d]) => d.tokensPerCommit);
   if (modelsForTokens.length > 1) {
@@ -749,9 +940,9 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     if (!modelBreakdown[family]) {
       modelBreakdown[family] = {
         cost: 0, tokens: 0, subModels: {},
-        sessions: 0, commits: 0, linesAdded: 0,
+        sessions: 0, commits: 0, linesAdded: 0, reverts: 0, fixes: 0,
         primaryCost: 0, primaryTokens: 0,
-        costPerCommit: null, tokensPerCommit: null,
+        costPerCommit: null, tokensPerCommit: null, reworkRatePct: null,
       };
     }
     return modelBreakdown[family];
@@ -773,6 +964,8 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     fam.sessions += 1;
     fam.commits += session.commitCount;
     fam.linesAdded += session.linesAdded;
+    fam.reverts += session.reverts || 0;
+    fam.fixes += session.fixes || 0;
     fam.primaryCost += session.cost.totalCost;
     fam.primaryTokens += Object.values(session.modelBreakdown).reduce((s, d) => s + d.tokens, 0);
   }
@@ -780,6 +973,8 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   for (const data of Object.values(modelBreakdown)) {
     data.costPerCommit = data.commits > 0 ? data.primaryCost / data.commits : null;
     data.tokensPerCommit = data.commits > 0 ? Math.round(data.primaryTokens / data.commits) : null;
+    // Durability proxy until per-model blame survival lands: fixes among this model's commits.
+    data.reworkRatePct = data.commits > 0 ? Math.round((data.fixes / data.commits) * 1000) / 10 : null;
     data.subModels = Object.fromEntries(
       Object.entries(data.subModels).sort(([, a], [, b]) => b.cost - a.cost)
     );
@@ -963,6 +1158,11 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     benchmarks: BENCHMARKS,
   };
 
+  // ---- Outcome / quality metrics ----
+  const qualityOutcomes = computeQualityOutcomes(correlatedSessions, commitsByRepo, organicCommits);
+  const streaks = computeStreaks(daily);
+  const waste = computeWaste(correlatedSessions);
+
   // ---- Autonomy metrics ----
   const autonomyMetrics = computeAutonomyMetrics(correlatedSessions);
 
@@ -979,7 +1179,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     };
   });
 
-  const insights = generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics, costControl);
+  const insights = generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics, costControl, qualityOutcomes);
 
   const weeklyNarrative = buildWeeklyNarrative(correlatedSessions, autonomyMetrics);
 
@@ -1000,6 +1200,9 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     summary,
     tokenAnalytics,
     costControl,
+    qualityOutcomes,
+    streaks,
+    waste,
     autonomyMetrics,
     insights,
     daily,

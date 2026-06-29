@@ -1,11 +1,21 @@
 const FALLBACK_BUFFER_MS = 2 * 60 * 60 * 1000; // 2 hours for time-only fallback
 
+// Generated / vendored / lock / minified files: their line counts are not human or
+// AI authorship and would massively inflate output, so they are excluded from line
+// attribution (count is still visible via filesChanged). Mirrors Anthropic's and
+// GitClear's attribution-exclusion rules.
+const EXCLUDED_PATH = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|cargo\.lock|poetry\.lock|composer\.lock|go\.sum|gemfile\.lock)$|\.min\.(js|css)$|(^|\/)(dist|build|vendor|node_modules|\.next|out)\//i;
+
+export function isAttributable(filePath) {
+  return !EXCLUDED_PATH.test(filePath);
+}
+
 function computeOverlappingLines(commits, sessionFiles) {
   let linesAdded = 0;
   let linesDeleted = 0;
   for (const c of commits) {
     for (const f of c.files) {
-      if (sessionFiles.has(f.path)) {
+      if (sessionFiles.has(f.path) && isAttributable(f.path)) {
         linesAdded += f.added;
         linesDeleted += f.deleted;
       }
@@ -103,13 +113,15 @@ export function correlateSessions(sessions, commitsByRepo) {
   for (const session of sessions) {
     const sessionFiles = new Set(session.filesWritten || []);
     const matched = sessionCommits.get(session.sessionId) || [];
+    const sessionStartMs = new Date(session.startTime).getTime();
+    const sessionEndMs = new Date(session.endTime).getTime();
 
     let linesAdded, linesDeleted;
     if (sessionFiles.size > 0) {
       ({ linesAdded, linesDeleted } = computeOverlappingLines(matched, sessionFiles));
     } else {
-      linesAdded = matched.reduce((s, c) => s + c.totalAdded, 0);
-      linesDeleted = matched.reduce((s, c) => s + c.totalDeleted, 0);
+      linesAdded = matched.reduce((s, c) => s + c.files.filter(f => isAttributable(f.path)).reduce((a, f) => a + f.added, 0), 0);
+      linesDeleted = matched.reduce((s, c) => s + c.files.filter(f => isAttributable(f.path)).reduce((a, f) => a + f.deleted, 0), 0);
     }
     const netLines = linesAdded - linesDeleted;
     const filesChanged = sessionFiles.size > 0
@@ -123,6 +135,22 @@ export function correlateSessions(sessions, commitsByRepo) {
     const committedFiles = new Set(matched.flatMap(c => c.files.map(f => f.path)));
     const uncommittedFiles = [...sessionFiles].filter(f => !committedFiles.has(f));
 
+    // Match confidence: tight file-overlap inside the session window is 'high';
+    // file-overlap that only landed in the +2h buffer is 'medium'; a time-only
+    // (chat-only) match is 'low'. Exposed instead of the bare matchedByFiles boolean.
+    let matchConfidence = null;
+    if (matched.length > 0) {
+      if (sessionFiles.size === 0) {
+        matchConfidence = 'low';
+      } else {
+        const allInWindow = matched.every(c => c.timestampMs >= sessionStartMs && c.timestampMs <= sessionEndMs);
+        matchConfidence = allInWindow ? 'high' : 'medium';
+      }
+    }
+    const reverts = matched.filter(c => c.isRevert).length;
+    const fixes = matched.filter(c => c.isFix).length;
+    const aiAuthoredCommits = matched.filter(c => c.aiAuthored).length;
+
     result.push({
       ...session,
       commits: matched,
@@ -134,6 +162,10 @@ export function correlateSessions(sessions, commitsByRepo) {
       filesChanged,
       isOrphaned,
       matchedByFiles: sessionFiles.size > 0,
+      matchConfidence,
+      reverts,
+      fixes,
+      aiAuthoredCommits,
       uncommittedFiles,
       costPerCommit: matched.length > 0 ? session.cost.totalCost / matched.length : null,
       costPerLine: linesAdded > 0 ? session.cost.totalCost / linesAdded : null,
