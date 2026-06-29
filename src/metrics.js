@@ -895,6 +895,25 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   }
 
   const pricingEstimatedCost = correlatedSessions.reduce((s, c) => s + (c.estimatedCost || 0), 0);
+  // Attribution confidence + reconciliation — make the headline numbers auditable:
+  // how many commits were confidently AI's vs. weakly-matched vs. organic (manual),
+  // and how the line counts reconcile (AI-attributed ⊆ AI-commit-total + organic).
+  const confCommits = { high: 0, medium: 0, low: 0 };
+  for (const s of correlatedSessions) {
+    if (s.commitCount > 0 && s.attributionConfidence) confCommits[s.attributionConfidence] += s.commitCount;
+  }
+  const aiCommitLinesTotal = correlatedSessions.reduce(
+    (a, s) => a + s.commits.reduce((x, c) => x + (c.totalAdded || 0), 0), 0);
+  const organicLines = organicCommits.reduce((a, c) => a + (c.totalAdded || 0), 0);
+  const reconciliation = {
+    commits: { aiMatched: totalCommits, organic: organicCommits.length, byConfidence: confCommits },
+    lines: {
+      aiAttributed: totalLinesAdded,       // lines in AI-written files within AI-matched commits
+      aiCommitsTotal: aiCommitLinesTotal,  // all lines in AI-matched commits (incl. files the AI didn't write)
+      organic: organicLines,               // lines in commits with no matched session
+    },
+  };
+
   // Subscription "effective cost" mode (only when a plan is supplied). Reframes
   // API-equivalent spend against the flat fee actually paid, prorated to the
   // analyzed window. utilizationRatio = API-equivalent value / fee — an estimate
@@ -917,6 +936,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   const summary = {
     totalCost,
     pricingEstimatedPct: totalCost > 0 ? Math.round((pricingEstimatedCost / totalCost) * 100) : 0,
+    reconciliation,
     plan,
     totalSessions,
     totalCommits,
