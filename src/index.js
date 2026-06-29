@@ -7,7 +7,7 @@ import { Command } from 'commander';
 import { deleteCache, getStaleFiles, loadCache, saveCache } from './cache.js';
 import { parseAllProjects } from './claude-parser.js';
 import { correlateSessions } from './correlator.js';
-import { analyzeGitRepo, getGitUser } from './git-analyzer.js';
+import { analyzeGitRepo, blameAiSurvival, combineBlameSurvival, getGitUser } from './git-analyzer.js';
 import { computeMetrics } from './metrics.js';
 import { createServer } from './server.js';
 
@@ -29,7 +29,7 @@ const icon = {
 };
 const fmt = (ms) => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 
-async function buildPayload(claudeDir, days, project, forceRefresh = false, plan = 'api') {
+async function buildPayload(claudeDir, days, project, forceRefresh = false, plan = 'api', blame = false) {
   // Step 1: Parse sessions (with caching)
   let sessions;
   let fileIndex;
@@ -83,9 +83,28 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false, plan
   const { correlatedSessions, organicCommits } = correlateSessions(sessions, commitsByRepo);
   console.log(`  ${icon.ok} Correlating sessions ${c.dim}── done${c.reset}`);
 
+  // Step 3b (opt-in): true git-blame line survival + half-life across AI-correlated commits
+  let blameSurvival = null;
+  if (blame) {
+    const startBlame = Date.now();
+    const byRepo = new Map();
+    for (const s of correlatedSessions) {
+      if (!s.commits?.length) continue;
+      if (!byRepo.has(s.repoPath)) byRepo.set(s.repoPath, new Map());
+      for (const co of s.commits) byRepo.get(s.repoPath).set(co.hash, co); // dedupe by hash
+    }
+    const results = [];
+    for (const [repoPath, commitMap] of byRepo) {
+      results.push(blameAiSurvival(repoPath, [...commitMap.values()]));
+    }
+    blameSurvival = combineBlameSurvival(results);
+    console.log(`  ${icon.ok} Blame survival ${c.dim}── ${byRepo.size} repos${blameSurvival?.cappedFiles ? ', file-capped' : ''} (${fmt(Date.now() - startBlame)})${c.reset}`);
+  }
+
   // Step 4: Compute metrics
   const payload = computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days, plan);
   payload.meta.gitUser = getGitUser();
+  if (blameSurvival) payload.halfLife = blameSurvival;
 
   // Save cache for next run
   saveCache(sessions, fileIndex);
@@ -106,6 +125,7 @@ async function main() {
     .option('--project <name>', 'filter to specific project')
     .option('--refresh', 'force full re-parse, ignore cache')
     .option('--plan <plan>', 'billing model for cost figures: api | pro | max5x | max20x | free', 'api')
+    .option('--blame', 'compute true git-blame line survival + code half-life (slower; opt-in)')
     .option('--autonomy', 'print autonomy metrics table to stdout and exit')
     .option('--claude-dir <path>', 'override path to Claude Code projects directory (for testing/CI)');
 
@@ -127,7 +147,7 @@ async function main() {
     ? path.resolve(opts.claudeDir)
     : path.join(os.homedir(), '.claude', 'projects');
 
-  const payload = await buildPayload(claudeDir, days, opts.project, opts.refresh, plan);
+  const payload = await buildPayload(claudeDir, days, opts.project, opts.refresh, plan, !!opts.blame);
   if (payload) payload.meta.invokedAs = invokedAs.includes('claude-roi') ? 'claude-roi' : 'codelens-ai';
 
   if (!payload) {
@@ -164,7 +184,7 @@ async function main() {
   }
 
   // Start server — pass a rebuild function so /api/refresh can re-run the pipeline
-  const rebuild = () => buildPayload(claudeDir, days, opts.project, true, plan);
+  const rebuild = () => buildPayload(claudeDir, days, opts.project, true, plan, !!opts.blame);
   const app = createServer(payload, rebuild);
   const server = app.listen(port, () => {
     const url = `http://localhost:${port}`;

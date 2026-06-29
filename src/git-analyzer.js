@@ -1,6 +1,10 @@
 import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { isAttributable } from './correlator.js';
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const BLAME_FILE_CAP = 600; // safety bound on per-repo blame work
 
 export function getGitUser() {
   try {
@@ -225,4 +229,122 @@ export function analyzeGitRepo(repoPath, days) {
     process.stderr.write(`Warning: Git analysis failed for ${repoPath}: ${err.message}\n`);
     return { repoPath, commits: [], allCommits: [], defaultBranch: null };
   }
+}
+
+/**
+ * True line-survival via git blame at HEAD (opt-in; expensive).
+ *
+ * For each file an AI-correlated commit touched, blame HEAD and count how many lines
+ * are STILL attributed to their original AI commit. Because blame attributes a line to
+ * its LAST-touching commit, "surviving" here means the line has not been edited since
+ * the AI introduced it — any later change (even by the same author) counts as not
+ * surviving. Lines are bucketed by the age of their introducing commit to derive a
+ * decay curve and an estimated half-life. Returns null when there is too little
+ * history to say anything honest.
+ *
+ * @param {string} repoPath
+ * @param {Array<{hash:string,timestampMs:number,files:Array<{path:string,added:number}>}>} aiCommits
+ */
+export function blameAiSurvival(repoPath, aiCommits, nowMs = Date.now()) {
+  if (!existsSync(path.join(repoPath, '.git')) || !aiCommits.length) return null;
+
+  const aiHashes = new Set(aiCommits.map(c => c.hash));
+  const files = new Set();
+  for (const c of aiCommits) {
+    for (const f of c.files) if (isAttributable(f.path)) files.add(f.path);
+  }
+  const fileList = [...files].slice(0, BLAME_FILE_CAP);
+  const cappedFiles = files.size > BLAME_FILE_CAP;
+
+  // surviving lines per AI commit hash (blamed to that hash at HEAD)
+  const survivingByHash = new Map();
+  for (const file of fileList) {
+    try {
+      const out = execSync(
+        `git -C "${repoPath}" blame --line-porcelain HEAD -- "${file}"`,
+        { encoding: 'utf-8', maxBuffer: 50 * 1024 * 1024, stdio: ['pipe', 'pipe', 'ignore'] }
+      );
+      for (const line of out.split('\n')) {
+        const m = line.match(/^([0-9a-f]{40}) /);
+        if (m && aiHashes.has(m[1])) survivingByHash.set(m[1], (survivingByHash.get(m[1]) || 0) + 1);
+      }
+    } catch {
+      // File renamed/deleted at HEAD, binary, or unreadable — its AI lines simply
+      // count as not surviving (they're not present under this path at HEAD).
+    }
+  }
+
+  // Aggregate + weekly cohorts (by age of the introducing commit).
+  let introduced = 0;
+  let surviving = 0;
+  const cohorts = new Map(); // ageWeeks -> { introduced, surviving }
+  for (const c of aiCommits) {
+    const added = c.files.filter(f => isAttributable(f.path)).reduce((a, f) => a + f.added, 0);
+    if (added === 0) continue;
+    const surv = Math.min(survivingByHash.get(c.hash) || 0, added); // cap (blame counts current lines)
+    introduced += added;
+    surviving += surv;
+    const ageWeeks = Math.max(0, Math.floor((nowMs - c.timestampMs) / WEEK_MS));
+    if (!cohorts.has(ageWeeks)) cohorts.set(ageWeeks, { introduced: 0, surviving: 0 });
+    const cw = cohorts.get(ageWeeks);
+    cw.introduced += added;
+    cw.surviving += surv;
+  }
+
+  if (introduced === 0) return null;
+  return finalizeBlame(introduced, surviving, cohorts, { cappedFiles, blamedFiles: fileList.length });
+}
+
+// Shared finalization for a single repo or the merged set: builds the weekly decay
+// curve and the half-life estimate (youngest weekly cohort below 50% survival).
+function finalizeBlame(introduced, surviving, cohortsMap, extra) {
+  const byAgeWeeks = [...cohortsMap.entries()]
+    .map(([ageWeeks, d]) => ({
+      ageWeeks,
+      introduced: d.introduced,
+      surviving: d.surviving,
+      survivalRatePct: Math.round((d.surviving / d.introduced) * 100),
+    }))
+    .sort((a, b) => a.ageWeeks - b.ageWeeks);
+
+  // Requires ≥3 distinct weekly cohorts spanning ≥3 weeks, else not enough signal.
+  const span = byAgeWeeks.length ? byAgeWeeks[byAgeWeeks.length - 1].ageWeeks : 0;
+  const sufficientHistory = byAgeWeeks.length >= 3 && span >= 3;
+  let halfLifeWeeks = null;
+  if (sufficientHistory) {
+    const below = byAgeWeeks.find(b => b.survivalRatePct < 50);
+    halfLifeWeeks = below ? below.ageWeeks : null; // null ⇒ still above 50% across the window
+  }
+
+  return {
+    introduced,
+    surviving,
+    survivalRatePct: Math.round((surviving / introduced) * 100),
+    byAgeWeeks,
+    halfLifeWeeks,
+    sufficientHistory,
+    ...extra,
+  };
+}
+
+// Merge per-repo blame-survival results into one aggregate decay curve + half-life.
+export function combineBlameSurvival(results) {
+  const valid = results.filter(Boolean);
+  if (!valid.length) return null;
+  let introduced = 0, surviving = 0, blamedFiles = 0, cappedFiles = false;
+  const cohorts = new Map();
+  for (const r of valid) {
+    introduced += r.introduced;
+    surviving += r.surviving;
+    blamedFiles += r.blamedFiles || 0;
+    cappedFiles = cappedFiles || !!r.cappedFiles;
+    for (const b of r.byAgeWeeks) {
+      if (!cohorts.has(b.ageWeeks)) cohorts.set(b.ageWeeks, { introduced: 0, surviving: 0 });
+      const cw = cohorts.get(b.ageWeeks);
+      cw.introduced += b.introduced;
+      cw.surviving += b.surviving;
+    }
+  }
+  if (introduced === 0) return null;
+  return finalizeBlame(introduced, surviving, cohorts, { cappedFiles, blamedFiles, repos: valid.length });
 }
