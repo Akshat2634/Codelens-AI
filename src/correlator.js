@@ -15,6 +15,29 @@ function computeOverlappingLines(commits, sessionFiles) {
 }
 
 /**
+ * AI-attributed line counts for a single (session, commit) pair: the added/
+ * deleted lines in files the session actually wrote (filesWritten ∩ commit.files).
+ * For chat-only sessions (no filesWritten) the whole commit is attributed.
+ * This is the single definition of "AI lines" used across the codebase so that
+ * per-session, daily-timeline, and code-survival totals reconcile exactly.
+ */
+export function commitLinesForSession(session, commit) {
+  const sessionFiles = new Set(session.filesWritten || []);
+  if (sessionFiles.size === 0) {
+    return { added: commit.totalAdded || 0, deleted: commit.totalDeleted || 0 };
+  }
+  let added = 0;
+  let deleted = 0;
+  for (const f of commit.files) {
+    if (sessionFiles.has(f.path)) {
+      added += f.added;
+      deleted += f.deleted;
+    }
+  }
+  return { added, deleted };
+}
+
+/**
  * Compute the temporal distance between a commit and a session.
  * Returns the minimum absolute distance from the commit to the session's
  * time range (0 if the commit falls within the session window).
@@ -74,9 +97,15 @@ export function correlateSessions(sessions, commitsByRepo) {
         // Prefer file-based match over time-only match
         if (hasFileOverlap && !existing.hasFileOverlap) {
           commitAssignment.set(commit.hash, { session, hasFileOverlap, distance });
-        } else if (hasFileOverlap === existing.hasFileOverlap && distance < existing.distance) {
-          // Same match type — prefer temporally closer session
-          commitAssignment.set(commit.hash, { session, hasFileOverlap, distance });
+        } else if (hasFileOverlap === existing.hasFileOverlap) {
+          // Same match type — prefer the temporally closer session; break exact
+          // ties by the more recent session start so attribution is deterministic
+          // (not dependent on session iteration order).
+          const tieToNewer = distance === existing.distance &&
+            new Date(session.startTime).getTime() > new Date(existing.session.startTime).getTime();
+          if (distance < existing.distance || tieToNewer) {
+            commitAssignment.set(commit.hash, { session, hasFileOverlap, distance });
+          }
         }
       }
     }

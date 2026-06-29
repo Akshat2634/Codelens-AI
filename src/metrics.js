@@ -1,4 +1,5 @@
 import { getModelFamily } from './claude-parser.js';
+import { commitLinesForSession } from './correlator.js';
 
 const CHURN_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -40,8 +41,11 @@ function computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, t
   const tokensPerLineAdded = totalLinesAdded > 0 ? Math.round(totalAllTokens / totalLinesAdded) : 0;
   const tokensPerSurvivingLine = lineSurvival.surviving > 0
     ? Math.round(totalAllTokens / lineSurvival.surviving) : 0;
-  const outputInputRatio = totalInputTokens > 0
-    ? Math.round((totalOutputTokens / totalInputTokens) * 100) / 100 : 0;
+  // Output per input token the model actually processed (fresh input + cache
+  // reads). Excluding cache reads inflates this badly under heavy prompt caching.
+  const effectiveInput = totalInputTokens + totalCacheReadTokens;
+  const outputInputRatio = effectiveInput > 0
+    ? Math.round((totalOutputTokens / effectiveInput) * 100) / 100 : 0;
 
   // Cache efficiency
   const totalRawInput = totalInputTokens + totalCacheReadTokens;
@@ -50,9 +54,6 @@ function computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, t
   const totalCacheReadCost = correlatedSessions.reduce((s, c) => s + c.cost.cacheReadCost, 0);
   // Cache reads are 90% cheaper — savings = what it would have cost at full price minus what was paid
   const cacheSavingsDollars = totalCacheReadCost * 9;
-
-  // Fun facts
-  const funFacts = generateTokenFunFacts(totalAllTokens, totalOutputTokens);
 
   return {
     totalAllTokens,
@@ -81,19 +82,7 @@ function computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, t
       orphaned: tokensOrphaned,
       exploratory: tokensExploratory,
     },
-    funFacts,
   };
-}
-
-function generateTokenFunFacts(_totalAllTokens, totalOutputTokens) {
-  const facts = [];
-  // ~0.75 words per token for English text
-  const approxWords = Math.round(totalOutputTokens * 0.75);
-  const novels = (approxWords / 80000).toFixed(1);
-  if (parseFloat(novels) >= 0.1) {
-    facts.push(`Claude generated ~${formatBigNumber(approxWords)} words of output — about ${novels} novels worth of text.`);
-  }
-  return facts;
 }
 
 function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics) {
@@ -261,18 +250,21 @@ function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics) {
   };
 }
 
-function computeLineSurvival(commitsByRepo) {
+function computeLineSurvival(correlatedSessions) {
   let totalAdded = 0;
   let totalChurned = 0;
 
-  for (const analysis of Object.values(commitsByRepo)) {
-    const userCommits = analysis.commits;
-    if (!userCommits.length) continue;
-
-    // Group commits by file
-    const fileTimeline = new Map();
-    for (const commit of userCommits) {
+  // Build a per-file edit timeline from AI-correlated commits ONLY, counting just
+  // the lines in files the matched session actually wrote (overlap). This makes
+  // survival an AI-quality signal (not "all of the user's code") and makes its
+  // totalAdded reconcile exactly with summary.totalLinesAdded.
+  const fileTimeline = new Map();
+  for (const session of correlatedSessions) {
+    const sessionFiles = new Set(session.filesWritten || []);
+    const chatOnly = sessionFiles.size === 0;
+    for (const commit of (session.commits || [])) {
       for (const file of commit.files) {
+        if (!chatOnly && !sessionFiles.has(file.path)) continue;
         if (!fileTimeline.has(file.path)) fileTimeline.set(file.path, []);
         fileTimeline.get(file.path).push({
           timestampMs: commit.timestampMs,
@@ -281,29 +273,46 @@ function computeLineSurvival(commitsByRepo) {
         });
       }
     }
+  }
 
-    // For each file, check for churn within 24h
-    for (const entries of fileTimeline.values()) {
-      entries.sort((a, b) => a.timestampMs - b.timestampMs);
-      for (let i = 0; i < entries.length; i++) {
-        totalAdded += entries[i].added;
-        if (i + 1 < entries.length) {
-          const gap = entries[i + 1].timestampMs - entries[i].timestampMs;
-          if (gap <= CHURN_WINDOW_MS) {
-            const churned = Math.min(entries[i + 1].deleted, entries[i].added);
-            totalChurned += churned;
-          }
-        }
+  // Churn accounting per file. Walk edits in order keeping a LIFO stack of
+  // still-live additions; each deletion consumes the most-recent additions, and
+  // only deletions that land within CHURN_WINDOW_MS of an addition count as churn
+  // (a deletion after the window is a legitimate later change, not rework). This
+  // catches multi-edit rework that a naive next-edit-only comparison misses.
+  const nowMs = Date.now();
+  let maturing = 0; // lines too young to have been observable for a full window
+  for (const entries of fileTimeline.values()) {
+    entries.sort((a, b) => a.timestampMs - b.timestampMs);
+    const live = []; // { ts, n } additions not yet deleted
+    for (const e of entries) {
+      totalAdded += e.added;
+      let toDelete = e.deleted;
+      while (toDelete > 0 && live.length > 0) {
+        const block = live[live.length - 1];
+        const take = Math.min(block.n, toDelete);
+        if (e.timestampMs - block.ts <= CHURN_WINDOW_MS) totalChurned += take;
+        block.n -= take;
+        toDelete -= take;
+        if (block.n === 0) live.pop();
       }
+      if (e.added > 0) live.push({ ts: e.timestampMs, n: e.added });
+    }
+    // Lines still live but younger than the window can't be judged yet — exclude
+    // them from the rate (right-censoring) so recent work doesn't inflate survival.
+    for (const block of live) {
+      if (nowMs - block.ts < CHURN_WINDOW_MS) maturing += block.n;
     }
   }
 
-  const surviving = totalAdded - totalChurned;
+  const surviving = totalAdded - totalChurned; // raw lines that survived the window
+  const observed = totalAdded - maturing;      // lines old enough to judge
+  const survived = surviving - maturing;       // matured lines that weren't churned
   // Round to nearest 5% to avoid false precision
-  const rawRate = totalAdded > 0 ? (surviving / totalAdded) * 100 : 100;
+  const rawRate = observed > 0 ? (survived / observed) * 100 : 100;
   const survivalRate = Math.round(rawRate / 5) * 5;
 
-  return { totalAdded, totalChurned, surviving, survivalRate };
+  return { totalAdded, totalChurned, surviving, maturing, survivalRate };
 }
 
 // ---- Autonomy metrics ----
@@ -332,7 +341,9 @@ function computeAutonomyMetrics(correlatedSessions) {
       : 0;
 
     const uniqueTools = Object.keys(s.toolCalls).length;
-    const toolbeltCoverage = Math.round((uniqueTools / TOTAL_AVAILABLE_TOOLS) * 100);
+    // Descriptor only (not scored): clamp at 100 since sessions can use more
+    // distinct tools (MCP/custom/Task) than the fixed known-tool denominator.
+    const toolbeltCoverage = Math.min(100, Math.round((uniqueTools / TOTAL_AVAILABLE_TOOLS) * 100));
 
     const totalToolCalls = Object.values(s.toolCalls).reduce((sum, c) => sum + c, 0);
     const commitVelocity = s.commitCount > 0 ? Math.round(totalToolCalls / s.commitCount) : null;
@@ -352,7 +363,7 @@ function computeAutonomyMetrics(correlatedSessions) {
   const selfHealScore = totalBash > 0 ? Math.round((totalVerif / totalBash) * 100) : 0;
 
   const toolbeltCoverage = perSession.length > 0
-    ? Math.round(perSession.reduce((s, a) => s + a.toolbeltCoverage, 0) / perSession.length)
+    ? Math.min(100, Math.round(perSession.reduce((s, a) => s + a.toolbeltCoverage, 0) / perSession.length))
     : 0;
 
   const withCommits = perSession.filter(a => a.commitVelocity !== null);
@@ -360,19 +371,22 @@ function computeAutonomyMetrics(correlatedSessions) {
     ? Math.round(withCommits.reduce((s, a) => s + a.commitVelocity, 0) / withCommits.length)
     : null;
 
-  // Composite score (0-100): clamp and weight each component
+  // Composite score (0-100): clamp and weight each component. Toolbelt coverage
+  // is deliberately NOT scored — it measures tool variety, not autonomy quality
+  // (a focused Edit+Bash session shouldn't grade "low"). It's reported as a
+  // descriptor only. Self-heal needs enough shell activity to mean anything;
+  // below the threshold it's neutral (50) rather than a punishing 0.
+  const MIN_BASH_FOR_SELFHEAL = 5;
   const autopilotScore = Math.round(Math.min(autopilotRatio / 5, 1) * 100);
-  const selfHealWeighted = selfHealScore;
-  const toolbeltWeighted = toolbeltCoverage;
+  const selfHealWeighted = totalBash >= MIN_BASH_FOR_SELFHEAL ? selfHealScore : 50;
   const velocityScore = commitVelocity !== null
     ? Math.round(Math.max(0, Math.min(1, 1 - (commitVelocity / 100))) * 100)
     : 50; // neutral when no commits
 
   const overallScore = Math.round(
-    autopilotScore * 0.25 +
-    selfHealWeighted * 0.30 +
-    toolbeltWeighted * 0.20 +
-    velocityScore * 0.25
+    autopilotScore * 0.30 +
+    selfHealWeighted * 0.35 +
+    velocityScore * 0.35
   );
 
   // Top verification commands — extract the actual test/lint command, stripping cd/path prefixes
@@ -406,7 +420,7 @@ function computeAutonomyMetrics(correlatedSessions) {
     totalVerificationCalls: totalVerif,
     topVerificationCommands,
     perSession,
-    breakdown: { autopilotScore, selfHealWeighted, toolbeltWeighted, velocityScore },
+    breakdown: { autopilotScore, selfHealWeighted, velocityScore },
   };
 }
 
@@ -460,9 +474,15 @@ function computeEfficiencyScore(costPerCommit, survivalRate, orphanedRate, total
 
 function computeSessionGrade(session) {
   if (session.commitCount === 0) return 'F';
+  // Grade on cost-per-commit only. We don't compute reliable per-session survival
+  // (single-session samples are too small), so plugging in a fake constant would
+  // make the survival half of the grade meaningless.
   const costPerCommit = session.cost.totalCost / session.commitCount;
-  // Use 80 as a default survival (we don't have per-session survival)
-  return computeEfficiencyGrade(costPerCommit, 80);
+  if (costPerCommit <= 2) return 'A';
+  if (costPerCommit <= 5) return 'B';
+  if (costPerCommit <= 15) return 'C';
+  if (costPerCommit <= 40) return 'D';
+  return 'F';
 }
 
 function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, _tokenAnalytics, autonomyMetrics) {
@@ -597,17 +617,7 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
     }
   }
 
-  // 8. Toolbelt coverage — actionable for under-utilized setups
-  if (autonomyMetrics && autonomyMetrics.toolbeltCoverage < 30 && correlatedSessions.length >= 5) {
-    const used = Math.round(autonomyMetrics.toolbeltCoverage * TOTAL_AVAILABLE_TOOLS / 100);
-    candidates.push({
-      priority: 2,
-      type: 'tip',
-      text: `Your agent used ${used} of ${TOTAL_AVAILABLE_TOOLS} available tools — low toolbelt coverage.`,
-    });
-  }
-
-  // 9. Model token efficiency — distinct from cost ratio (tokens ≠ cost)
+  // 8. Model token efficiency — distinct from cost ratio (tokens ≠ cost)
   const modelsForTokens = Object.entries(modelBreakdown).filter(([, d]) => d.tokensPerCommit);
   if (modelsForTokens.length > 1) {
     const sorted = [...modelsForTokens].sort((a, b) => a[1].tokensPerCommit - b[1].tokensPerCommit);
@@ -649,7 +659,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   const orphanedCount = correlatedSessions.filter(s => s.isOrphaned).length;
   const totalCommitsOnMain = correlatedSessions.reduce((s, c) => s + c.commitsOnMain, 0);
 
-  const lineSurvival = computeLineSurvival(commitsByRepo);
+  const lineSurvival = computeLineSurvival(correlatedSessions);
 
   const avgCost = totalCommits > 0 ? totalCost / totalCommits : 0;
   const orphanedSessionRate = totalSessions > 0 ? Math.round((orphanedCount / totalSessions) * 100) : 0;
@@ -686,61 +696,88 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
       day.totalTokens += dayData.inputTokens + dayData.outputTokens + dayData.cacheReadTokens + (dayData.cacheCreationTokens || 0);
     }
 
-    // Session count attributed to each day it had activity
-    for (const date of Object.keys(usage)) {
-      ensureDay(date).sessions++;
-    }
+    // Count each session once, on its start day, so sum(daily.sessions) equals
+    // totalSessions. (Cost/tokens are still spread across every active day above.)
+    ensureDay(startDate).sessions++;
 
-    // Commits attributed to their own timestamps
+    // Commits attributed to their own timestamps. Lines use the AI-attributed
+    // (session-file-overlap) counts so the timeline reconciles with
+    // summary.totalLinesAdded and the survival metric.
     for (const commit of session.commits) {
       const commitDate = toDateStr(commit.timestamp);
       const cDay = ensureDay(commitDate);
+      const { added, deleted } = commitLinesForSession(session, commit);
       cDay.commits++;
-      cDay.linesAdded += commit.totalAdded || 0;
-      cDay.linesDeleted += commit.totalDeleted || 0;
-      cDay.netLines += (commit.totalAdded || 0) - (commit.totalDeleted || 0);
+      cDay.linesAdded += added;
+      cDay.linesDeleted += deleted;
+      cDay.netLines += added - deleted;
     }
   }
   const daily = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));
 
-  // Best/worst days
+  // Best/worst days. When enough days have non-trivial spend, rank those by
+  // commits-per-dollar using their true cost (all are >= the floor, so no absurd
+  // ratios). When every day with commits is trivially cheap, $/commit is just
+  // noise — rank by raw productivity (commit count) instead of a floored ratio.
+  const RANK_MIN_COST = 0.5;
   const daysWithCommits = daily.filter(d => d.commits > 0);
-  const bestDay = daysWithCommits.length > 0
-    ? daysWithCommits.reduce((a, b) => (b.commits / Math.max(b.cost, 0.01)) > (a.commits / Math.max(a.cost, 0.01)) ? b : a)
-    : null;
-  const worstDay = daysWithCommits.length > 0
-    ? daysWithCommits.reduce((a, b) => (b.commits / Math.max(b.cost, 0.01)) < (a.commits / Math.max(a.cost, 0.01)) ? b : a)
-    : null;
+  const rankPool = daysWithCommits.filter(d => d.cost >= RANK_MIN_COST);
+  let bestDay = null;
+  let worstDay = null;
+  if (rankPool.length > 0) {
+    const eff = (d) => d.commits / d.cost;
+    bestDay = rankPool.reduce((a, b) => eff(b) > eff(a) ? b : a);
+    worstDay = rankPool.reduce((a, b) => eff(b) < eff(a) ? b : a);
+  } else if (daysWithCommits.length > 0) {
+    bestDay = daysWithCommits.reduce((a, b) => b.commits > a.commits ? b : a);
+    worstDay = daysWithCommits.reduce((a, b) => b.commits < a.commits ? b : a);
+  }
 
   // ---- Model breakdown ----
+  // Cost and tokens are split across families by ACTUAL usage (accurate for the
+  // spend/usage charts). Sessions and commits are attributed in WHOLE numbers — a
+  // session counts once for every family it used, and all of its commits are
+  // credited to that session's dominant family (most tokens) — so per-family
+  // avgCostPerCommit is computed from integer commits, not fractional ones.
   const modelBreakdown = {};
+  const ensureFamily = (family) => {
+    if (!modelBreakdown[family]) {
+      modelBreakdown[family] = { cost: 0, tokens: 0, sessions: 0, commits: 0, avgCostPerCommit: null, subModels: {} };
+    }
+    return modelBreakdown[family];
+  };
   for (const session of correlatedSessions) {
-    const sessionTotalTokens = Object.values(session.modelBreakdown)
-      .reduce((s, d) => s + d.tokens, 0);
-
+    // Aggregate this session's usage by family
+    const famAgg = {};
     for (const [model, data] of Object.entries(session.modelBreakdown)) {
       const family = getModelFamily(model) || 'unknown';
-      if (!modelBreakdown[family]) {
-        modelBreakdown[family] = { cost: 0, tokens: 0, sessions: 0, commits: 0, avgCostPerCommit: null, subModels: {} };
-      }
-      modelBreakdown[family].cost += data.cost;
-      modelBreakdown[family].tokens += data.tokens;
-
-      // Accumulate sub-model cost and tokens within this family
-      if (!modelBreakdown[family].subModels[model]) {
-        modelBreakdown[family].subModels[model] = { cost: 0, tokens: 0 };
-      }
-      modelBreakdown[family].subModels[model].cost   += data.cost;
-      modelBreakdown[family].subModels[model].tokens += data.tokens;
-
-      // Distribute sessions and commits proportionally by token share
-      const share = sessionTotalTokens > 0 ? data.tokens / sessionTotalTokens : 0;
-      modelBreakdown[family].sessions += share;
-      modelBreakdown[family].commits += session.commitCount * share;
+      if (!famAgg[family]) famAgg[family] = { cost: 0, tokens: 0, models: {} };
+      famAgg[family].cost += data.cost;
+      famAgg[family].tokens += data.tokens;
+      if (!famAgg[family].models[model]) famAgg[family].models[model] = { cost: 0, tokens: 0 };
+      famAgg[family].models[model].cost += data.cost;
+      famAgg[family].models[model].tokens += data.tokens;
     }
+    // Dominant family for this session (by token volume)
+    let domFamily = null;
+    let domTokens = -1;
+    for (const [family, agg] of Object.entries(famAgg)) {
+      if (agg.tokens > domTokens) { domTokens = agg.tokens; domFamily = family; }
+    }
+    for (const [family, agg] of Object.entries(famAgg)) {
+      const fam = ensureFamily(family);
+      fam.cost += agg.cost;
+      fam.tokens += agg.tokens;
+      fam.sessions += 1; // this session used this family
+      for (const [model, md] of Object.entries(agg.models)) {
+        if (!fam.subModels[model]) fam.subModels[model] = { cost: 0, tokens: 0 };
+        fam.subModels[model].cost += md.cost;
+        fam.subModels[model].tokens += md.tokens;
+      }
+    }
+    if (domFamily) ensureFamily(domFamily).commits += session.commitCount;
   }
   for (const data of Object.values(modelBreakdown)) {
-    data.sessions = Math.round(data.sessions);
     data.avgCostPerCommit = data.commits > 0 ? data.cost / data.commits : null;
     data.tokensPerCommit = data.commits > 0 ? Math.round(data.tokens / data.commits) : null;
     data.subModels = Object.fromEntries(
@@ -777,24 +814,12 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     };
   }
 
-  // ---- Heatmap (hour x day-of-week) ----
+  // ---- Heatmap (hour x day-of-week), placed at each commit's actual timestamp ----
   const heatmap = Array.from({ length: 7 }, () => Array(24).fill(0));
-  const heatmapCost = Array.from({ length: 7 }, () => Array(24).fill(0));
   for (const session of correlatedSessions) {
-    // Place each commit at its actual timestamp, not the session start
     for (const commit of session.commits) {
       const d = new Date(commit.timestamp);
-      const dayOfWeek = d.getDay(); // 0=Sun
-      const hour = d.getHours();
-      heatmap[dayOfWeek][hour]++;
-    }
-    // Distribute cost across actual usage days via dailyUsage
-    const usage = session.dailyUsage && Object.keys(session.dailyUsage).length > 0
-      ? session.dailyUsage
-      : { [toDateStr(session.startTime)]: { cost: session.cost.totalCost } };
-    for (const [dateStr, dayData] of Object.entries(usage)) {
-      const dd = new Date(dateStr + 'T12:00:00'); // noon local to get correct day-of-week
-      heatmapCost[dd.getDay()][12] += dayData.cost;
+      heatmap[d.getDay()][d.getHours()]++;
     }
   }
 
@@ -825,8 +850,9 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   // ---- Cost breakdown by time period ----
   const now = new Date();
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay());
-  startOfWeek.setHours(0, 0, 0, 0);
+  // Rolling 7-day window, matching the weekly narrative's definition of "this
+  // week" so the two "this week" figures use the same boundary.
+  const startOfWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const mkPeriod = () => ({ cost: 0, sessions: 0, commits: 0, tokens: 0 });
@@ -868,8 +894,10 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     }
   }
 
+  const pricingEstimatedCost = correlatedSessions.reduce((s, c) => s + (c.estimatedCost || 0), 0);
   const summary = {
     totalCost,
+    pricingEstimatedPct: totalCost > 0 ? Math.round((pricingEstimatedCost / totalCost) * 100) : 0,
     totalSessions,
     totalCommits,
     totalLinesAdded,
@@ -941,7 +969,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     toolBreakdown,
     sessionBuckets,
     lineSurvival,
-    heatmap: { commits: heatmap, cost: heatmapCost },
+    heatmap: { commits: heatmap },
     weeklyNarrative,
     organicCommits,
   };

@@ -97,7 +97,7 @@ test('efficiency grade reflects cost-per-commit and survival', () => {
     commits: [{
       hash: 'x', timestamp: '2026-04-20T10:30:00.000Z', timestampMs: new Date('2026-04-20T10:30:00.000Z').getTime(),
       subject: 's', branches: ['main'], onMain: true,
-      files: [{ path: 'src/a.js', added: 50, deleted: 0 }],
+      files: [{ path: 'src/foo.js', added: 50, deleted: 0 }],
       totalAdded: 50, totalDeleted: 0,
     }],
     commitCount: 1,
@@ -132,6 +132,96 @@ test('insights list is bounded and sorted by priority', () => {
   }
 });
 
+test('line survival: rework within 24h is churned; totals reconcile', () => {
+  const now = Date.now();
+  const t0 = now - 5 * 24 * 3600 * 1000; // old enough to be matured
+  const t1 = t0 + 3600 * 1000; // +1h, within the 24h churn window
+  const session = mkCorrelated({
+    filesWritten: ['src/foo.js'],
+    commits: [
+      { hash: 'c1', timestamp: new Date(t0).toISOString(), timestampMs: t0, subject: 'add', branches: ['main'], onMain: true, files: [{ path: 'src/foo.js', added: 100, deleted: 0 }], totalAdded: 100, totalDeleted: 0 },
+      { hash: 'c2', timestamp: new Date(t1).toISOString(), timestampMs: t1, subject: 'rework', branches: ['main'], onMain: true, files: [{ path: 'src/foo.js', added: 0, deleted: 30 }], totalAdded: 0, totalDeleted: 30 },
+    ],
+    commitCount: 2, commitsOnMain: 2, linesAdded: 100, linesDeleted: 30,
+  });
+  const cbr = { '/repo': { commits: session.commits, defaultBranch: 'main' } };
+  const m = computeMetrics([session], [], cbr, 30);
+  assert.equal(m.lineSurvival.totalAdded, 100);
+  assert.equal(m.lineSurvival.totalChurned, 30);
+  assert.equal(m.lineSurvival.maturing, 0);
+  assert.equal(m.lineSurvival.survivalRate, 70);
+  // reconciliation: summary == survival == sum(daily)
+  assert.equal(m.summary.totalLinesAdded, m.lineSurvival.totalAdded);
+  assert.equal(m.daily.reduce((a, d) => a + d.linesAdded, 0), m.summary.totalLinesAdded);
+});
+
+test('line survival: lines added in the last 24h are right-censored from the rate', () => {
+  const now = Date.now();
+  const recent = now - 3600 * 1000; // 1h ago — too young to judge
+  const session = mkCorrelated({
+    filesWritten: ['src/foo.js'],
+    commits: [{ hash: 'r', timestamp: new Date(recent).toISOString(), timestampMs: recent, subject: 'add', branches: ['main'], onMain: true, files: [{ path: 'src/foo.js', added: 40, deleted: 0 }], totalAdded: 40, totalDeleted: 0 }],
+    commitCount: 1, commitsOnMain: 1, linesAdded: 40,
+  });
+  const cbr = { '/repo': { commits: session.commits, defaultBranch: 'main' } };
+  const m = computeMetrics([session], [], cbr, 30);
+  assert.equal(m.lineSurvival.totalAdded, 40);
+  assert.equal(m.lineSurvival.maturing, 40);
+  assert.equal(m.lineSurvival.survivalRate, 100); // nothing matured yet → optimistic default
+});
+
+test('model breakdown attributes whole commits to the dominant family', () => {
+  const session = mkCorrelated({
+    modelBreakdown: { 'claude-opus-4-8': { tokens: 1000, cost: 5 }, 'claude-sonnet-4-6': { tokens: 200, cost: 0.6 } },
+    commits: [{ hash: 'a', timestamp: '2026-04-20T10:30:00.000Z', timestampMs: new Date('2026-04-20T10:30:00.000Z').getTime(), subject: 's', branches: ['main'], onMain: true, files: [{ path: 'src/foo.js', added: 10, deleted: 0 }], totalAdded: 10, totalDeleted: 0 }],
+    commitCount: 3, commitsOnMain: 1, linesAdded: 10,
+  });
+  const cbr = { '/repo': { commits: session.commits, defaultBranch: 'main' } };
+  const m = computeMetrics([session], [], cbr, 30);
+  assert.equal(m.modelBreakdown.opus.commits, 3, 'all commits to dominant family');
+  assert.equal(m.modelBreakdown.sonnet.commits, 0, 'non-dominant family gets no commits');
+  assert.equal(m.modelBreakdown.opus.sessions, 1);
+  assert.equal(m.modelBreakdown.sonnet.sessions, 1, 'still counted as a family the session used');
+  assert.ok(Number.isInteger(m.modelBreakdown.opus.commits));
+});
+
+test('bestDay/worstDay rank by commits-per-dollar when spend is non-trivial', () => {
+  const mk = (d) => ({ hash: 'h' + d, timestamp: d + 'T10:00:00.000Z', timestampMs: new Date(d + 'T10:00:00.000Z').getTime(), subject: 's', branches: ['main'], onMain: true, files: [{ path: 'src/foo.js', added: 5, deleted: 0 }], totalAdded: 5, totalDeleted: 0 });
+  const session = mkCorrelated({
+    filesWritten: ['src/foo.js'],
+    dailyUsage: {
+      '2026-04-10': { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 10 },
+      '2026-04-11': { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 1 },
+    },
+    commits: [mk('2026-04-10'), mk('2026-04-11')],
+    commitCount: 2, commitsOnMain: 2, linesAdded: 10,
+  });
+  const m = computeMetrics([session], [], { '/repo': { commits: session.commits, defaultBranch: 'main' } }, 365);
+  // 04-11 ($1, 1 commit = 1.0/$) beats 04-10 ($10, 1 commit = 0.1/$)
+  assert.equal(m.summary.bestDay.date, '2026-04-11');
+  assert.equal(m.summary.worstDay.date, '2026-04-10');
+});
+
+test('bestDay falls back to commit count when all days are trivially cheap', () => {
+  const session = mkCorrelated({
+    filesWritten: ['src/foo.js'],
+    dailyUsage: {
+      '2026-04-10': { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 0.10 },
+      '2026-04-11': { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 0.05 },
+    },
+    // both days below the $0.50 floor → rank by commit count, not the noisy ratio
+    commits: [
+      { hash: 'a', timestamp: '2026-04-10T10:00:00.000Z', timestampMs: new Date('2026-04-10T10:00:00.000Z').getTime(), subject: 's', branches: ['main'], onMain: true, files: [{ path: 'src/foo.js', added: 5, deleted: 0 }], totalAdded: 5, totalDeleted: 0 },
+      { hash: 'b', timestamp: '2026-04-10T11:00:00.000Z', timestampMs: new Date('2026-04-10T11:00:00.000Z').getTime(), subject: 's', branches: ['main'], onMain: true, files: [{ path: 'src/foo.js', added: 5, deleted: 0 }], totalAdded: 5, totalDeleted: 0 },
+      { hash: 'c', timestamp: '2026-04-11T10:00:00.000Z', timestampMs: new Date('2026-04-11T10:00:00.000Z').getTime(), subject: 's', branches: ['main'], onMain: true, files: [{ path: 'src/foo.js', added: 5, deleted: 0 }], totalAdded: 5, totalDeleted: 0 },
+    ],
+    commitCount: 3, commitsOnMain: 3, linesAdded: 15,
+  });
+  const m = computeMetrics([session], [], { '/repo': { commits: session.commits, defaultBranch: 'main' } }, 365);
+  assert.equal(m.summary.bestDay.date, '2026-04-10'); // 2 commits
+  assert.equal(m.summary.worstDay.date, '2026-04-11'); // 1 commit
+});
+
 test('weeklyNarrative populated when this-week sessions exist', () => {
   const now = Date.now();
   const recent = mkCorrelated({
@@ -142,7 +232,7 @@ test('weeklyNarrative populated when this-week sessions exist', () => {
       hash: 'h', timestamp: new Date(now - 23 * 3600 * 1000).toISOString(),
       timestampMs: now - 23 * 3600 * 1000,
       subject: 's', branches: ['main'], onMain: true,
-      files: [{ path: 'src/a.js', added: 30, deleted: 0 }],
+      files: [{ path: 'src/foo.js', added: 30, deleted: 0 }],
       totalAdded: 30, totalDeleted: 0,
     }],
     commitsOnMain: 1,

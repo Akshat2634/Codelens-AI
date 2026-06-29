@@ -15,6 +15,12 @@ const PRICING = {
   'opus-45':    { input: 5,     output: 25,    cacheRead: 0.50,   cacheWrite: 6.25   },
   // Opus 4.0 / 4.1 (legacy): $15 input, $75 output
   'opus-old':   { input: 15,    output: 75,    cacheRead: 1.50,   cacheWrite: 18.75  },
+  // Fable 5 / Mythos 5: $10 input, $50 output — per Anthropic's announcement:
+  // https://www.anthropic.com/news/claude-fable-5-mythos-5
+  // NOTE: Anthropic suspended access to both models on 2026-06-12 (stated as
+  // temporary, restoration in progress). Pricing is kept here so historical Fable
+  // usage already in users' logs is costed correctly; revisit if status/pricing changes.
+  fable:        { input: 10,    output: 50,    cacheRead: 1.00,   cacheWrite: 12.50  },
   // Sonnet 4.0 / 4.5 / 4.6: $3 input, $15 output
   sonnet:       { input: 3,     output: 15,    cacheRead: 0.30,   cacheWrite: 3.75   },
   // Haiku 4.5: $1 input, $5 output
@@ -33,12 +39,15 @@ function getModelFamily(modelName) {
   if (lower.includes('opus')) return 'opus';
   if (lower.includes('sonnet')) return 'sonnet';
   if (lower.includes('haiku')) return 'haiku';
+  if (lower.includes('fable') || lower.includes('mythos')) return 'fable';
   return null;
 }
 
 function getPricingTier(modelName) {
   if (!modelName) return null;
   const lower = modelName.toLowerCase();
+  // Fable 5 / Mythos 5 share $10/$50 pricing
+  if (lower.includes('fable') || lower.includes('mythos')) return 'fable';
   // Opus: check most specific version first
   if (lower.includes('opus')) {
     if (lower.includes('4-8') || lower.includes('4.8')) return 'opus-48';
@@ -58,7 +67,13 @@ function getPricingTier(modelName) {
   return 'sonnet'; // default unknown models to Sonnet pricing
 }
 
-function calculateCost(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName) {
+// `cacheWrite` is the default 5-minute TTL rate (1.25x input). 1-hour-TTL cache
+// writes cost 2x input, so the 1h portion gets a premium of (2x - 1.25x) input.
+function oneHourCachePremium(p, cacheCreation1hTokens) {
+  return cacheCreation1hTokens * (2 * p.input - p.cacheWrite) / PER_MIL;
+}
+
+function calculateCost(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, cacheCreation1hTokens = 0) {
   const tier = getPricingTier(modelName);
   if (!tier) return 0;
   const p = PRICING[tier];
@@ -66,18 +81,19 @@ function calculateCost(inputTokens, outputTokens, cacheReadTokens, cacheCreation
     (inputTokens * p.input / PER_MIL) +
     (outputTokens * p.output / PER_MIL) +
     (cacheReadTokens * p.cacheRead / PER_MIL) +
-    (cacheCreationTokens * p.cacheWrite / PER_MIL)
+    (cacheCreationTokens * p.cacheWrite / PER_MIL) +
+    oneHourCachePremium(p, cacheCreation1hTokens)
   );
 }
 
-function calculateCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName) {
+function calculateCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, cacheCreation1hTokens = 0) {
   const tier = getPricingTier(modelName);
   if (!tier) return { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, totalCost: 0 };
   const p = PRICING[tier];
   const inputCost = inputTokens * p.input / PER_MIL;
   const outputCost = outputTokens * p.output / PER_MIL;
   const cacheReadCost = cacheReadTokens * p.cacheRead / PER_MIL;
-  const cacheCreationCost = cacheCreationTokens * p.cacheWrite / PER_MIL;
+  const cacheCreationCost = cacheCreationTokens * p.cacheWrite / PER_MIL + oneHourCachePremium(p, cacheCreation1hTokens);
   return {
     inputCost,
     outputCost,
@@ -184,7 +200,7 @@ function isVerificationCommand(command) {
   return VERIFICATION_PATTERNS.some(p => p.test(core));
 }
 
-function extractToolUse(session, msg) {
+function extractToolUse(session, msg, seenToolUseIds) {
   const content = msg.content;
   if (!Array.isArray(content)) return;
 
@@ -192,6 +208,14 @@ function extractToolUse(session, msg) {
     if (block.type !== 'tool_use') continue;
     const toolName = block.name;
     if (!toolName) continue;
+
+    // Skip blocks already counted. The same tool_use id reappears when an
+    // assistant message is re-sent under a duplicate requestId; counting it again
+    // would inflate tool/bash totals (tokens are already deduped separately).
+    if (block.id && seenToolUseIds) {
+      if (seenToolUseIds.has(block.id)) continue;
+      seenToolUseIds.add(block.id);
+    }
 
     // Count tool calls
     session.toolCalls[toolName] = (session.toolCalls[toolName] || 0) + 1;
@@ -235,6 +259,7 @@ function createEmptySession(sessionId) {
     totalInputTokens: 0,
     totalOutputTokens: 0,
     cacheCreationTokens: 0,
+    cacheCreation1hTokens: 0,
     cacheReadTokens: 0,
     cost: { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, totalCost: 0 },
     model: null,
@@ -247,6 +272,7 @@ function createEmptySession(sessionId) {
     bashCommands: [],
     totalBashCalls: 0,
     verificationBashCalls: 0,
+    estimatedCost: 0,
   };
 }
 
@@ -254,6 +280,7 @@ async function parseSessionFile(filePath) {
   const sessionId = path.basename(filePath, '.jsonl');
   const session = createEmptySession(sessionId);
   const seenRequestIds = new Set();
+  const seenToolUseIds = new Set();
   const modelTokens = {}; // model -> { input, output, cacheRead, cacheCreate }
   const dailyModelTokens = {}; // dateStr -> model -> { input, output, cacheRead, cacheCreate }
   let lastSeenTimestamp = null;
@@ -339,21 +366,26 @@ async function parseSessionFile(filePath) {
         const output = usage.output_tokens || 0;
         const cacheRead = usage.cache_read_input_tokens || 0;
         const cacheCreate = usage.cache_creation_input_tokens || 0;
+        // 1-hour-TTL portion of the cache writes (priced at 2x vs 1.25x for 5m).
+        // Absent in older log formats — falls back to 0 (all priced at the 5m rate).
+        const cacheCreate1h = usage.cache_creation?.ephemeral_1h_input_tokens || 0;
         const model = msg.model || 'unknown';
 
         session.totalInputTokens += input;
         session.totalOutputTokens += output;
         session.cacheReadTokens += cacheRead;
         session.cacheCreationTokens += cacheCreate;
+        session.cacheCreation1hTokens += cacheCreate1h;
 
         // Track per-model breakdown
         if (!modelTokens[model]) {
-          modelTokens[model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 };
+          modelTokens[model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, cacheCreate1h: 0 };
         }
         modelTokens[model].input += input;
         modelTokens[model].output += output;
         modelTokens[model].cacheRead += cacheRead;
         modelTokens[model].cacheCreate += cacheCreate;
+        modelTokens[model].cacheCreate1h += cacheCreate1h;
 
         // Track per-day per-model tokens for daily usage attribution
         const msgTs = obj.timestamp || lastSeenTimestamp;
@@ -362,30 +394,37 @@ async function parseSessionFile(filePath) {
           const dateStr = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
           if (!dailyModelTokens[dateStr]) dailyModelTokens[dateStr] = {};
           if (!dailyModelTokens[dateStr][model]) {
-            dailyModelTokens[dateStr][model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 };
+            dailyModelTokens[dateStr][model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, cacheCreate1h: 0 };
           }
           dailyModelTokens[dateStr][model].input += input;
           dailyModelTokens[dateStr][model].output += output;
           dailyModelTokens[dateStr][model].cacheRead += cacheRead;
           dailyModelTokens[dateStr][model].cacheCreate += cacheCreate;
+          dailyModelTokens[dateStr][model].cacheCreate1h += cacheCreate1h;
         }
       }
 
       session.assistantMessageCount++;
     }
 
-    // Always extract tool use info (different content blocks can appear in split messages)
-    extractToolUse(session, msg);
+    // Always extract tool use info (different content blocks can appear in split
+    // messages); dedup by tool_use id so duplicate-requestId re-sends aren't recounted.
+    extractToolUse(session, msg, seenToolUseIds);
   }
 
   // Compute costs from model breakdown
   let maxTokens = 0;
   let primaryModel = null;
+  // Cost attributed to models with no known pricing (billed at the Sonnet
+  // fallback) — surfaced so the dashboard can flag estimated spend rather than
+  // presenting a silently-wrong number as fact.
+  session.estimatedCost = 0;
 
   for (const [model, tokens] of Object.entries(modelTokens)) {
-    const cost = calculateCost(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model);
+    const cost = calculateCost(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h);
     const totalTokens = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
     session.modelBreakdown[model] = { tokens: totalTokens, cost };
+    if (getModelFamily(model) === null) session.estimatedCost += cost;
 
     if (totalTokens > maxTokens) {
       maxTokens = totalTokens;
@@ -400,7 +439,8 @@ async function parseSessionFile(filePath) {
     session.totalOutputTokens,
     session.cacheReadTokens,
     session.cacheCreationTokens,
-    primaryModel
+    primaryModel,
+    session.cacheCreation1hTokens
   );
 
   // If multiple models used, recalculate cost from per-model breakdown for accuracy
@@ -412,7 +452,7 @@ async function parseSessionFile(filePath) {
     let cacheCreationCost = 0;
 
     for (const [model, tokens] of Object.entries(modelTokens)) {
-      const breakdown = calculateCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model);
+      const breakdown = calculateCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h);
       inputCost += breakdown.inputCost;
       outputCost += breakdown.outputCost;
       cacheReadCost += breakdown.cacheReadCost;
@@ -429,7 +469,7 @@ async function parseSessionFile(filePath) {
     let dayCost = 0;
     let dayInput = 0, dayOutput = 0, dayCacheRead = 0, dayCacheCreate = 0;
     for (const [model, tokens] of Object.entries(models)) {
-      dayCost += calculateCost(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model);
+      dayCost += calculateCost(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h);
       dayInput += tokens.input;
       dayOutput += tokens.output;
       dayCacheRead += tokens.cacheRead;
@@ -497,6 +537,7 @@ function mergeSubagentIntoSession(parent, sub) {
   parent.totalInputTokens += sub.totalInputTokens;
   parent.totalOutputTokens += sub.totalOutputTokens;
   parent.cacheCreationTokens += sub.cacheCreationTokens;
+  parent.cacheCreation1hTokens += sub.cacheCreation1hTokens || 0;
   parent.cacheReadTokens += sub.cacheReadTokens;
 
   parent.cost.inputCost += sub.cost.inputCost;
@@ -504,6 +545,7 @@ function mergeSubagentIntoSession(parent, sub) {
   parent.cost.cacheReadCost += sub.cost.cacheReadCost;
   parent.cost.cacheCreationCost += sub.cost.cacheCreationCost;
   parent.cost.totalCost += sub.cost.totalCost;
+  parent.estimatedCost = (parent.estimatedCost || 0) + (sub.estimatedCost || 0);
 
   // Message counts intentionally NOT merged — we only report
   // the main-conversation messages, not internal subagent chatter.
