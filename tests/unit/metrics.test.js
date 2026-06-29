@@ -56,6 +56,51 @@ test('computeMetrics on empty input returns a well-formed payload', () => {
   assert.equal(m.weeklyNarrative, null);
 });
 
+test('computeMetrics exposes the new metric blocks (cost-control, quality, streaks, waste, pricing)', () => {
+  const m = computeMetrics([], [], {}, 30);
+  assert.ok(m.costControl, 'costControl present');
+  assert.equal(typeof m.costControl.cacheHitRate, 'number');
+  assert.ok(m.costControl.benchmarks, 'benchmarks present');
+  assert.ok(m.qualityOutcomes, 'qualityOutcomes present');
+  assert.equal(m.qualityOutcomes.reworkRatePct, 0);
+  assert.deepEqual(m.streaks, { current: 0, longest: 0 });
+  assert.ok(m.waste && Array.isArray(m.waste.highBurnSessions));
+  assert.ok(Array.isArray(m.lineSurvival.byLanguage));
+  assert.equal(m.heatmap.costByDay.length, 7);
+  assert.ok(m.summary.pricing, 'pricing present');
+  assert.equal(m.summary.pricing.plan, 'api');
+});
+
+test('plan-aware pricing reframes spend for subscription vs api', () => {
+  const api = computeMetrics([], [], {}, 30, 'api').summary.pricing;
+  assert.equal(api.monthlyUsd, null);
+  assert.equal(api.isSubscription, false);
+  const pro = computeMetrics([], [], {}, 30, 'pro').summary.pricing;
+  assert.equal(pro.isSubscription, true);
+  assert.equal(pro.proratedPlanCost, 20); // $20/mo over a 30-day window
+  const free = computeMetrics([], [], {}, 30, 'free').summary.pricing;
+  assert.equal(free.showDollars, false);
+});
+
+test('per-model breakdown uses real primary attribution (no fabricated fractional commits)', () => {
+  const session = mkCorrelated({
+    model: 'claude-opus-4-8',
+    modelBreakdown: { 'claude-opus-4-8': { tokens: 1800, cost: 3 } },
+    commits: [{
+      hash: 'a', timestamp: '2026-04-20T10:30:00.000Z', timestampMs: new Date('2026-04-20T10:30:00.000Z').getTime(),
+      subject: 'feat: x', branches: ['main'], onMain: true, isRevert: false, isFix: false,
+      files: [{ path: 'src/a.js', added: 10, deleted: 0 }], totalAdded: 10, totalDeleted: 0,
+    }],
+    commitCount: 1, commitsOnMain: 1, linesAdded: 10,
+  });
+  const m = computeMetrics([session], [], { '/repo': { commits: session.commits, defaultBranch: 'main' } }, 30);
+  const opus = m.modelBreakdown.opus;
+  assert.ok(opus, 'opus family present');
+  assert.equal(opus.commits, 1, 'whole commit credited to primary model, not a fraction');
+  assert.ok(Number.isInteger(opus.sessions), 'session count is a real integer');
+  assert.ok(opus.costPerCommit > 0);
+});
+
 test('computeMetrics aggregates cost, sessions, commits from correlated input', () => {
   const session = mkCorrelated({
     commits: [{

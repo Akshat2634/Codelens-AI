@@ -132,3 +132,43 @@ test('cost-per-commit computed when session matches commits', () => {
   assert.ok(correlatedSessions[0].costPerCommit > 0);
   assert.equal(correlatedSessions[0].costPerCommit, 2.5 / 1);
 });
+
+test('match confidence is high for in-window file overlap, low for chat-only', () => {
+  const fileSession = mkSession({ filesWritten: ['src/foo.js'] });
+  const fileMatch = correlateSessions([fileSession], { '/repo': { commits: [mkCommit()], defaultBranch: 'main' } });
+  assert.equal(fileMatch.correlatedSessions[0].matchConfidence, 'high');
+
+  const chatSession = mkSession({ filesWritten: [] });
+  const chatMatch = correlateSessions([chatSession], { '/repo': { commits: [mkCommit({ files: [{ path: 'src/x.js', added: 3, deleted: 0 }], totalAdded: 3, totalDeleted: 0 })], defaultBranch: 'main' } });
+  assert.equal(chatMatch.correlatedSessions[0].matchConfidence, 'low');
+});
+
+test('generated/lock files are excluded from line attribution', () => {
+  const session = mkSession({ filesWritten: ['package-lock.json', 'src/foo.js'] });
+  const commit = mkCommit({
+    files: [
+      { path: 'package-lock.json', added: 5000, deleted: 4000 },
+      { path: 'src/foo.js', added: 10, deleted: 2 },
+    ],
+    totalAdded: 5010, totalDeleted: 4002,
+  });
+  const { correlatedSessions } = correlateSessions(
+    [session],
+    { '/repo': { commits: [commit], defaultBranch: 'main' } }
+  );
+  // Only src/foo.js counts — the lockfile's 5000 lines are excluded.
+  assert.equal(correlatedSessions[0].linesAdded, 10);
+  assert.equal(correlatedSessions[0].linesDeleted, 2);
+});
+
+test('revert/fix/ai-authored counts surface per session', () => {
+  const session = mkSession({ filesWritten: ['src/foo.js'] });
+  const commit = mkCommit({ isFix: true, isRevert: false, aiAuthored: true });
+  const { correlatedSessions } = correlateSessions(
+    [session],
+    { '/repo': { commits: [commit], defaultBranch: 'main' } }
+  );
+  assert.equal(correlatedSessions[0].fixes, 1);
+  assert.equal(correlatedSessions[0].reverts, 0);
+  assert.equal(correlatedSessions[0].aiAuthoredCommits, 1);
+});
