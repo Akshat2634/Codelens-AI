@@ -62,6 +62,21 @@ test.describe('Dashboard smoke (fixtures)', () => {
     expect(count).toBeGreaterThan(0);
   });
 
+  test('info-tips on KPI panels open on click and are not clipped', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.kpi .info-tip');
+    const tip = page.locator('.kpi .info-tip').first();
+    // The card hosting the tooltip must not clip it (the bug: overflow:hidden ate the tip).
+    const overflow = await tip.evaluate(el => getComputedStyle(el.closest('.kpi')).overflow);
+    expect(overflow).not.toBe('hidden');
+    // Clicking toggles the tooltip open (touch/click support, not just hover).
+    await tip.click();
+    await expect(tip).toHaveClass(/tip-open/);
+    const afterContent = await tip.evaluate(el => getComputedStyle(el, '::after').content);
+    expect(afterContent, 'tooltip ::after should render text when open').not.toBe('none');
+    expect(afterContent.length).toBeGreaterThan(5);
+  });
+
   test('header + dashboard charts render without throwing', async ({ page }) => {
     const errors = [];
     page.on('pageerror', (err) => errors.push(err.message));
