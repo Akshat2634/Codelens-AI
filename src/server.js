@@ -16,9 +16,29 @@ export function createServer(initialPayload, rebuildFn) {
     res.type('html').send(dashboardHtml);
   });
 
+  // On-demand re-windowed payloads (lookback / project), memoized per key so the
+  // dashboard's global filters can re-scope without a CLI restart. Blame is never
+  // recomputed for filter re-windows (kept fast). Default (no params) is the boot payload.
+  const windowCache = new Map();
+
   // Full payload (single fetch for dashboard)
-  app.get('/api/all', (_req, res) => {
-    res.json(payload);
+  app.get('/api/all', async (req, res) => {
+    const days = req.query.days ? parseInt(req.query.days, 10) : null;
+    const project = req.query.project || null;
+    if ((days == null || !Number.isFinite(days)) && !project) {
+      return res.json(payload);
+    }
+    if (!rebuildFn) return res.json(payload);
+    const key = `${days ?? 'def'}|${project ?? 'all'}`;
+    try {
+      if (!windowCache.has(key)) {
+        const built = await rebuildFn({ days: days ?? undefined, project: project ?? undefined, blame: false });
+        windowCache.set(key, built || payload);
+      }
+      res.json(windowCache.get(key));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Re-run the full pipeline: clear cache, re-parse sessions, re-analyze git, recompute metrics
@@ -29,6 +49,7 @@ export function createServer(initialPayload, rebuildFn) {
       const newPayload = await rebuildFn();
       if (!newPayload) return res.status(404).json({ error: 'No sessions found after refresh' });
       payload = newPayload;
+      windowCache.clear();
       console.log('  \x1b[32m✔\x1b[0m \x1b[32m[refresh]\x1b[0m Done');
       res.json({ ok: true });
     } catch (err) {
@@ -142,6 +163,31 @@ export function createServer(initialPayload, rebuildFn) {
   // Weekly narrative report (this week vs prior)
   app.get('/api/narrative', (_req, res) => {
     res.json(payload.weeklyNarrative || null);
+  });
+
+  // Cost-control levers: cache hit rate, premium-model share, delegated (subagent) spend
+  app.get('/api/cost-control', (_req, res) => {
+    res.json(payload.costControl || null);
+  });
+
+  // Outcome / quality metrics: revert, fix, rework, deletion ratio, AI-orphan commits
+  app.get('/api/quality', (_req, res) => {
+    res.json(payload.qualityOutcomes || null);
+  });
+
+  // Waste & burn: high spend-rate sessions + over-iteration loops
+  app.get('/api/waste', (_req, res) => {
+    res.json(payload.waste || null);
+  });
+
+  // Coding streaks (current/longest)
+  app.get('/api/streaks', (_req, res) => {
+    res.json(payload.streaks || null);
+  });
+
+  // True git-blame line survival + half-life (present only when run with --blame)
+  app.get('/api/half-life', (_req, res) => {
+    res.json(payload.halfLife || null);
   });
 
   return app;

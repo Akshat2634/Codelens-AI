@@ -184,7 +184,14 @@ async function main() {
   }
 
   // Start server — pass a rebuild function so /api/refresh can re-run the pipeline
-  const rebuild = () => buildPayload(claudeDir, days, opts.project, true, plan, !!opts.blame);
+  const rebuild = (o = {}) => buildPayload(
+    claudeDir,
+    o.days ?? days,
+    o.project ?? opts.project,
+    true,
+    plan,
+    o.blame ?? !!opts.blame
+  );
   const app = createServer(payload, rebuild);
   const server = app.listen(port, () => {
     const url = `http://localhost:${port}`;
