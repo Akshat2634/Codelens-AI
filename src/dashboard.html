@@ -1980,9 +1980,75 @@
         <span class="badge">All data stays local</span>
         <span class="badge">No tracking, no telemetry</span>
       </div>
+      <div class="controls-bar" id="controls-bar">
+        <label class="ctrl">Lookback
+          <select id="filter-days">
+            <option value="7">7 days</option>
+            <option value="14">14 days</option>
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+          </select>
+        </label>
+        <label class="ctrl">Project
+          <select id="filter-project"><option value="">All projects</option></select>
+        </label>
+        <label class="ctrl">Billing
+          <select id="filter-plan" title="Reframe dollar figures for your billing model">
+            <option value="api">API (per-token)</option>
+            <option value="pro">Pro ($20/mo)</option>
+            <option value="max5x">Max 5× ($100/mo)</option>
+            <option value="max20x">Max 20× ($200/mo)</option>
+            <option value="free">Tokens only</option>
+          </select>
+        </label>
+      </div>
     </header>
 
     <style>
+      /* ── Controls bar (filters + billing toggle) ── */
+      .controls-bar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 16px; }
+      .controls-bar .ctrl { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-display); font-size: 0.7rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+      .controls-bar select { font-family: var(--font-body); font-size: 0.82rem; text-transform: none; letter-spacing: 0; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 5px 9px; cursor: pointer; }
+      .controls-bar select:hover { border-color: var(--accent-blue); }
+
+      /* ── Diagnostic vs Outcome section dividers ── */
+      .frame-divider { display: flex; align-items: center; gap: 14px; margin: 40px 0 8px; }
+      .frame-divider .ttl { font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; color: var(--text-primary); white-space: nowrap; }
+      .frame-divider .tag { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
+      .frame-divider .rule { flex: 1; height: 1px; background: linear-gradient(90deg, var(--border), transparent); }
+      .frame-note { font-size: 0.82rem; color: var(--text-muted); margin: 0 0 12px; }
+
+      /* ── Generic metric panel grid + benchmark bands ── */
+      .panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 8px; }
+      .kpi { background: var(--bg-card, var(--bg-secondary)); border: 1px solid var(--border); border-radius: var(--radius-md, 14px); padding: 18px; position: relative; overflow: hidden; }
+      .kpi .kpi-label { font-size: 0.74rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px; }
+      .kpi .kpi-value { font-family: var(--font-display); font-size: 1.7rem; font-weight: 700; margin-top: 8px; }
+      .kpi .kpi-sub { font-size: 0.8rem; color: var(--text-secondary, var(--text-muted)); margin-top: 4px; }
+      .kpi .band { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 12px; background: var(--border); }
+      .kpi .band > i { display: block; height: 100%; }
+      .verdict { display: inline-block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 999px; margin-top: 10px; }
+      .verdict.good { background: rgba(34,211,168,0.15); color: var(--accent-green); }
+      .verdict.warn { background: rgba(245,158,11,0.15); color: var(--accent-orange); }
+      .verdict.bad  { background: rgba(239,68,68,0.15); color: var(--accent-red); }
+
+      /* ── Per-language durability table ── */
+      .lang-table { display: flex; flex-direction: column; gap: 8px; }
+      .lang-row { display: grid; grid-template-columns: 110px 1fr 56px; align-items: center; gap: 12px; font-size: 0.86rem; }
+      .lang-row .lname { color: var(--text-secondary, var(--text-primary)); font-weight: 600; }
+      .lang-row .lbar { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
+      .lang-row .lbar > i { display: block; height: 100%; border-radius: 4px; }
+      .lang-row .lpct { text-align: right; font-family: var(--font-display); font-weight: 700; }
+
+      /* ── Streak + half-life decay ── */
+      .streak-wrap { display: flex; gap: 28px; align-items: center; flex-wrap: wrap; }
+      .streak-big { font-family: var(--font-display); font-size: 2.6rem; font-weight: 800; color: var(--accent-orange); line-height: 1; }
+      .decay-spark { display: flex; align-items: flex-end; gap: 6px; height: 70px; }
+      .decay-spark .dbar { width: 26px; background: linear-gradient(180deg, var(--accent-green), var(--accent-blue)); border-radius: 4px 4px 0 0; position: relative; }
+      .decay-spark .dbar span { position: absolute; top: -16px; left: 0; right: 0; text-align: center; font-size: 0.62rem; color: var(--text-muted); }
+      .waste-list { display: flex; flex-direction: column; gap: 8px; }
+      .waste-item { display: flex; justify-content: space-between; gap: 12px; font-size: 0.84rem; padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+      .pill { font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+
       @keyframes dep-in {
         0%   { opacity: 0; transform: translateX(32px) scale(0.96); }
         60%  { opacity: 1; transform: translateX(-4px) scale(1.01); }
@@ -2241,6 +2307,35 @@ const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 let DATA = null;
 let initialRenderDone = false;
 
+// ── Billing-plan reframing (client-side display layer over API-equivalent cost) ──
+const PLAN_MONTHLY = { api: null, pro: 20, max5x: 100, max20x: 200, free: 0 };
+const PLAN_LABEL = { api: 'API per-token', pro: 'Pro', max5x: 'Max 5×', max20x: 'Max 20×', free: 'Tokens only' };
+function currentPlan() {
+  return localStorage.getItem('codelens-plan')
+    || (DATA && DATA.summary && DATA.summary.pricing && DATA.summary.pricing.plan)
+    || 'api';
+}
+// verdict from value vs good/warn thresholds; lowerIsBetter flips the comparison.
+function verdictClass(value, good, warn, lowerIsBetter = true) {
+  if (lowerIsBetter) return value <= good ? 'good' : value <= warn ? 'warn' : 'bad';
+  return value >= good ? 'good' : value >= warn ? 'warn' : 'bad';
+}
+function vColor(v) { return v === 'good' ? 'var(--accent-green)' : v === 'warn' ? 'var(--accent-orange)' : 'var(--accent-red)'; }
+function vWord(v) { return v === 'good' ? 'Healthy' : v === 'warn' ? 'Watch' : 'Action'; }
+function bandBar(value, color) { const pct = Math.max(2, Math.min(100, value)); return `<div class="band"><i style="width:${pct}%;background:${color};"></i></div>`; }
+function kpiCard(label, value, sub, verdict, extra, tip) {
+  return `<div class="kpi">
+    <div class="kpi-label">${label}${tip ? ` <i class="info-tip" data-tip="${tip}">i</i>` : ''}</div>
+    <div class="kpi-value" style="color:${verdict ? vColor(verdict) : 'var(--text-primary)'};">${value}</div>
+    <div class="kpi-sub">${sub || ''}</div>
+    ${extra || ''}
+    ${verdict ? `<span class="verdict ${verdict}">${vWord(verdict)}</span>` : ''}
+  </div>`;
+}
+function frameDivider(title, tag) {
+  return `<div class="frame-divider"><span class="ttl">${title}</span><span class="tag">${tag}</span><span class="rule"></span></div>`;
+}
+
 function getThemePref() {
   return localStorage.getItem('codelens-theme') || 'system';
 }
@@ -2364,6 +2459,50 @@ let timelineLogScale = false;
 let tokenBurnChart = null;
 let tokenBurnPercentMode = false;
 
+let currentDays = null;
+let currentProject = '';
+
+async function applyFilters() {
+  const app = document.getElementById('app');
+  if (app) app.style.opacity = '0.5';
+  try {
+    const qs = new URLSearchParams();
+    if (currentDays) qs.set('days', currentDays);
+    if (currentProject) qs.set('project', currentProject);
+    const res = await fetch('/api/all' + (qs.toString() ? '?' + qs.toString() : ''));
+    DATA = await res.json();
+    initialRenderDone = true; // skip entry animations on a re-filter
+    render();
+  } catch (err) {
+    /* keep prior view on failure */
+  } finally {
+    if (app) app.style.opacity = '1';
+  }
+}
+
+// Populate + bind the filter / billing controls (header). Selects are static markup,
+// so values are synced each render; change listeners are bound once.
+let controlsBound = false;
+function syncControls() {
+  const daysSel = document.getElementById('filter-days');
+  const projSel = document.getElementById('filter-project');
+  const planSel = document.getElementById('filter-plan');
+  if (!daysSel || !projSel || !planSel) return;
+  if (currentDays == null) currentDays = (DATA.meta && DATA.meta.daysAnalyzed) || 30;
+  daysSel.value = String(currentDays);
+  const projects = (DATA.projects || []).map(p => p.repoName).filter(Boolean).sort();
+  projSel.innerHTML = '<option value="">All projects</option>' +
+    projects.map(p => `<option value="${p}">${p}</option>`).join('');
+  projSel.value = currentProject;
+  planSel.value = currentPlan();
+  if (!controlsBound) {
+    controlsBound = true;
+    daysSel.addEventListener('change', () => { currentDays = parseInt(daysSel.value, 10); applyFilters(); });
+    projSel.addEventListener('change', () => { currentProject = projSel.value; applyFilters(); });
+    planSel.addEventListener('change', () => { localStorage.setItem('codelens-plan', planSel.value); render(); });
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   initTheme();
   const refreshBtn = document.getElementById('refresh-btn');
@@ -2409,6 +2548,7 @@ function render() {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const tzShort = new Date().toLocaleTimeString(undefined, { timeZoneName: 'short' }).split(' ').pop();
   document.getElementById('timezone-badge').textContent = `${tzShort} (${tz})`;
+  syncControls();
   const summary = d.summary;
   const t = d.tokenAnalytics;
 
@@ -2416,9 +2556,12 @@ function render() {
   const rd = (n) => !initialRenderDone ? `reveal reveal-delay-${n}` : '';
 
   document.getElementById('app').innerHTML = `
+    <div class="${rd(1)}">${renderPricingBanner(summary)}</div>
     <div class="${rd(1)}">${renderWeeklyNarrative(d.weeklyNarrative)}</div>
     <div class="${rd(2)}">${renderHeroStats(summary)}</div>
+    ${frameDivider('Diagnostic', 'how the work was done')}
     <div class="${rd(3)}">${renderCostByPeriod(summary.costByPeriod)}</div>
+    <div class="scroll-reveal">${renderCostControl(d.costControl)}</div>
     <div class="${rd(4)}">${renderTokenHeroStats(t)}</div>
     <div class="${rd(5)}">${renderTokenFunnel(t)}</div>
     <div class="scroll-reveal">${renderInsights(d.insights)}</div>
@@ -2455,8 +2598,14 @@ function render() {
       </div>
     </div>
     <div class="scroll-reveal">${renderAutonomySection(d.autonomyMetrics)}</div>
-    <div class="scroll-reveal">${renderCacheEfficiency(t)}</div>
+
+    ${frameDivider('Outcome', 'whether it stuck')}
+    <p class="frame-note">The numbers above are activity. These measure whether the code stuck — high survival and low rework matter more than raw output volume.</p>
     <div class="scroll-reveal">${renderSurvival(d.lineSurvival)}</div>
+    <div class="scroll-reveal">${renderOutcomes(d.qualityOutcomes)}</div>
+    <div class="scroll-reveal">${renderLanguageDurability(d.lineSurvival)}</div>
+    ${d.halfLife ? `<div class="scroll-reveal">${renderHalfLife(d.halfLife)}</div>` : ''}
+    <div class="scroll-reveal">${renderStreaksWaste(d.streaks, d.waste)}</div>
     <div class="scroll-reveal">${renderSessionsTable(d.sessions)}</div>
   `;
 
@@ -2465,6 +2614,124 @@ function render() {
     initHeatmap();
   }
   bindEvents();
+}
+
+// Billing reframe: API-equivalent value is always known; subscription plans show a
+// flat prorated fee, 'free' shows tokens-only. Lead with the honest headline cost.
+function renderPricingBanner(s) {
+  const plan = currentPlan();
+  const p = s.pricing || { apiEquivalentCost: s.totalCost, plan: 'api' };
+  const api = p.apiEquivalentCost != null ? p.apiEquivalentCost : s.totalCost;
+  const days = (DATA && DATA.meta && DATA.meta.daysAnalyzed) || 30;
+  const monthly = PLAN_MONTHLY[plan];
+  let main, sub;
+  if (plan === 'api') {
+    main = '$' + api.toFixed(2);
+    sub = `API pay-per-token over ${days} days — this is your actual bill.`;
+  } else if (plan === 'free') {
+    main = formatTokens(s.totalInputTokens + s.totalOutputTokens) + ' tokens';
+    sub = `Tokens-only mode — those tokens are worth ~$${api.toFixed(2)} at API rates, but cost $0 on a free tier.`;
+  } else {
+    const prorated = Math.round(monthly * (days / 30) * 100) / 100;
+    main = '$' + prorated.toFixed(2);
+    sub = `${PLAN_LABEL[plan]} flat fee (prorated ${days}d). Your tokens are worth ~$${api.toFixed(2)} at API rates — that's your leverage.`;
+  }
+  return `<div class="kpi" style="margin-bottom:18px;border-left:3px solid var(--accent-orange);">
+    <div class="kpi-label">Spend this period · ${PLAN_LABEL[plan]} <i class="info-tip" data-tip="Switch billing model in the header. Codelens always knows the API-equivalent value of your tokens; subscription plans reframe it as a flat fee.">i</i></div>
+    <div class="kpi-value" style="color:var(--accent-orange);font-size:2rem;">${main}</div>
+    <div class="kpi-sub">${sub}</div>
+  </div>`;
+}
+
+// Cost-control levers: cache hit rate, premium-model routing, delegated spend.
+function renderCostControl(cc) {
+  if (!cc) return '';
+  const b = cc.benchmarks || { cacheHitRatePct: { good: 80, warn: 50 }, premiumSharePct: { good: 30, warn: 60 } };
+  const cacheV = verdictClass(cc.cacheHitRate, b.cacheHitRatePct.good, b.cacheHitRatePct.warn, false);
+  const premV = verdictClass(cc.premiumSharePct, b.premiumSharePct.good, b.premiumSharePct.warn, true);
+  return `<div class="stats-section">
+    <h2>Cost Control <i class="info-tip" data-tip="The cheapest levers to cut spend — all computed from data already on disk.">i</i></h2>
+    <div class="panel-grid">
+      ${kpiCard('Cache Hit Rate', cc.cacheHitRate + '%', `~$${cc.cacheSavingsDollars.toFixed(2)} saved (est.)`, cacheV, bandBar(cc.cacheHitRate, vColor(cacheV)), 'Share of input served from cache (90% cheaper). Below ~80% suggests caching is misconfigured.')}
+      ${kpiCard('Premium Model Share', cc.premiumSharePct + '%', cc.estimatedRebalanceSavings > 0 ? `~$${cc.estimatedRebalanceSavings.toFixed(2)} reroutable to Sonnet` : `$${cc.premiumCost.toFixed(2)} on Opus`, premV, bandBar(cc.premiumSharePct, vColor(premV)), 'Share of spend on premium (Opus) models. A high share is usually the first cost lever to pull.')}
+      ${kpiCard('Delegated to Subagents', cc.subagentSharePct + '%', `$${cc.subagentCost.toFixed(2)} of spend ran in subagents`, null, '', 'How much of your spend was offloaded to subagents — a delegation/autonomy signal.')}
+    </div>
+  </div>`;
+}
+
+// Outcome / quality counterweights with published benchmark bands.
+function renderOutcomes(q) {
+  if (!q) return '';
+  const reworkV = q.aiCommitCount >= 5 ? verdictClass(q.reworkRatePct, 4, 10, true) : null;
+  const revertV = q.totalUserCommits >= 5 ? verdictClass(q.revertRatePct, 4, 8, true) : null;
+  const delV = verdictClass(q.deletionRatio, 0.5, 1, true);
+  return `<div class="stats-section">
+    <div class="panel-grid">
+      ${kpiCard('Rework Rate', q.reworkRatePct + '%', `${q.aiCommitsWithFollowupFix}/${q.aiCommitCount} AI commits got a fix within 7d`, reworkV, bandBar(q.reworkRatePct, vColor(reworkV || 'good')), 'AI-assisted commits later followed by a bug-fix touching the same file. Lower = more durable. <4% is top-quartile.')}
+      ${kpiCard('Revert Rate', q.revertRatePct + '%', `${q.revertCount}/${q.totalUserCommits} commits were reverts`, revertV, bandBar(q.revertRatePct, vColor(revertV || 'good')), 'Share of commits that were reverts — the local DORA change-failure analog. <4% is healthy.')}
+      ${kpiCard('Deletion Ratio', q.deletionRatio.toFixed(2), 'lines deleted per line added', delV, '', 'High churn means lots of deletion relative to additions — a rework signal.')}
+      ${kpiCard('Unmatched AI Commits', String(q.aiOrphanCommitCount), 'AI co-authored commits with no captured session', q.aiOrphanCommitCount === 0 ? 'good' : 'warn', '', 'Commits with an AI co-author trailer that the session correlation did not capture — possible measurement blind spots.')}
+    </div>
+  </div>`;
+}
+
+// Durability split by language (from per-file numstat; generated/lock files excluded).
+function renderLanguageDurability(ls) {
+  const langs = (ls && ls.byLanguage) || [];
+  if (!langs.length) return '';
+  return `<div class="survival-section"><div class="survival-card">
+    <h3>Durability by Language <i class="info-tip" data-tip="Percentage of added lines that survived (not churned within 24h), per language. Generated/lock/minified files excluded.">i</i></h3>
+    <div class="lang-table">${langs.map(l => {
+      const c = l.survivalRatePct >= 80 ? 'var(--accent-green)' : l.survivalRatePct >= 60 ? 'var(--accent-orange)' : 'var(--accent-red)';
+      return `<div class="lang-row"><span class="lname">${l.language}</span><div class="lbar"><i style="width:${l.survivalRatePct}%;background:${c};"></i></div><span class="lpct" style="color:${c};">${l.survivalRatePct}%</span></div>`;
+    }).join('')}</div>
+    <div class="frame-note" style="margin-top:12px;">${langs.reduce((a, l) => a + l.added, 0).toLocaleString()} attributable lines, ordered by volume.</div>
+  </div></div>`;
+}
+
+// AI code half-life from git blame (only present when run with --blame).
+function renderHalfLife(hl) {
+  if (!hl) return '';
+  const cohorts = hl.byAgeWeeks || [];
+  const spark = cohorts.map(c => {
+    const h = Math.round((Math.max(0, Math.min(100, c.survivalRatePct)) / 100) * 50) + 6;
+    return `<div class="dbar" style="height:${h}px;" title="${c.introduced} lines introduced ${c.ageWeeks}w ago"><span>${c.survivalRatePct}%</span></div>`;
+  }).join('');
+  const hlText = !hl.sufficientHistory
+    ? 'Not enough history yet for a half-life estimate (need ≥3 weekly cohorts).'
+    : hl.halfLifeWeeks != null ? `Estimated half-life ≈ ${hl.halfLifeWeeks} week${hl.halfLifeWeeks === 1 ? '' : 's'}.` : 'Half-life is beyond the analyzed window — durable.';
+  const sv = hl.survivalRatePct >= 70 ? 'var(--accent-green)' : hl.survivalRatePct >= 40 ? 'var(--accent-orange)' : 'var(--accent-red)';
+  return `<div class="survival-section"><div class="survival-card">
+    <h3>AI Code Half-Life · git blame <i class="info-tip" data-tip="From git blame at HEAD: of the lines AI introduced, how many are still attributed to that original commit. A later edit (even yours) counts as not surviving.">i</i></h3>
+    <div class="streak-wrap">
+      <div><div class="streak-big" style="color:${sv};">${hl.survivalRatePct}%</div><div class="kpi-sub">${hl.surviving.toLocaleString()} of ${hl.introduced.toLocaleString()} AI lines still live at HEAD</div></div>
+      ${cohorts.length ? `<div class="decay-spark">${spark}</div>` : ''}
+    </div>
+    <div class="frame-note" style="margin-top:16px;">${hlText} ${hl.blamedFiles} files blamed${hl.cappedFiles ? ' (file-capped)' : ''}. Bars show survival by introducing-commit age.</div>
+  </div></div>`;
+}
+
+// Streaks + waste/burn outliers.
+function renderStreaksWaste(streaks, waste) {
+  const s = streaks || { current: 0, longest: 0 };
+  const w = waste || { highBurnSessions: [], overIteratedSessions: [] };
+  const items = [
+    ...(w.highBurnSessions || []).slice(0, 4).map(x => `<div class="waste-item"><span>🔥 ${x.projectName || 'session'} — $${x.costPerActiveMin}/active-min, no commits</span><span class="pill" style="background:rgba(239,68,68,0.15);color:var(--accent-red);">$${x.cost}</span></div>`),
+    ...(w.overIteratedSessions || []).slice(0, 4).map(x => `<div class="waste-item"><span>🔁 ${x.projectName || 'session'} — repeated a verification command ${x.repeats}×</span><span class="pill" style="background:rgba(245,158,11,0.15);color:var(--accent-orange);">retry loop</span></div>`),
+  ];
+  return `<div class="charts-grid">
+    <div class="chart-card">
+      <h3>Coding Streak <i class="info-tip" data-tip="Consecutive days with AI-assisted committed output.">i</i></h3>
+      <div class="streak-wrap" style="margin-top:8px;">
+        <div><div class="streak-big">${s.current}🔥</div><div class="kpi-sub">current streak (days)</div></div>
+        <div><div class="streak-big" style="color:var(--accent-blue);">${s.longest}</div><div class="kpi-sub">longest streak</div></div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <h3>Waste &amp; Burn <i class="info-tip" data-tip="High spend-rate sessions with no committed output, and test-retry loops. Burn = cost per active minute vs your own median. Planning/chat sessions are not flagged.">i</i></h3>
+      ${items.length ? `<div class="waste-list" style="margin-top:8px;">${items.join('')}</div>` : `<div class="frame-note" style="margin-top:8px;">No high-burn or over-iteration sessions detected — clean spend.</div>`}
+    </div>
+  </div>`;
 }
 
 function renderWeeklyNarrative(n) {
