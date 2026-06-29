@@ -32,6 +32,16 @@ test('getPricingTier resolves version-specific tiers', () => {
   assert.equal(getPricingTier(null), null);
 });
 
+test('Fable 5 / Mythos 5 are recognized and priced at $10/$50', () => {
+  assert.equal(getModelFamily('claude-fable-5'), 'fable');
+  assert.equal(getModelFamily('claude-mythos-5'), 'fable');
+  assert.equal(getPricingTier('claude-fable-5'), 'fable');
+  assert.equal(getPricingTier('claude-mythos-5'), 'fable');
+  // $10 input + $50 output per 1M tokens
+  const cost = calculateCost(1_000_000, 1_000_000, 0, 0, 'claude-fable-5');
+  assert.ok(Math.abs(cost - 60) < 0.0001, `expected 60, got ${cost}`);
+});
+
 test('PRICING table covers every exported tier', () => {
   for (const key of ['opus-47', 'opus-46', 'opus-45', 'opus-old', 'sonnet', 'haiku-new', 'haiku-35', 'haiku-3']) {
     assert.ok(PRICING[key], `missing pricing tier ${key}`);
@@ -48,6 +58,15 @@ test('calculateCost matches manual math for Opus 4.6', () => {
   const cost = calculateCost(1_000_000, 100_000, 500_000, 10_000, 'claude-opus-4-6');
   const expected = (1_000_000 * 5 / 1e6) + (100_000 * 25 / 1e6) + (500_000 * 0.5 / 1e6) + (10_000 * 6.25 / 1e6);
   assert.ok(Math.abs(cost - expected) < 0.0001, `expected ${expected}, got ${cost}`);
+});
+
+test('1-hour cache writes cost more than the 5-minute default', () => {
+  const fiveMin = calculateCost(0, 0, 0, 10_000, 'claude-opus-4-6'); // all 5m (default arg = 0)
+  const oneHour = calculateCost(0, 0, 0, 10_000, 'claude-opus-4-6', 10_000); // all 1h
+  assert.ok(oneHour > fiveMin, '1h cache write should cost more than 5m');
+  // Opus input $5/1M → 1h = 2x = $10/1M, 5m = 1.25x = $6.25/1M; for 10k tokens:
+  assert.ok(Math.abs(oneHour - 0.10) < 1e-9, `expected 0.10, got ${oneHour}`);
+  assert.ok(Math.abs(fiveMin - 0.0625) < 1e-9, `expected 0.0625, got ${fiveMin}`);
 });
 
 test('calculateCost returns 0 for unknown/missing model', () => {

@@ -60,6 +60,22 @@ function getMainBranchHashes(repoPath) {
   }
 }
 
+// Resolve git's --numstat rename syntax to the NEW path so it matches the
+// current file paths captured from session tool calls (filesWritten):
+//   "lib/{old => new}/file.js" -> "lib/new/file.js"
+//   "old.js => new.js"         -> "new.js"
+// Non-rename paths pass through unchanged.
+function parseNumstatPath(raw) {
+  if (!raw.includes(' => ')) return raw;
+  const brace = raw.match(/^(.*)\{(.*) => (.*)\}(.*)$/);
+  if (brace) {
+    const [, pre, , newMid, tail] = brace;
+    return (pre + newMid + tail).replace(/\/{2,}/g, '/');
+  }
+  const parts = raw.split(' => ');
+  return parts[parts.length - 1];
+}
+
 function parseGitLog(raw) {
   const commits = [];
   let current = null;
@@ -126,7 +142,7 @@ function parseGitLog(raw) {
       if (parts.length >= 3) {
         const added = parts[0] === '-' ? 0 : parseInt(parts[0], 10) || 0;
         const deleted = parts[1] === '-' ? 0 : parseInt(parts[1], 10) || 0;
-        const filePath = parts.slice(2).join('\t'); // handle filenames with tabs
+        const filePath = parseNumstatPath(parts.slice(2).join('\t')); // resolve renames + tabs
         current.files.push({ path: filePath, added, deleted });
         current.totalAdded += added;
         current.totalDeleted += deleted;
@@ -147,8 +163,8 @@ export function analyzeGitRepo(repoPath, days) {
 
   try {
     const raw = execSync(
-      `git -C "${repoPath}" log --all --since="${days} days ago" --format="COMMIT:%H|%ae|%aI|%s|%D" --numstat`,
-      { encoding: 'utf-8', maxBuffer: 50 * 1024 * 1024 }
+      `git -C "${repoPath}" log --no-merges --exclude=refs/stash --all --since="${days} days ago" --format="COMMIT:%H|%ae|%aI|%s|%D" --numstat`,
+      { encoding: 'utf-8', maxBuffer: 256 * 1024 * 1024 }
     );
 
     const allCommits = parseGitLog(raw);
@@ -159,8 +175,18 @@ export function analyzeGitRepo(repoPath, days) {
       commit.onMain = mainHashes.has(commit.hash);
     }
 
-    // Filter to current user
-    const userCommits = allCommits.filter(c => c.authorEmail === user.email);
+    // Enforce the lookback window on AUTHOR date (%aI), matching every downstream
+    // metric (all of which bucket on author date). `--since` filters on committer
+    // date, which can differ from author date after a rebase or cherry-pick.
+    const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
+
+    // Filter to the current user (case-insensitive — git records emails verbatim
+    // and the case can vary) within the author-date window.
+    const userEmail = (user.email || '').toLowerCase();
+    const userCommits = allCommits.filter(c =>
+      (c.authorEmail || '').toLowerCase() === userEmail &&
+      Number.isFinite(c.timestampMs) && c.timestampMs >= cutoffMs
+    );
 
     return { repoPath, commits: userCommits, allCommits, defaultBranch: branchName };
   } catch (err) {

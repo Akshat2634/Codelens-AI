@@ -2340,6 +2340,19 @@ function formatTokens(n) {
   return n.toString();
 }
 
+// Integer percentages of a set of values that are guaranteed to sum to exactly
+// 100 (largest-remainder method), so legends never read 99% or 101%.
+function pctTo100(values) {
+  const total = values.reduce((a, b) => a + b, 0);
+  if (total <= 0) return values.map(() => 0);
+  const exact = values.map(v => (v / total) * 100);
+  const out = exact.map(Math.floor);
+  let remainder = 100 - out.reduce((a, b) => a + b, 0);
+  const order = exact.map((v, i) => ({ i, frac: v - Math.floor(v) })).sort((a, b) => b.frac - a.frac);
+  for (let k = 0; k < order.length && remainder > 0; k++) { out[order[k].i]++; remainder--; }
+  return out;
+}
+
 function animateValue(element, start, end, duration, prefix = '', suffix = '') {
   const startTime = performance.now();
   const range = end - start;
@@ -2348,7 +2361,12 @@ function animateValue(element, start, end, duration, prefix = '', suffix = '') {
     const progress = Math.min(elapsed / duration, 1);
     const eased = 1 - Math.pow(1 - progress, 3);
     const current = start + range * eased;
-    element.textContent = prefix + (Number.isInteger(end) ? Math.round(current).toLocaleString() : current.toFixed(2)) + suffix;
+    // Currency keeps 2 decimals + thousands separators even when the amount is a
+    // whole number ($12 must not render as "12" with the cents silently dropped).
+    const text = prefix === '$'
+      ? current.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : (Number.isInteger(end) ? Math.round(current).toLocaleString() : current.toFixed(2));
+    element.textContent = prefix + text + suffix;
     if (progress < 1) requestAnimationFrame(update);
   }
   requestAnimationFrame(update);
@@ -2438,6 +2456,7 @@ function render() {
       <div class="chart-card">
         <h3>Model Cost Breakdown <i class="info-tip" data-tip="How your spending splits across different Claude models (Opus, Sonnet, Haiku). Opus is the most expensive but may be more capable.">i</i></h3>
         <div class="chart-container"><canvas id="chart-models"></canvas></div>
+        <div id="model-note" style="display:none;font-size:0.72rem;color:var(--text-muted);margin-top:8px;line-height:1.45;"></div>
       </div>
       <div class="chart-card">
         <h3>Tool Usage Distribution <i class="info-tip" data-tip="Which tools Claude used most during your sessions. Read = reading files, Bash = running commands, Edit = modifying files, Write = creating new files.">i</i></h3>
@@ -2512,6 +2531,7 @@ function renderHeroStats(s) {
   const scoreDeg = Math.round(es.score * 3.6);
   return `<div class="stats-section">
     <h2>Performance Overview <i class="info-tip" data-tip="High-level metrics for your AI coding sessions — cost, output, efficiency, and overall score.">i</i></h2>
+    ${s.pricingEstimatedPct > 0 ? `<div style="margin:0 0 14px;padding:10px 14px;border-radius:10px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);font-size:0.8rem;color:var(--text-secondary);">⚠️ ~${s.pricingEstimatedPct}% of the cost above is <strong>estimated</strong> — some sessions used a model with no known pricing and were billed at the Sonnet fallback rate.</div>` : ''}
     <div class="hero-stats">
       <div class="hero-stats-left">
         <div class="stat-card glow cost-card">
@@ -2577,7 +2597,7 @@ function renderCostByPeriod(p) {
         <div class="period-tokens">${formatTokens(p.today.tokens)} tokens</div>
       </div>
       <div class="period-card week">
-        <div class="period-label">This Week</div>
+        <div class="period-label">Last 7 Days</div>
         <div class="period-cost">$${p.week.cost.toFixed(2)}</div>
         <div class="period-meta">${p.week.sessions} sessions &middot; ${p.week.commits} commits</div>
         <div class="period-tokens">${formatTokens(p.week.tokens)} tokens</div>
@@ -2597,7 +2617,7 @@ function renderCostByPeriod(p) {
     </div>
     <div class="cost-legend">
       <span><span class="dot" style="background: var(--accent-green);"></span>Today</span>
-      <span><span class="dot" style="background: var(--accent-blue);"></span>This Week</span>
+      <span><span class="dot" style="background: var(--accent-blue);"></span>Last 7 Days</span>
       <span><span class="dot" style="background: var(--accent-purple);"></span>This Month</span>
       <span><span class="dot" style="background: var(--accent-orange);"></span>All Time</span>
     </div>
@@ -2631,13 +2651,13 @@ function renderSurvival(s) {
     <div class="survival-card">
       <h3>
         Line Survival Rate
-        <i class="info-tip" data-tip="Of all lines your AI agent added, how many are still in the codebase after 24 hours. Approximate — based on churn detection, not exact git blame tracking.">i</i>
+        <i class="info-tip" data-tip="Of the lines your AI agent added (in files it edited), how many weren't reworked within 24 hours. Approximate — based on churn detection, not exact git blame. Lines added in the last 24h are excluded from the rate since they haven't had a full window to be reworked.">i</i>
       </h3>
       <div class="survival-bar"><div class="fill" style="width: ${pct}%; background: ${gradient};"></div></div>
       <div class="survival-stats">
-        <div><span>${s.totalAdded.toLocaleString()}</span> lines added</div>
-        <div><span>${s.totalChurned.toLocaleString()}</span> churned within 24h</div>
-        <div><span>${s.surviving.toLocaleString()}</span> surviving</div>
+        <div><span>${s.totalAdded.toLocaleString()}</span> AI lines added</div>
+        <div><span>${s.totalChurned.toLocaleString()}</span> reworked within 24h</div>
+        ${s.maturing > 0 ? `<div><span>${s.maturing.toLocaleString()}</span> still maturing (&lt;24h)</div>` : ''}
         <div><span style="color:${accentColor};">${pct}%</span> survival rate</div>
       </div>
     </div>
@@ -2789,16 +2809,18 @@ function renderAutonomySection(am) {
     ? (am.commitVelocity <= 20 ? 'Blazing' : am.commitVelocity <= 50 ? 'Solid' : 'Heavy')
     : 'N/A';
 
-  // Breakdown percentages (out of total weight = 100)
+  // Score composition: each component's contribution to the final score
+  // (component score × weight) as integer percentages summing to 100. Toolbelt
+  // coverage is intentionally excluded — it's a descriptor, not a scored input.
   const bd = am.breakdown;
-  const bTotal = (bd.autopilotScore * 0.25 + bd.selfHealWeighted * 0.30 + bd.toolbeltWeighted * 0.20 + bd.velocityScore * 0.25) || 1;
-  const bAuto = Math.round((bd.autopilotScore * 0.25 / bTotal) * 100);
-  const bHeal = Math.round((bd.selfHealWeighted * 0.30 / bTotal) * 100);
-  const bTool = Math.round((bd.toolbeltWeighted * 0.20 / bTotal) * 100);
-  const bVel = 100 - bAuto - bHeal - bTool;
+  const [bAuto, bHeal, bVel] = pctTo100([
+    bd.autopilotScore * 0.30,
+    bd.selfHealWeighted * 0.35,
+    bd.velocityScore * 0.35,
+  ]);
 
   return `<div class="autonomy-section">
-    <h2>Agent Autonomy <i class="info-tip" data-tip="How independently your AI agent works. Measures autopilot ratio (actions per prompt), self-healing (test/lint usage), tool diversity, and commit efficiency.">i</i></h2>
+    <h2>Agent Autonomy <i class="info-tip" data-tip="How independently your AI agent works. The score blends autopilot ratio (actions per prompt), self-healing (test/lint usage), and commit efficiency. Toolbelt coverage is shown for context but is not part of the score.">i</i></h2>
     <div class="autonomy-layout">
       <div class="autonomy-score-hub" style="--auto-glow: ${glowMap[g] || glowMap.F};">
         <div class="autonomy-ring" style="--auto-color: ${gradeColor}; --auto-deg: ${deg}deg;">
@@ -2827,7 +2849,7 @@ function renderAutonomySection(am) {
           </div>
           <div class="auto-metric">
             <div class="metric-header">
-              <span class="metric-name">Toolbelt Coverage <i class="info-tip" data-tip="Percentage of available tools (Read, Write, Edit, Bash, Grep, Glob, etc.) the agent uses per session. Higher diversity suggests more complete autonomous workflow.">i</i></span>
+              <span class="metric-name">Toolbelt Coverage <i class="info-tip" data-tip="How many distinct tools (Read, Write, Edit, Bash, Grep, Glob, etc.) the agent uses, as a share of the common tool set. A descriptor of tool variety — not part of the autonomy score, since a focused session that needs few tools isn't less autonomous.">i</i></span>
             </div>
             <div class="metric-value" style="color: var(--accent-purple);">${am.toolbeltCoverage}%</div>
             <div class="metric-bar"><div class="fill" style="width: ${am.toolbeltCoverage}%; background: var(--accent-purple);"></div></div>
@@ -2845,16 +2867,14 @@ function renderAutonomySection(am) {
         <div class="autonomy-breakdown">
           <div class="breakdown-label">Score Composition</div>
           <div class="breakdown-bar">
-            <div class="seg" style="width: ${bAuto}%; background: var(--accent-cyan);" title="Autopilot ${bd.autopilotScore}"></div>
-            <div class="seg" style="width: ${bHeal}%; background: var(--accent-green);" title="Self-Heal ${bd.selfHealWeighted}"></div>
-            <div class="seg" style="width: ${bTool}%; background: var(--accent-purple);" title="Toolbelt ${bd.toolbeltWeighted}"></div>
-            <div class="seg" style="width: ${bVel}%; background: var(--accent-blue);" title="Velocity ${bd.velocityScore}"></div>
+            <div class="seg" style="width: ${bAuto}%; background: var(--accent-cyan);" title="Autopilot contributes ${bAuto}%"></div>
+            <div class="seg" style="width: ${bHeal}%; background: var(--accent-green);" title="Self-Heal contributes ${bHeal}%"></div>
+            <div class="seg" style="width: ${bVel}%; background: var(--accent-blue);" title="Velocity contributes ${bVel}%"></div>
           </div>
           <div class="breakdown-legend">
-            <span><span class="ldot" style="background: var(--accent-cyan);"></span>Autopilot 25%</span>
-            <span><span class="ldot" style="background: var(--accent-green);"></span>Self-Heal 30%</span>
-            <span><span class="ldot" style="background: var(--accent-purple);"></span>Toolbelt 20%</span>
-            <span><span class="ldot" style="background: var(--accent-blue);"></span>Velocity 25%</span>
+            <span><span class="ldot" style="background: var(--accent-cyan);"></span>Autopilot ${bAuto}%</span>
+            <span><span class="ldot" style="background: var(--accent-green);"></span>Self-Heal ${bHeal}%</span>
+            <span><span class="ldot" style="background: var(--accent-blue);"></span>Velocity ${bVel}%</span>
           </div>
         </div>
         ${am.topVerificationCommands.length > 0 ? `
@@ -2883,13 +2903,13 @@ function renderCacheEfficiency(t) {
     <div class="survival-card">
       <h3>
         Cache Efficiency
-        <i class="info-tip" data-tip="Cache reads are 90% cheaper than regular input tokens. This shows what percentage of your input context was served from cache and how much money that saved you.">i</i>
+        <i class="info-tip" data-tip="Cache reads cost ~10% of a fresh input token. This shows the share of input context served from cache and what those cached tokens would have cost at full input pricing — an avoided-cost estimate, not money you were necessarily billed (subscription plans pay a flat rate).">i</i>
       </h3>
       <div class="survival-bar"><div class="fill" style="width: ${hitRate}%; background: ${gradient};"></div></div>
       <div class="survival-stats">
         <div><span>${formatTokens(t.totalCacheReadTokens)}</span> tokens from cache</div>
         <div><span>${formatTokens(t.totalInputTokens)}</span> fresh input tokens</div>
-        <div><span style="color:var(--accent-cyan);">$${t.cacheSavingsDollars.toFixed(2)}</span> saved</div>
+        <div><span style="color:var(--accent-cyan);">$${t.cacheSavingsDollars.toFixed(2)}</span> vs. uncached pricing</div>
         <div><span style="color:${accentColor};">${hitRate}%</span> cache hit rate</div>
       </div>
     </div>
@@ -3196,15 +3216,15 @@ function initCharts() {
   // Model doughnut
   const models = DATA.modelBreakdown;
   const modelLabels = Object.keys(models).filter(k => models[k].cost > 0);
-  const modelColors = { opus: '#a855f7', sonnet: '#3b82f6', haiku: '#22d3a8', unknown: '#94a3b8' };
+  const modelColors = { opus: '#a855f7', sonnet: '#3b82f6', haiku: '#22d3a8', fable: '#ec4899', unknown: '#94a3b8' };
   const modelTotalCost = modelLabels.reduce((s, m) => s + models[m].cost, 0);
   new Chart(document.getElementById('chart-models'), {
     type: 'doughnut',
     data: {
-      labels: modelLabels.map(m => {
-        const pct = modelTotalCost > 0 ? Math.round((models[m].cost / modelTotalCost) * 100) : 0;
-        return m.charAt(0).toUpperCase() + m.slice(1) + ' (' + pct + '%)';
-      }),
+      labels: (() => {
+        const pcts = pctTo100(modelLabels.map(m => models[m].cost));
+        return modelLabels.map((m, i) => m.charAt(0).toUpperCase() + m.slice(1) + ' (' + pcts[i] + '%)');
+      })(),
       datasets: [{
         data: modelLabels.map(m => models[m].cost),
         backgroundColor: modelLabels.map(m => modelColors[m] || '#94a3b8'),
@@ -3239,6 +3259,16 @@ function initCharts() {
       },
     },
   });
+
+  // Disclaimer shown only when Fable 5 / Mythos 5 appears in the breakdown:
+  // Anthropic suspended access to both models on 2026-06-12 (stated as temporary).
+  const modelNote = document.getElementById('model-note');
+  // Only when Fable/Mythos actually appears in the chart (modelLabels = cost > 0).
+  // Both fable and mythos map to the 'fable' family, so this covers either.
+  if (modelNote && modelLabels.includes('fable')) {
+    modelNote.style.display = 'block';
+    modelNote.innerHTML = '⚠️ Claude Fable 5 / Mythos 5 access was suspended by Anthropic on Jun 12, 2026 (stated as temporary). Costs shown use the announced $10 / $50 per-MTok pricing — <a href="https://www.anthropic.com/news/claude-fable-5-mythos-5" target="_blank" rel="noopener" style="color:var(--accent-blue);">see Anthropic\'s announcement ↗</a>.';
+  }
 
   // Tool usage horizontal bar
   const tools = DATA.toolBreakdown;
@@ -3793,7 +3823,7 @@ function renderShareCard(canvas) {
 
   // ── Grade + Stats Row ──
   y += 20;
-  drawGradeCircle(ctx, 80, y + 52, 42, s.overallGrade, th);
+  drawGradeCircle(ctx, 80, y + 52, 42, (s.efficiencyScore && s.efficiencyScore.letter) || s.overallGrade, th);
 
   const boxW = 152;
   const boxH = 52;
