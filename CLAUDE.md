@@ -4,7 +4,7 @@
 
 **Codelens AI** (`codelens-ai` on npm) is a CLI tool that measures ROI from AI coding agents by correlating Claude Code token usage with git commit output. It parses Claude Code session files, analyzes git history, and serves an interactive dashboard at `http://localhost:3457`.
 
-**Version:** 0.8.2
+**Version:** 0.9.0
 **License:** MIT
 **npm package:** `codelens-ai` (alias: `claude-roi`)
 
@@ -13,7 +13,7 @@
 - **Runtime:** Node.js >= 18, ES modules (`"type": "module"`)
 - **Backend:** Express.js 5.0.0
 - **CLI:** Commander.js 13.0.0
-- **Frontend:** Single-file HTML (`src/dashboard.html`) with vanilla JS + Chart.js 4.4.7
+- **Frontend:** Single-file HTML (`src/dashboard.html`) with vanilla JS + locally-vendored Chart.js 4.5.1 (`src/vendor/`, served same-origin — no CDN)
 - **Testing:** Playwright (E2E)
 - **Styling:** Inline CSS with CSS variables, glassmorphism design, dark/light theme
 
@@ -25,14 +25,18 @@ src/
 ├── claude-parser.js   # Parses JSONL session files from ~/.claude/projects/
 ├── git-analyzer.js    # Git log analysis, branch detection, diff stats
 ├── correlator.js      # Matches sessions to commits via file overlap + time window
-├── metrics.js         # ROI calculations, grades, insights, heatmap, survival rate
+├── metrics.js         # ROI calcs, grades, insights, cost-control, quality outcomes, streaks, waste
+├── artifacts.js       # Weekly digest HTML + embeddable ROI badge generators
 ├── server.js          # Express REST API routes
 ├── cache.js           # Smart caching with stale file detection
-├── dashboard.html     # Single-file SPA dashboard (3000+ lines)
-└── agents/            # Agent integration stubs (claude/, cursor/)
+├── dashboard.html     # Single-file SPA dashboard (Diagnostic vs Outcome)
+└── vendor/            # Locally bundled Chart.js (no CDN)
 
 tests/
-└── dashboard.spec.js  # Playwright E2E tests
+├── unit/              # node:test unit tests (parser, correlator, metrics)
+├── e2e/smoke.spec.js  # Playwright smoke suite (fixture-backed, runs in CI)
+├── local/             # Full Playwright suite (local-only)
+└── fixtures/          # Synthetic session fixtures + build-fixtures.js
 
 .github/workflows/
 ├── ci.yml             # CI: syntax check, Node 18/20/22 matrix
@@ -49,15 +53,21 @@ Claude Sessions (JSONL) → claude-parser.js → [Cache] → git-analyzer.js
 ## Key API Routes (server.js)
 
 - `GET /` — dashboard HTML
-- `GET /api/all` — full payload
+- `GET /vendor/chart.umd.min.js` — locally vendored Chart.js (no CDN)
+- `GET /api/all` — full payload (supports `?days=&project=` re-windowing)
 - `GET /api/summary` — hero stats + insights
 - `GET /api/timeline` — daily cost/output chart data
 - `GET /api/sessions` — paginated sessions with sorting
 - `GET /api/models` — model breakdown
-- `GET /api/heatmap` — productivity heatmap
+- `GET /api/heatmap` — productivity heatmap (commits grid + cost by day-of-week)
 - `GET /api/tools` — tool usage breakdown
-- `GET /api/survival` — line survival stats
+- `GET /api/survival` — line survival stats (+ per-language)
 - `GET /api/tokens` — detailed token analytics
+- `GET /api/cost-control` — cache hit, premium-model share, subagent spend
+- `GET /api/quality` — revert/rework/deletion outcomes
+- `GET /api/waste` — high-burn + over-iteration sessions
+- `GET /api/streaks` — coding streaks
+- `GET /api/half-life` — git-blame survival (present only with `--blame`)
 - `POST /api/refresh` — force re-parse
 
 ## CLI Usage
