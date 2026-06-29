@@ -105,6 +105,7 @@ codelens-ai --autonomy             # print autonomy score to terminal and exit
 The dashboard includes:
 
 - **Hero stats** — total cost, commits shipped, cost per commit, ROI grade
+- **Attribution & Coverage** — per-commit confidence (high/medium/low) that a commit was really the AI's, plus a reconciliation of AI-attributed vs co-authored vs organic (manual) lines, so the ROI numbers are auditable rather than a black box
 - **Smart insights** — auto-generated observations about your usage patterns
 - **Cost vs Output timeline** — dual-axis chart of daily cost and lines added
 - **Model comparison** — cost breakdown by Claude model

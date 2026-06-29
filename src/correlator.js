@@ -152,6 +152,34 @@ export function correlateSessions(sessions, commitsByRepo) {
     const committedFiles = new Set(matched.flatMap(c => c.files.map(f => f.path)));
     const uncommittedFiles = [...sessionFiles].filter(f => !committedFiles.has(f));
 
+    // Attribution confidence: how sure are we these commits are THIS session's
+    // work? Two signals, both already computed during matching:
+    //   - overlapFrac: share of the matched commits' added lines that landed in
+    //     files the session actually wrote (filesWritten ∩ commit.files).
+    //   - inWindowFrac: share of commits made inside the session window
+    //     (distance 0) vs. claimed via the 2h post-session buffer.
+    // Chat-only (time-only) matches have no file evidence → low.
+    let attributionConfidence = null;
+    if (matched.length > 0) {
+      let inWindow = 0;
+      let overlapAdded = 0;
+      let totalAddedAll = 0;
+      for (const c of matched) {
+        const a = commitAssignment.get(c.hash);
+        if (a && a.distance === 0) inWindow++;
+        totalAddedAll += c.totalAdded || 0;
+        if (sessionFiles.size > 0) {
+          overlapAdded += c.files.filter(f => sessionFiles.has(f.path)).reduce((x, f) => x + f.added, 0);
+        }
+      }
+      const overlapFrac = sessionFiles.size === 0 ? 0 : (totalAddedAll > 0 ? overlapAdded / totalAddedAll : 1);
+      const inWindowFrac = inWindow / matched.length;
+      if (sessionFiles.size === 0) attributionConfidence = 'low';
+      else if (overlapFrac >= 0.5 && inWindowFrac >= 0.5) attributionConfidence = 'high';
+      else if (overlapFrac < 0.2 || inWindowFrac < 0.2) attributionConfidence = 'low';
+      else attributionConfidence = 'medium';
+    }
+
     result.push({
       ...session,
       commits: matched,
@@ -162,6 +190,7 @@ export function correlateSessions(sessions, commitsByRepo) {
       netLines,
       filesChanged,
       isOrphaned,
+      attributionConfidence,
       matchedByFiles: sessionFiles.size > 0,
       uncommittedFiles,
       costPerCommit: matched.length > 0 ? session.cost.totalCost / matched.length : null,

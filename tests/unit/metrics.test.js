@@ -222,6 +222,34 @@ test('bestDay falls back to commit count when all days are trivially cheap', () 
   assert.equal(m.summary.worstDay.date, '2026-04-11'); // 1 commit
 });
 
+test('reconciliation aggregates commit confidence and line populations', () => {
+  const sessionHigh = mkCorrelated({
+    sessionId: 'h', attributionConfidence: 'high',
+    filesWritten: ['src/foo.js'],
+    commits: [{
+      hash: 'h1', timestamp: '2026-04-20T10:30:00.000Z', timestampMs: new Date('2026-04-20T10:30:00.000Z').getTime(),
+      subject: 's', branches: ['main'], onMain: true,
+      files: [{ path: 'src/foo.js', added: 20, deleted: 0 }, { path: 'src/bar.js', added: 10, deleted: 0 }],
+      totalAdded: 30, totalDeleted: 0,
+    }],
+    commitCount: 1, commitsOnMain: 1, linesAdded: 20, linesDeleted: 0,
+  });
+  const organic = [{
+    hash: 'o1', timestamp: '2026-04-19T10:00:00.000Z', timestampMs: new Date('2026-04-19T10:00:00.000Z').getTime(),
+    subject: 'manual', branches: ['main'], onMain: true,
+    files: [{ path: 'src/baz.js', added: 50, deleted: 0 }], totalAdded: 50, totalDeleted: 0,
+  }];
+  const cbr = { '/repo': { commits: sessionHigh.commits.concat(organic), defaultBranch: 'main' } };
+  const m = computeMetrics([sessionHigh], organic, cbr, 30);
+  const r = m.summary.reconciliation;
+  assert.equal(r.commits.aiMatched, 1);
+  assert.equal(r.commits.organic, 1);
+  assert.deepEqual(r.commits.byConfidence, { high: 1, medium: 0, low: 0 });
+  assert.equal(r.lines.aiAttributed, 20);       // overlap (foo.js only)
+  assert.equal(r.lines.aiCommitsTotal, 30);     // full commit (foo.js + bar.js)
+  assert.equal(r.lines.organic, 50);            // unmatched commit
+});
+
 test('weeklyNarrative populated when this-week sessions exist', () => {
   const now = Date.now();
   const recent = mkCorrelated({

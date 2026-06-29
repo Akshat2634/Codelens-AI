@@ -2435,6 +2435,7 @@ function render() {
     <div class="${rd(1)}">${renderWeeklyNarrative(d.weeklyNarrative)}</div>
     <div class="${rd(2)}">${renderHeroStats(summary)}</div>
     <div class="${rd(3)}">${renderCostByPeriod(summary.costByPeriod)}</div>
+    <div class="scroll-reveal">${renderAttribution(summary)}</div>
     <div class="${rd(4)}">${renderTokenHeroStats(t)}</div>
     <div class="${rd(5)}">${renderTokenFunnel(t)}</div>
     <div class="scroll-reveal">${renderInsights(d.insights)}</div>
@@ -2621,6 +2622,51 @@ function renderCostByPeriod(p) {
       <span><span class="dot" style="background: var(--accent-purple);"></span>This Month</span>
       <span><span class="dot" style="background: var(--accent-orange);"></span>All Time</span>
     </div>
+  </div>`;
+}
+
+function renderAttribution(s) {
+  const r = s.reconciliation;
+  if (!r) return '';
+  const c = r.commits, ln = r.lines;
+  const totalCommits = c.aiMatched + c.organic;
+  if (totalCommits === 0) return '';
+  const bc = c.byConfidence;
+  const segs = [
+    { label: 'High-confidence AI', val: bc.high, color: 'var(--accent-green)' },
+    { label: 'Medium', val: bc.medium, color: 'var(--accent-orange)' },
+    { label: 'Low-confidence', val: bc.low, color: 'var(--accent-red)' },
+    { label: 'Organic (manual)', val: c.organic, color: 'var(--text-muted)' },
+  ];
+  const pcts = pctTo100(segs.map(x => x.val));
+  const segHtml = segs.map((x, i) => x.val > 0 ? `<div class="seg" style="width:${pcts[i]}%;background:${x.color};" title="${x.label}: ${x.val} commits"></div>` : '').join('');
+  const legendHtml = segs.map((x, i) => `<span><span class="ldot" style="background:${x.color};"></span>${x.label} ${x.val} (${pcts[i]}%)</span>`).join('');
+  const coAuthored = Math.max(0, ln.aiCommitsTotal - ln.aiAttributed);
+  return `<div class="stats-section">
+    <h2>Attribution &amp; Coverage <i class="info-tip" data-tip="How confidently each commit is attributed to an AI session (from file-overlap + timing), and how the line counts reconcile. Makes the ROI numbers auditable instead of a black box.">i</i></h2>
+    <div class="autonomy-breakdown" style="margin-bottom:14px;">
+      <div class="breakdown-label">Commit attribution — ${totalCommits} commit${totalCommits === 1 ? '' : 's'} in window</div>
+      <div class="breakdown-bar">${segHtml}</div>
+      <div class="breakdown-legend">${legendHtml}</div>
+    </div>
+    <div class="period-stats">
+      <div class="period-card today">
+        <div class="period-label">AI-attributed lines</div>
+        <div class="period-cost">${ln.aiAttributed.toLocaleString()}</div>
+        <div class="period-meta">in files the AI wrote, within AI-matched commits</div>
+      </div>
+      <div class="period-card week">
+        <div class="period-label">Co-authored / manual</div>
+        <div class="period-cost">${coAuthored.toLocaleString()}</div>
+        <div class="period-meta">other lines in those same commits</div>
+      </div>
+      <div class="period-card all-time">
+        <div class="period-label">Organic-commit lines</div>
+        <div class="period-cost">${ln.organic.toLocaleString()}</div>
+        <div class="period-meta">commits with no matched session</div>
+      </div>
+    </div>
+    <div style="font-size:0.72rem;color:var(--text-muted);margin-top:8px;line-height:1.45;">Confidence is a heuristic from file-overlap and timing — "low" usually means a chat-only session matched purely by time, or a commit claimed via the 2h post-session window. Use it to judge how much weight to put on the ROI figures.</div>
   </div>`;
 }
 
@@ -2943,7 +2989,7 @@ function renderSessionsTable(sessions) {
             <th onclick="sortTable('msgCount')" class="${sortCol === 'msgCount' ? 'sorted' : ''}">Msgs${thArrow('msgCount')} <i class="info-tip" data-tip="Total messages in the session (your messages + Claude's responses).">i</i></th>
             <th onclick="sortTable('autopilotRatio')" class="${sortCol === 'autopilotRatio' ? 'sorted' : ''}">Autopilot${thArrow('autopilotRatio')} <i class="info-tip" data-tip="Agent responses per user message. Higher = more autonomous. 5x is excellent.">i</i></th>
             <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')} <i class="info-tip" data-tip="Estimated cost based on token usage and Anthropic's pricing. Calculated from input, output, cache read (90% discount), and cache write (25% premium) tokens.">i</i></th>
-            <th onclick="sortTable('commitCount')" class="${sortCol === 'commitCount' ? 'sorted' : ''}">Commits${thArrow('commitCount')} <i class="info-tip" data-tip="Git commits that touch files Claude edited in this session. Falls back to time-window for chat-only sessions.">i</i></th>
+            <th onclick="sortTable('commitCount')" class="${sortCol === 'commitCount' ? 'sorted' : ''}">Commits${thArrow('commitCount')} <i class="info-tip" data-tip="Git commits that touch files Claude edited in this session. Falls back to time-window for chat-only sessions. The colored dot shows attribution confidence: green = high, amber = medium, red = low (e.g. time-only match).">i</i></th>
             <th onclick="sortTable('linesAdded')" class="${sortCol === 'linesAdded' ? 'sorted' : ''}">Lines${thArrow('linesAdded')} <i class="info-tip" data-tip="Lines added / lines deleted in matched commits.">i</i></th>
             <th>Grade <i class="info-tip" data-tip="Session efficiency: A = great ROI, B = good, C = average, D = poor, F = no commits or very high cost.">i</i></th>
           </tr>
@@ -2970,7 +3016,7 @@ function renderSessionsTable(sessions) {
                 <td>${s.userMessageCount + s.assistantMessageCount}</td>
                 <td><span class="autopilot-badge">${s.autopilotRatio > 0 ? s.autopilotRatio + 'x' : '—'}</span></td>
                 <td>$${s.cost.totalCost.toFixed(2)}</td>
-                <td>${s.commitCount}</td>
+                <td>${s.commitCount}${s.commitCount > 0 && s.attributionConfidence ? ` <span title="${({high:'High',medium:'Medium',low:'Low'})[s.attributionConfidence]} attribution confidence" style="display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:middle;margin-left:5px;background:${({high:'var(--accent-green)',medium:'var(--accent-orange)',low:'var(--accent-red)'})[s.attributionConfidence]};"></span>` : ''}</td>
                 <td><span style="color:var(--accent-green)">+${s.linesAdded.toLocaleString()}</span> / <span style="color:var(--accent-red)">-${s.linesDeleted.toLocaleString()}</span></td>
                 <td><span class="grade-badge" style="background:${gradeBg};color:${gradeColor};">${s.grade}</span></td>
               </tr>
