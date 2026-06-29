@@ -27,6 +27,23 @@ const PRICING = {
 
 const PER_MIL = 1_000_000;
 
+// Subscription-plan monthly costs (USD). 'api' = pay-per-token API billing.
+// Codelens always computes the API-equivalent cost of consumed tokens; the plan
+// is a display layer that reframes those dollars for users on a Claude.ai
+// subscription, who do NOT pay per-token rates. Without this, every cost figure
+// is wrong for the solo-dev/subscription users who are the primary audience.
+const PLAN_PRICING = {
+  api:    { label: 'API (pay-per-token)', monthlyUsd: null },
+  pro:    { label: 'Pro',                 monthlyUsd: 20   },
+  max5x:  { label: 'Max 5×',              monthlyUsd: 100  },
+  max20x: { label: 'Max 20×',             monthlyUsd: 200  },
+  free:   { label: 'Free / tokens-only',  monthlyUsd: 0    },
+};
+
+// Gaps between consecutive messages longer than this count as idle (the user
+// stepped away), not active focus time. Mirrors WakaTime's heartbeat timeout.
+const IDLE_THRESHOLD_MS = 5 * 60 * 1000;
+
 function getModelFamily(modelName) {
   if (!modelName) return null;
   const lower = modelName.toLowerCase();
@@ -232,6 +249,9 @@ function createEmptySession(sessionId) {
     startTime: null,
     endTime: null,
     durationMinutes: 0,
+    activeMinutes: 0,
+    subagentCost: 0,
+    subagentTokens: 0,
     totalInputTokens: 0,
     totalOutputTokens: 0,
     cacheCreationTokens: 0,
@@ -257,6 +277,8 @@ async function parseSessionFile(filePath) {
   const modelTokens = {}; // model -> { input, output, cacheRead, cacheCreate }
   const dailyModelTokens = {}; // dateStr -> model -> { input, output, cacheRead, cacheCreate }
   let lastSeenTimestamp = null;
+  let activeMs = 0;           // accumulated focus time (gap-capped)
+  let lastActivityTs = null;  // ms of the previous timestamped record
 
   const rl = createInterface({
     input: createReadStream(filePath),
@@ -271,6 +293,19 @@ async function parseSessionFile(filePath) {
       obj = JSON.parse(line);
     } catch {
       continue; // skip malformed lines
+    }
+
+    // Active-time accumulation: sum gaps between consecutive timestamped records,
+    // counting only gaps below the idle threshold so wall-clock idle time is excluded.
+    if (obj.timestamp) {
+      const tsMs = new Date(obj.timestamp).getTime();
+      if (!Number.isNaN(tsMs)) {
+        if (lastActivityTs !== null) {
+          const gap = tsMs - lastActivityTs;
+          if (gap > 0 && gap <= IDLE_THRESHOLD_MS) activeMs += gap;
+        }
+        lastActivityTs = tsMs;
+      }
     }
 
     if (obj.type === 'user' && obj.message) {
@@ -444,12 +479,13 @@ async function parseSessionFile(filePath) {
     };
   }
 
-  // Calculate duration
+  // Calculate duration (wall-clock) and active focus time (gap-capped).
   if (session.startTime && session.endTime) {
     const start = new Date(session.startTime).getTime();
     const end = new Date(session.endTime).getTime();
     session.durationMinutes = Math.round((end - start) / 60000 * 10) / 10;
   }
+  session.activeMinutes = Math.round(activeMs / 60000 * 10) / 10;
 
   // Normalize filesWritten to relative paths (for file-based commit correlation)
   // Resolve the actual git root from repoPath (which may be a worktree path)
@@ -504,6 +540,12 @@ function mergeSubagentIntoSession(parent, sub) {
   parent.cost.cacheReadCost += sub.cost.cacheReadCost;
   parent.cost.cacheCreationCost += sub.cost.cacheCreationCost;
   parent.cost.totalCost += sub.cost.totalCost;
+
+  // Retain a delegated-work subtotal so the dashboard can show how much of a
+  // session's spend was offloaded to subagents. Active time is intentionally NOT
+  // merged — subagents run concurrently within the parent's wall-clock window.
+  parent.subagentCost += sub.cost.totalCost;
+  parent.subagentTokens += sub.totalInputTokens + sub.totalOutputTokens + sub.cacheReadTokens + sub.cacheCreationTokens;
 
   // Message counts intentionally NOT merged — we only report
   // the main-conversation messages, not internal subagent chatter.
@@ -652,6 +694,7 @@ export {
   getModelFamily,
   getPricingTier,
   isVerificationCommand,
+  PLAN_PRICING,
   PRICING,
   toRelativePath,
 };

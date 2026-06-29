@@ -4,7 +4,7 @@ import path from 'node:path';
 
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'agent-analytics');
 const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
-const CACHE_VERSION = 5;
+const CACHE_VERSION = 6;
 
 export function loadCache() {
   if (!existsSync(CACHE_FILE)) {

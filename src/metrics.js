@@ -1,6 +1,17 @@
-import { getModelFamily } from './claude-parser.js';
+import { getModelFamily, PLAN_PRICING } from './claude-parser.js';
 
 const CHURN_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// Premium-model families: spend here is the first lever to question when costs run high.
+const PREMIUM_FAMILIES = new Set(['opus']);
+// Published reference thresholds (used for benchmark bands in the UI).
+// AI-era code churn baseline ≈ 7-8% (GitClear); revert/rework top-quartile < 4% (DORA-style).
+const BENCHMARKS = {
+  churnRatePct: { good: 8, warn: 15 },
+  reworkRatePct: { good: 4, warn: 10 },
+  cacheHitRatePct: { good: 80, warn: 50 },
+  premiumSharePct: { good: 30, warn: 60 },
+};
 
 function formatBigNumber(n) {
   if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + 'B';
@@ -48,11 +59,10 @@ function computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, t
   const cacheHitRate = totalRawInput > 0
     ? Math.round((totalCacheReadTokens / totalRawInput) * 100) : 0;
   const totalCacheReadCost = correlatedSessions.reduce((s, c) => s + c.cost.cacheReadCost, 0);
-  // Cache reads are 90% cheaper — savings = what it would have cost at full price minus what was paid
+  // Estimated cache savings. Cache reads are billed at ~0.1x the base input rate
+  // across every pricing tier, so the avoided cost ≈ 9x what was actually paid for
+  // those reads. Labelled as an estimate in the UI (and only meaningful on the API plan).
   const cacheSavingsDollars = totalCacheReadCost * 9;
-
-  // Fun facts
-  const funFacts = generateTokenFunFacts(totalAllTokens, totalOutputTokens);
 
   return {
     totalAllTokens,
@@ -81,19 +91,7 @@ function computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, t
       orphaned: tokensOrphaned,
       exploratory: tokensExploratory,
     },
-    funFacts,
   };
-}
-
-function generateTokenFunFacts(_totalAllTokens, totalOutputTokens) {
-  const facts = [];
-  // ~0.75 words per token for English text
-  const approxWords = Math.round(totalOutputTokens * 0.75);
-  const novels = (approxWords / 80000).toFixed(1);
-  if (parseFloat(novels) >= 0.1) {
-    facts.push(`Claude generated ~${formatBigNumber(approxWords)} words of output — about ${novels} novels worth of text.`);
-  }
-  return facts;
 }
 
 function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics) {
@@ -307,12 +305,6 @@ function computeLineSurvival(commitsByRepo) {
 }
 
 // ---- Autonomy metrics ----
-const KNOWN_TOOLS = [
-  'Bash', 'Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'LS',
-  'WebFetch', 'WebSearch', 'NotebookEdit', 'NotebookRead', 'TodoWrite', 'Agent',
-];
-const TOTAL_AVAILABLE_TOOLS = KNOWN_TOOLS.length; // 14
-
 function computeAutonomyGrade(score) {
   if (score >= 80) return 'A';
   if (score >= 60) return 'B';
@@ -331,13 +323,10 @@ function computeAutonomyMetrics(correlatedSessions) {
       ? Math.round((s.verificationBashCalls / s.totalBashCalls) * 100)
       : 0;
 
-    const uniqueTools = Object.keys(s.toolCalls).length;
-    const toolbeltCoverage = Math.round((uniqueTools / TOTAL_AVAILABLE_TOOLS) * 100);
-
     const totalToolCalls = Object.values(s.toolCalls).reduce((sum, c) => sum + c, 0);
     const commitVelocity = s.commitCount > 0 ? Math.round(totalToolCalls / s.commitCount) : null;
 
-    return { sessionId: s.sessionId, autopilotRatio, selfHealScore, toolbeltCoverage, commitVelocity };
+    return { sessionId: s.sessionId, autopilotRatio, selfHealScore, commitVelocity };
   });
 
   // Aggregates
@@ -351,28 +340,24 @@ function computeAutonomyMetrics(correlatedSessions) {
   const totalVerif = correlatedSessions.reduce((s, c) => s + (c.verificationBashCalls || 0), 0);
   const selfHealScore = totalBash > 0 ? Math.round((totalVerif / totalBash) * 100) : 0;
 
-  const toolbeltCoverage = perSession.length > 0
-    ? Math.round(perSession.reduce((s, a) => s + a.toolbeltCoverage, 0) / perSession.length)
-    : 0;
-
   const withCommits = perSession.filter(a => a.commitVelocity !== null);
   const commitVelocity = withCommits.length > 0
     ? Math.round(withCommits.reduce((s, a) => s + a.commitVelocity, 0) / withCommits.length)
     : null;
 
-  // Composite score (0-100): clamp and weight each component
+  // Composite score (0-100): clamp and weight each component. Toolbelt coverage was
+  // dropped (its fixed 14-tool denominator is meaningless once MCP/custom tools exist),
+  // so the remaining weight shifts onto self-healing — the strongest quality signal.
   const autopilotScore = Math.round(Math.min(autopilotRatio / 5, 1) * 100);
   const selfHealWeighted = selfHealScore;
-  const toolbeltWeighted = toolbeltCoverage;
   const velocityScore = commitVelocity !== null
     ? Math.round(Math.max(0, Math.min(1, 1 - (commitVelocity / 100))) * 100)
     : 50; // neutral when no commits
 
   const overallScore = Math.round(
-    autopilotScore * 0.25 +
-    selfHealWeighted * 0.30 +
-    toolbeltWeighted * 0.20 +
-    velocityScore * 0.25
+    autopilotScore * 0.30 +
+    selfHealWeighted * 0.40 +
+    velocityScore * 0.30
   );
 
   // Top verification commands — extract the actual test/lint command, stripping cd/path prefixes
@@ -400,25 +385,22 @@ function computeAutonomyMetrics(correlatedSessions) {
     overall: { score: overallScore, grade: computeAutonomyGrade(overallScore) },
     autopilotRatio,
     selfHealScore,
-    toolbeltCoverage,
     commitVelocity,
     totalBashCalls: totalBash,
     totalVerificationCalls: totalVerif,
     topVerificationCommands,
     perSession,
-    breakdown: { autopilotScore, selfHealWeighted, toolbeltWeighted, velocityScore },
+    breakdown: { autopilotScore, selfHealWeighted, velocityScore },
   };
 }
 
-function computeEfficiencyGrade(costPerCommit, survivalRate) {
-  // Grade based on cost per commit (more meaningful than raw token count)
-  if (costPerCommit <= 2 && survivalRate >= 90) return 'A';
-  if (costPerCommit <= 5 && survivalRate >= 75) return 'B';
-  if (costPerCommit <= 15 && survivalRate >= 50) return 'C';
-  if (costPerCommit <= 40 && survivalRate >= 25) return 'D';
-  return 'F';
+function scoreToLetter(score) {
+  return score >= 80 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : score >= 20 ? 'D' : 'F';
 }
 
+// Single source of truth for the ROI grade. Weighted toward durability (survival)
+// over raw cost efficiency, per the SPACE/DX-Core-4 guidance that output volume must
+// be counterbalanced by quality. 60 pts survival + 40 pts cost efficiency.
 function computeEfficiencyScore(costPerCommit, survivalRate, orphanedRate, totalCommits) {
   if (totalCommits === 0) {
     return {
@@ -428,27 +410,26 @@ function computeEfficiencyScore(costPerCommit, survivalRate, orphanedRate, total
     };
   }
 
-  // Score: 50 pts from cost efficiency (log scale) + 50 pts from survival rate
   let costScore;
-  if (costPerCommit <= 2) costScore = 50;
+  if (costPerCommit <= 2) costScore = 40;
   else if (costPerCommit >= 50) costScore = 0;
-  else costScore = Math.max(0, 50 * (1 - Math.log(costPerCommit / 2) / Math.log(25)));
-  const survivalScore = Math.min(survivalRate, 100) / 100 * 50;
+  else costScore = Math.max(0, 40 * (1 - Math.log(costPerCommit / 2) / Math.log(25)));
+  const survivalScore = Math.min(survivalRate, 100) / 100 * 60;
   const score = Math.round(costScore + survivalScore);
 
   const tier = score >= 80 ? 'Excellent' : score >= 60 ? 'Solid' : score >= 40 ? 'Developing' : score >= 20 ? 'Early' : 'Getting Started';
-  const letter = score >= 80 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : score >= 20 ? 'D' : 'F';
+  const letter = scoreToLetter(score);
 
   // Build explanation from actual metrics
   const costAdj = costPerCommit <= 2 ? 'excellent' : costPerCommit <= 5 ? 'good' : costPerCommit <= 15 ? 'moderate' : 'high';
   const explanation = `$${costPerCommit.toFixed(2)}/commit (${costAdj}) · ${Math.round(survivalRate)}% code survival`;
 
-  // Actionable tip based on weakest metric
+  // Actionable tip based on weakest metric (survival weighted heavier, so flag it first)
   let tip;
-  if (costScore < survivalScore) {
-    tip = 'Try shorter, focused sessions to reduce cost per commit.';
-  } else if (survivalRate < 50) {
+  if (survivalRate < 50) {
     tip = 'Review AI-generated code before committing to improve survival rate.';
+  } else if (costScore / 40 < survivalScore / 60) {
+    tip = 'Try shorter, focused sessions to reduce cost per commit.';
   } else if (orphanedRate > 40) {
     tip = `${orphanedRate}% of sessions had no commits — some may be exploratory, which is fine.`;
   } else {
@@ -458,14 +439,20 @@ function computeEfficiencyScore(costPerCommit, survivalRate, orphanedRate, total
   return { score, tier, letter, explanation, tip };
 }
 
+// Per-session grade reflects cost-per-commit ONLY — there is no per-session survival
+// signal (that requires the blame engine), so we deliberately do not fake a quality
+// component here. Labelled as a cost grade in the UI.
 function computeSessionGrade(session) {
   if (session.commitCount === 0) return 'F';
   const costPerCommit = session.cost.totalCost / session.commitCount;
-  // Use 80 as a default survival (we don't have per-session survival)
-  return computeEfficiencyGrade(costPerCommit, 80);
+  if (costPerCommit <= 3) return 'A';
+  if (costPerCommit <= 8) return 'B';
+  if (costPerCommit <= 20) return 'C';
+  if (costPerCommit <= 50) return 'D';
+  return 'F';
 }
 
-function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, _tokenAnalytics, autonomyMetrics) {
+function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics, costControl) {
   // Insights are deliberately curated to avoid repeating what's already shown
   // on hero cards (cost/tokens/cache), the weekly narrative (best day, autopilot,
   // dominant model), or the autonomy section (self-heal, toolbelt, bash counts).
@@ -506,13 +493,13 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
     });
   }
 
-  // 3. Model cost efficiency — actionable comparison
-  const modelFamilies = Object.entries(modelBreakdown).filter(([, d]) => d.sessions > 0 && d.avgCostPerCommit);
+  // 3. Model cost efficiency — actionable comparison (real primary-model attribution)
+  const modelFamilies = Object.entries(modelBreakdown).filter(([, d]) => d.commits > 0 && d.costPerCommit);
   if (modelFamilies.length > 1) {
-    const sorted = [...modelFamilies].sort((a, b) => a[1].avgCostPerCommit - b[1].avgCostPerCommit);
+    const sorted = [...modelFamilies].sort((a, b) => a[1].costPerCommit - b[1].costPerCommit);
     const best = sorted[0];
     const worst = sorted[sorted.length - 1];
-    const ratio = worst[1].avgCostPerCommit / best[1].avgCostPerCommit;
+    const ratio = worst[1].costPerCommit / best[1].costPerCommit;
     if (ratio >= 2) {
       candidates.push({
         priority: 2,
@@ -520,6 +507,34 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
         text: `${capitalise(worst[0])} costs ${ratio.toFixed(1)}x more per commit than ${capitalise(best[0])}.`,
       });
     }
+  }
+
+  // 3b. Cache hit rate — cheap, high-ROI cost lever
+  if (costControl && tokenAnalytics && tokenAnalytics.totalCacheReadTokens > 0) {
+    const hit = tokenAnalytics.cacheHitRate;
+    if (hit < costControl.benchmarks.cacheHitRatePct.warn && summary.totalCost > 1) {
+      candidates.push({
+        priority: 1,
+        type: 'warning',
+        text: `Cache hit rate is ${hit}% — well below the ~80% healthy range. Prompt caching is likely misconfigured, inflating cost.`,
+      });
+    } else if (hit < costControl.benchmarks.cacheHitRatePct.good && summary.totalCost > 1) {
+      candidates.push({
+        priority: 2,
+        type: 'tip',
+        text: `Cache hit rate is ${hit}% — pushing it toward 80%+ would cut input cost noticeably.`,
+      });
+    }
+  }
+
+  // 3c. Premium-model spend share — routing lever
+  if (costControl && costControl.premiumSharePct >= costControl.benchmarks.premiumSharePct.warn && summary.totalCost > 5) {
+    const save = costControl.estimatedRebalanceSavings;
+    candidates.push({
+      priority: 2,
+      type: 'tip',
+      text: `Opus drove ${costControl.premiumSharePct}% of spend${save > 0 ? ` — rerouting the Sonnet-eligible share could save ~$${save.toFixed(2)}` : ''}.`,
+    });
   }
 
   // 4. Session length sweet spot — actionable tip
@@ -597,16 +612,6 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
     }
   }
 
-  // 8. Toolbelt coverage — actionable for under-utilized setups
-  if (autonomyMetrics && autonomyMetrics.toolbeltCoverage < 30 && correlatedSessions.length >= 5) {
-    const used = Math.round(autonomyMetrics.toolbeltCoverage * TOTAL_AVAILABLE_TOOLS / 100);
-    candidates.push({
-      priority: 2,
-      type: 'tip',
-      text: `Your agent used ${used} of ${TOTAL_AVAILABLE_TOOLS} available tools — low toolbelt coverage.`,
-    });
-  }
-
   // 9. Model token efficiency — distinct from cost ratio (tokens ≠ cost)
   const modelsForTokens = Object.entries(modelBreakdown).filter(([, d]) => d.tokensPerCommit);
   if (modelsForTokens.length > 1) {
@@ -633,9 +638,30 @@ function capitalise(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days) {
+// Reframe dollar figures for the user's billing model. The API-equivalent cost (the
+// market value of consumed tokens) is always computed; subscription plans replace the
+// per-token bill with a flat monthly fee prorated across the window, and 'free' hides
+// dollars entirely (tokens-only). The dashboard applies the actual display transform.
+function buildPricing(plan, apiEquivalentCost, days) {
+  const def = PLAN_PRICING[plan] || PLAN_PRICING.api;
+  const monthlyUsd = def.monthlyUsd;
+  const proratedPlanCost = monthlyUsd != null ? Math.round(monthlyUsd * (days / 30) * 100) / 100 : null;
+  return {
+    plan: PLAN_PRICING[plan] ? plan : 'api',
+    label: def.label,
+    monthlyUsd,
+    proratedPlanCost,
+    apiEquivalentCost: Math.round(apiEquivalentCost * 100) / 100,
+    isSubscription: monthlyUsd != null && monthlyUsd > 0,
+    showDollars: plan !== 'free',
+  };
+}
+
+export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days, plan = 'api') {
   // ---- Summary ----
   const totalCost = correlatedSessions.reduce((s, c) => s + c.cost.totalCost, 0);
+  const totalSubagentCost = correlatedSessions.reduce((s, c) => s + (c.subagentCost || 0), 0);
+  const totalActiveMinutes = correlatedSessions.reduce((s, c) => s + (c.activeMinutes || 0), 0);
   const totalSessions = correlatedSessions.length;
   const totalCommits = correlatedSessions.reduce((s, c) => s + c.commitCount, 0);
   const totalLinesAdded = correlatedSessions.reduce((s, c) => s + c.linesAdded, 0);
@@ -653,10 +679,9 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
 
   const avgCost = totalCommits > 0 ? totalCost / totalCommits : 0;
   const orphanedSessionRate = totalSessions > 0 ? Math.round((orphanedCount / totalSessions) * 100) : 0;
-  const overallGrade = totalCommits > 0
-    ? computeEfficiencyGrade(avgCost, lineSurvival.survivalRate)
-    : 'F';
   const efficiencyScore = computeEfficiencyScore(avgCost, lineSurvival.survivalRate, orphanedSessionRate, totalCommits);
+  // Single consolidated grade — derived from the efficiency score, no separate scale.
+  const overallGrade = efficiencyScore.letter;
 
   // ---- Daily timeline ----
   const dailyMap = new Map();
@@ -713,40 +738,63 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     : null;
 
   // ---- Model breakdown ----
+  // Two distinct, both-real views per model family:
+  //  • cost / tokens / subModels — true spend share across every session (a session
+  //    using two models contributes to both families).
+  //  • sessions / commits / costPerCommit — real PRIMARY-model attribution: a session's
+  //    whole output is credited to its dominant model. This replaces the old approach
+  //    that split single commits into fractional per-model pieces by token share.
   const modelBreakdown = {};
+  const ensureFamily = (family) => {
+    if (!modelBreakdown[family]) {
+      modelBreakdown[family] = {
+        cost: 0, tokens: 0, subModels: {},
+        sessions: 0, commits: 0, linesAdded: 0,
+        primaryCost: 0, primaryTokens: 0,
+        costPerCommit: null, tokensPerCommit: null,
+      };
+    }
+    return modelBreakdown[family];
+  };
+
   for (const session of correlatedSessions) {
-    const sessionTotalTokens = Object.values(session.modelBreakdown)
-      .reduce((s, d) => s + d.tokens, 0);
-
     for (const [model, data] of Object.entries(session.modelBreakdown)) {
-      const family = getModelFamily(model) || 'unknown';
-      if (!modelBreakdown[family]) {
-        modelBreakdown[family] = { cost: 0, tokens: 0, sessions: 0, commits: 0, avgCostPerCommit: null, subModels: {} };
-      }
-      modelBreakdown[family].cost += data.cost;
-      modelBreakdown[family].tokens += data.tokens;
-
-      // Accumulate sub-model cost and tokens within this family
-      if (!modelBreakdown[family].subModels[model]) {
-        modelBreakdown[family].subModels[model] = { cost: 0, tokens: 0 };
-      }
-      modelBreakdown[family].subModels[model].cost   += data.cost;
-      modelBreakdown[family].subModels[model].tokens += data.tokens;
-
-      // Distribute sessions and commits proportionally by token share
-      const share = sessionTotalTokens > 0 ? data.tokens / sessionTotalTokens : 0;
-      modelBreakdown[family].sessions += share;
-      modelBreakdown[family].commits += session.commitCount * share;
+      const fam = ensureFamily(getModelFamily(model) || 'unknown');
+      fam.cost += data.cost;
+      fam.tokens += data.tokens;
+      if (!fam.subModels[model]) fam.subModels[model] = { cost: 0, tokens: 0 };
+      fam.subModels[model].cost += data.cost;
+      fam.subModels[model].tokens += data.tokens;
     }
   }
+
+  for (const session of correlatedSessions) {
+    const fam = ensureFamily(getModelFamily(session.model) || 'unknown');
+    fam.sessions += 1;
+    fam.commits += session.commitCount;
+    fam.linesAdded += session.linesAdded;
+    fam.primaryCost += session.cost.totalCost;
+    fam.primaryTokens += Object.values(session.modelBreakdown).reduce((s, d) => s + d.tokens, 0);
+  }
+
   for (const data of Object.values(modelBreakdown)) {
-    data.sessions = Math.round(data.sessions);
-    data.avgCostPerCommit = data.commits > 0 ? data.cost / data.commits : null;
-    data.tokensPerCommit = data.commits > 0 ? Math.round(data.tokens / data.commits) : null;
+    data.costPerCommit = data.commits > 0 ? data.primaryCost / data.commits : null;
+    data.tokensPerCommit = data.commits > 0 ? Math.round(data.primaryTokens / data.commits) : null;
     data.subModels = Object.fromEntries(
       Object.entries(data.subModels).sort(([, a], [, b]) => b.cost - a.cost)
     );
   }
+
+  // Premium-model spend share (cost-control lever: Opus work that Sonnet could do).
+  const totalModelCost = Object.values(modelBreakdown).reduce((s, d) => s + d.cost, 0);
+  const premiumCost = Object.entries(modelBreakdown)
+    .filter(([fam]) => PREMIUM_FAMILIES.has(fam))
+    .reduce((s, [, d]) => s + d.cost, 0);
+  const premiumSharePct = totalModelCost > 0 ? Math.round((premiumCost / totalModelCost) * 100) : 0;
+  // Rough rebalance estimate: a Sonnet-eligible slice of premium spend costs ~0.6x on
+  // Sonnet ($3/$15 vs $5/$25), so the avoidable amount on the premium overage is ~0.4x.
+  const premiumOverage = Math.max(0, premiumSharePct - BENCHMARKS.premiumSharePct.good) / 100 * totalModelCost;
+  const estimatedRebalanceSavings = Math.round(premiumOverage * 0.4 * 100) / 100;
 
   // ---- Tool breakdown ----
   const toolBreakdown = {};
@@ -777,9 +825,12 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     };
   }
 
-  // ---- Heatmap (hour x day-of-week) ----
+  // ---- Heatmap: commits by (day-of-week × hour), cost by day-of-week ----
+  // Commits carry a real hour-of-day (their timestamp). Cost is only known per
+  // calendar day (via dailyUsage), so it is bucketed by day-of-week only — no fake
+  // hour precision.
   const heatmap = Array.from({ length: 7 }, () => Array(24).fill(0));
-  const heatmapCost = Array.from({ length: 7 }, () => Array(24).fill(0));
+  const heatmapCostByDow = Array(7).fill(0);
   for (const session of correlatedSessions) {
     // Place each commit at its actual timestamp, not the session start
     for (const commit of session.commits) {
@@ -794,7 +845,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
       : { [toDateStr(session.startTime)]: { cost: session.cost.totalCost } };
     for (const [dateStr, dayData] of Object.entries(usage)) {
       const dd = new Date(dateStr + 'T12:00:00'); // noon local to get correct day-of-week
-      heatmapCost[dd.getDay()][12] += dayData.cost;
+      heatmapCostByDow[dd.getDay()] += dayData.cost;
     }
   }
 
@@ -878,6 +929,10 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     totalFilesChanged,
     avgCostPerCommit: totalCommits > 0 ? totalCost / totalCommits : null,
     avgCostPerLine: totalLinesAdded > 0 ? totalCost / totalLinesAdded : null,
+    // Durability-adjusted: cost per line that actually survived (signature outcome metric).
+    costPerSurvivingLine: lineSurvival.surviving > 0 ? totalCost / lineSurvival.surviving : null,
+    totalActiveMinutes: Math.round(totalActiveMinutes),
+    costPerActiveHour: totalActiveMinutes > 0 ? totalCost / (totalActiveMinutes / 60) : null,
     totalInputTokens,
     totalOutputTokens,
     orphanedSessionRate,
@@ -887,6 +942,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     totalCommitsOnMain,
     mainBranchPct: totalCommits > 0 ? Math.round((totalCommitsOnMain / totalCommits) * 100) : 0,
     organicCommitCount: organicCommits.length,
+    pricing: buildPricing(plan, totalCost, days),
     bestDay,
     worstDay,
     costByPeriod,
@@ -894,6 +950,18 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
 
   // ---- Token analytics ----
   const tokenAnalytics = computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, totalLinesAdded, modelBreakdown);
+
+  // ---- Cost-control levers (cache, model routing, delegated spend) ----
+  const costControl = {
+    cacheHitRate: tokenAnalytics.cacheHitRate,
+    cacheSavingsDollars: Math.round(tokenAnalytics.cacheSavingsDollars * 100) / 100,
+    premiumSharePct,
+    premiumCost: Math.round(premiumCost * 100) / 100,
+    estimatedRebalanceSavings,
+    subagentCost: Math.round(totalSubagentCost * 100) / 100,
+    subagentSharePct: totalCost > 0 ? Math.round((totalSubagentCost / totalCost) * 100) : 0,
+    benchmarks: BENCHMARKS,
+  };
 
   // ---- Autonomy metrics ----
   const autonomyMetrics = computeAutonomyMetrics(correlatedSessions);
@@ -907,12 +975,11 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
       grade: computeSessionGrade(s),
       autopilotRatio: a?.autopilotRatio ?? 0,
       selfHealScore: a?.selfHealScore ?? 0,
-      toolbeltCoverage: a?.toolbeltCoverage ?? 0,
       commitVelocity: a?.commitVelocity ?? null,
     };
   });
 
-  const insights = generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics);
+  const insights = generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics, costControl);
 
   const weeklyNarrative = buildWeeklyNarrative(correlatedSessions, autonomyMetrics);
 
@@ -932,6 +999,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     },
     summary,
     tokenAnalytics,
+    costControl,
     autonomyMetrics,
     insights,
     daily,
@@ -941,7 +1009,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     toolBreakdown,
     sessionBuckets,
     lineSurvival,
-    heatmap: { commits: heatmap, cost: heatmapCost },
+    heatmap: { commits: heatmap, costByDay: heatmapCostByDow },
     weeklyNarrative,
     organicCommits,
   };

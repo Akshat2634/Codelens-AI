@@ -29,7 +29,7 @@ const icon = {
 };
 const fmt = (ms) => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 
-async function buildPayload(claudeDir, days, project, forceRefresh = false) {
+async function buildPayload(claudeDir, days, project, forceRefresh = false, plan = 'api') {
   // Step 1: Parse sessions (with caching)
   let sessions;
   let fileIndex;
@@ -84,7 +84,7 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false) {
   console.log(`  ${icon.ok} Correlating sessions ${c.dim}── done${c.reset}`);
 
   // Step 4: Compute metrics
-  const payload = computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days);
+  const payload = computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days, plan);
   payload.meta.gitUser = getGitUser();
 
   // Save cache for next run
@@ -105,6 +105,7 @@ async function main() {
     .option('--json', 'output raw JSON to stdout instead of starting server')
     .option('--project <name>', 'filter to specific project')
     .option('--refresh', 'force full re-parse, ignore cache')
+    .option('--plan <plan>', 'billing model for cost figures: api | pro | max5x | max20x | free', 'api')
     .option('--autonomy', 'print autonomy metrics table to stdout and exit')
     .option('--claude-dir <path>', 'override path to Claude Code projects directory (for testing/CI)');
 
@@ -112,6 +113,8 @@ async function main() {
   const opts = program.opts();
   const port = parseInt(opts.port, 10);
   const days = parseInt(opts.days, 10);
+  const VALID_PLANS = ['api', 'pro', 'max5x', 'max20x', 'free'];
+  const plan = VALID_PLANS.includes(opts.plan) ? opts.plan : 'api';
 
   const invokedAs = path.basename(process.argv[1]);
   if (invokedAs.includes('claude-roi')) {
@@ -124,7 +127,7 @@ async function main() {
     ? path.resolve(opts.claudeDir)
     : path.join(os.homedir(), '.claude', 'projects');
 
-  const payload = await buildPayload(claudeDir, days, opts.project, opts.refresh);
+  const payload = await buildPayload(claudeDir, days, opts.project, opts.refresh, plan);
   if (payload) payload.meta.invokedAs = invokedAs.includes('claude-roi') ? 'claude-roi' : 'codelens-ai';
 
   if (!payload) {
@@ -149,7 +152,6 @@ async function main() {
     console.log(`  ${line}`);
     console.log(`  Autopilot Ratio     ${am.autopilotRatio}x`);
     console.log(`  Self-Heal Score     ${am.selfHealScore}%`);
-    console.log(`  Toolbelt Coverage   ${am.toolbeltCoverage}%`);
     console.log(`  Commit Velocity     ${am.commitVelocity !== null ? am.commitVelocity + ' steps/commit' : 'N/A'}`);
     console.log(`  ${line}`);
     if (am.topVerificationCommands.length > 0) {
@@ -162,7 +164,7 @@ async function main() {
   }
 
   // Start server — pass a rebuild function so /api/refresh can re-run the pipeline
-  const rebuild = () => buildPayload(claudeDir, days, opts.project, true);
+  const rebuild = () => buildPayload(claudeDir, days, opts.project, true, plan);
   const app = createServer(payload, rebuild);
   const server = app.listen(port, () => {
     const url = `http://localhost:${port}`;
