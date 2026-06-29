@@ -29,7 +29,7 @@ const icon = {
 };
 const fmt = (ms) => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 
-async function buildPayload(claudeDir, days, project, forceRefresh = false) {
+async function buildPayload(claudeDir, days, project, forceRefresh = false, planConfig = null) {
   // Step 1: Parse sessions (with caching)
   let sessions;
   let fileIndex;
@@ -84,7 +84,7 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false) {
   console.log(`  ${icon.ok} Correlating sessions ${c.dim}── done${c.reset}`);
 
   // Step 4: Compute metrics
-  const payload = computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days);
+  const payload = computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days, planConfig);
   payload.meta.gitUser = getGitUser();
 
   // Save cache for next run
@@ -106,12 +106,35 @@ async function main() {
     .option('--project <name>', 'filter to specific project')
     .option('--refresh', 'force full re-parse, ignore cache')
     .option('--autonomy', 'print autonomy metrics table to stdout and exit')
-    .option('--claude-dir <path>', 'override path to Claude Code projects directory (for testing/CI)');
+    .option('--claude-dir <path>', 'override path to Claude Code projects directory (for testing/CI)')
+    .option('--plan <tier>', 'subscription mode — effective $/commit vs your flat plan: pro | max5 | max20')
+    .option('--plan-cost <amount>', 'custom monthly subscription cost in USD (overrides --plan)');
 
   program.parse();
   const opts = program.opts();
   const port = parseInt(opts.port, 10);
   const days = parseInt(opts.days, 10);
+
+  // Optional subscription "effective cost" mode. Monthly USD by Anthropic plan.
+  const PLAN_COSTS = { pro: 20, max5: 100, max20: 200 };
+  let planConfig = null;
+  if (opts.planCost !== undefined) {
+    const custom = parseFloat(opts.planCost);
+    if (Number.isFinite(custom) && custom > 0) {
+      planConfig = { name: 'custom', monthlyCost: custom };
+    } else {
+      console.error(`  ${icon.err} ${c.red}--plan-cost must be a positive number.${c.reset}`);
+      process.exit(1);
+    }
+  } else if (opts.plan) {
+    const key = String(opts.plan).toLowerCase();
+    if (PLAN_COSTS[key]) {
+      planConfig = { name: key, monthlyCost: PLAN_COSTS[key] };
+    } else {
+      console.error(`  ${icon.err} ${c.red}Unknown --plan "${opts.plan}".${c.reset} Use pro, max5, max20, or --plan-cost <amount>.`);
+      process.exit(1);
+    }
+  }
 
   const invokedAs = path.basename(process.argv[1]);
   if (invokedAs.includes('claude-roi')) {
@@ -124,7 +147,7 @@ async function main() {
     ? path.resolve(opts.claudeDir)
     : path.join(os.homedir(), '.claude', 'projects');
 
-  const payload = await buildPayload(claudeDir, days, opts.project, opts.refresh);
+  const payload = await buildPayload(claudeDir, days, opts.project, opts.refresh, planConfig);
   if (payload) payload.meta.invokedAs = invokedAs.includes('claude-roi') ? 'claude-roi' : 'codelens-ai';
 
   if (!payload) {
@@ -162,7 +185,7 @@ async function main() {
   }
 
   // Start server — pass a rebuild function so /api/refresh can re-run the pipeline
-  const rebuild = () => buildPayload(claudeDir, days, opts.project, true);
+  const rebuild = () => buildPayload(claudeDir, days, opts.project, true, planConfig);
   const app = createServer(payload, rebuild);
   const server = app.listen(port, () => {
     const url = `http://localhost:${port}`;

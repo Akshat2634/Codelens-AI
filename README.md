@@ -98,7 +98,16 @@ codelens-ai --json                 # dump all metrics as JSON to stdout
 codelens-ai --project techops      # filter to a specific project
 codelens-ai --refresh              # force full re-parse (ignore cache)
 codelens-ai --autonomy             # print autonomy score to terminal and exit
+codelens-ai --plan max20           # subscription mode: effective $/commit vs your flat plan
+codelens-ai --plan-cost 150        # custom monthly subscription cost (USD)
 ```
+
+### Effective cost (subscription mode)
+
+By default costs are **API-equivalent** — what your usage *would* cost at pay-as-you-go token rates. If you're on a flat-rate Claude plan, those dollars aren't what you actually pay. Pass `--plan` (`pro` = $20/mo, `max5` = $100/mo, `max20` = $200/mo) or `--plan-cost <usd>` to add an **Effective Cost** panel that prorates your subscription to the analyzed window and shows:
+
+- **Effective $/commit** and **$/surviving line** — your prorated fee ÷ output, the cost figures that actually reflect your bill.
+- **Plan utilization** — API-equivalent value ÷ prorated fee (e.g. `3.2×` means you extracted ~3.2× your subscription in pay-as-you-go value). This is an estimate of value extracted, **not** realized savings.
 
 ## Dashboard
 

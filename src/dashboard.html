@@ -2435,6 +2435,7 @@ function render() {
     <div class="${rd(1)}">${renderWeeklyNarrative(d.weeklyNarrative)}</div>
     <div class="${rd(2)}">${renderHeroStats(summary)}</div>
     <div class="${rd(3)}">${renderCostByPeriod(summary.costByPeriod)}</div>
+    ${summary.plan ? `<div class="scroll-reveal">${renderPlan(summary)}</div>` : ''}
     <div class="${rd(4)}">${renderTokenHeroStats(t)}</div>
     <div class="${rd(5)}">${renderTokenFunnel(t)}</div>
     <div class="scroll-reveal">${renderInsights(d.insights)}</div>
@@ -2621,6 +2622,40 @@ function renderCostByPeriod(p) {
       <span><span class="dot" style="background: var(--accent-purple);"></span>This Month</span>
       <span><span class="dot" style="background: var(--accent-orange);"></span>All Time</span>
     </div>
+  </div>`;
+}
+
+function renderPlan(s) {
+  const p = s.plan;
+  if (!p) return '';
+  const planLabel = { pro: 'Pro ($20/mo)', max5: 'Max 5× ($100/mo)', max20: 'Max 20× ($200/mo)', custom: '$' + p.monthlyCost + '/mo' }[p.name] || ('$' + p.monthlyCost + '/mo');
+  const util = p.utilizationRatio;
+  const utilColor = util === null ? 'var(--text-muted)' : util >= 1 ? 'var(--accent-green)' : 'var(--accent-orange)';
+  return `<div class="stats-section">
+    <h2>Effective Cost <i class="info-tip" data-tip="Reframes API-equivalent spend against the flat subscription fee you actually pay, prorated to this window. Utilization = API-equivalent value ÷ prorated fee — an estimate of value extracted, not money saved (you pay the flat fee regardless of usage).">i</i></h2>
+    <div class="period-stats">
+      <div class="period-card today">
+        <div class="period-label">Your Plan</div>
+        <div class="period-cost" style="font-size:1.05rem;">${planLabel}</div>
+        <div class="period-meta">~$${p.windowCost.toFixed(2)} for the last ${p.windowDays} days</div>
+      </div>
+      <div class="period-card week">
+        <div class="period-label">Effective $/Commit</div>
+        <div class="period-cost">${p.effectiveCostPerCommit !== null ? '$' + p.effectiveCostPerCommit.toFixed(2) : '—'}</div>
+        <div class="period-meta">prorated fee ÷ commits shipped</div>
+      </div>
+      <div class="period-card month">
+        <div class="period-label">Effective $/Surviving Line</div>
+        <div class="period-cost">${p.effectiveCostPerSurvivingLine !== null ? '$' + p.effectiveCostPerSurvivingLine.toFixed(3) : '—'}</div>
+        <div class="period-meta">prorated fee ÷ surviving AI lines</div>
+      </div>
+      <div class="period-card all-time">
+        <div class="period-label">Plan Utilization</div>
+        <div class="period-cost" style="color:${utilColor};">${util !== null ? util.toFixed(1) + '×' : '—'}</div>
+        <div class="period-meta">$${p.apiEquivalentCost.toFixed(2)} API-equiv ÷ $${p.windowCost.toFixed(2)} fee</div>
+      </div>
+    </div>
+    <div style="font-size:0.72rem;color:var(--text-muted);margin-top:8px;line-height:1.45;">Utilization compares API-equivalent value to your flat fee — an estimate of value extracted, not realized savings. The $${p.apiEquivalentCost.toFixed(2)} API-equivalent figure is what this usage would cost at pay-as-you-go rates.</div>
   </div>`;
 }
 
