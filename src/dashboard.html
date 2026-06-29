@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Codelens AI — Agent Productivity Dashboard</title>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='8' y='14' width='4' height='12' rx='1.5' fill='%23e67e22'/%3E%3Crect x='14' y='6' width='4' height='20' rx='1.5' fill='%232ecc71'/%3E%3Crect x='20' y='10' width='4' height='16' rx='1.5' fill='%233498db'/%3E%3C/svg%3E">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+  <!-- Chart.js served same-origin from the local vendor copy — no CDN, works fully offline (privacy-first). -->
+  <script src="/vendor/chart.umd.min.js"></script>
   <script>
     (function() {
       var pref = localStorage.getItem('codelens-theme') || 'system';
@@ -54,8 +54,10 @@
       --glow-red: rgba(239, 68, 68, 0.15);
       --radius: 12px;
       --radius-sm: 8px;
-      --font-display: 'JetBrains Mono', 'SF Mono', monospace;
-      --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      /* Local-first font stacks: prefer the named faces if the user has them installed,
+         otherwise fall back to system fonts — no web-font CDN, works fully offline. */
+      --font-display: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+      --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
 
       /* Glassmorphism & overlay tokens */
       --glass-bg-from: rgba(21, 29, 43, 0.8);
@@ -2789,13 +2791,13 @@ function renderAutonomySection(am) {
     ? (am.commitVelocity <= 20 ? 'Blazing' : am.commitVelocity <= 50 ? 'Solid' : 'Heavy')
     : 'N/A';
 
-  // Breakdown percentages (out of total weight = 100)
+  // Breakdown percentages (out of total weight = 100). Toolbelt coverage was removed
+  // (meaningless fixed denominator); weight redistributed to self-heal.
   const bd = am.breakdown;
-  const bTotal = (bd.autopilotScore * 0.25 + bd.selfHealWeighted * 0.30 + bd.toolbeltWeighted * 0.20 + bd.velocityScore * 0.25) || 1;
-  const bAuto = Math.round((bd.autopilotScore * 0.25 / bTotal) * 100);
-  const bHeal = Math.round((bd.selfHealWeighted * 0.30 / bTotal) * 100);
-  const bTool = Math.round((bd.toolbeltWeighted * 0.20 / bTotal) * 100);
-  const bVel = 100 - bAuto - bHeal - bTool;
+  const bTotal = (bd.autopilotScore * 0.30 + bd.selfHealWeighted * 0.40 + bd.velocityScore * 0.30) || 1;
+  const bAuto = Math.round((bd.autopilotScore * 0.30 / bTotal) * 100);
+  const bHeal = Math.round((bd.selfHealWeighted * 0.40 / bTotal) * 100);
+  const bVel = 100 - bAuto - bHeal;
 
   return `<div class="autonomy-section">
     <h2>Agent Autonomy <i class="info-tip" data-tip="How independently your AI agent works. Measures autopilot ratio (actions per prompt), self-healing (test/lint usage), tool diversity, and commit efficiency.">i</i></h2>
@@ -2827,14 +2829,6 @@ function renderAutonomySection(am) {
           </div>
           <div class="auto-metric">
             <div class="metric-header">
-              <span class="metric-name">Toolbelt Coverage <i class="info-tip" data-tip="Percentage of available tools (Read, Write, Edit, Bash, Grep, Glob, etc.) the agent uses per session. Higher diversity suggests more complete autonomous workflow.">i</i></span>
-            </div>
-            <div class="metric-value" style="color: var(--accent-purple);">${am.toolbeltCoverage}%</div>
-            <div class="metric-bar"><div class="fill" style="width: ${am.toolbeltCoverage}%; background: var(--accent-purple);"></div></div>
-            <div class="metric-sub">${am.toolbeltCoverage >= 70 ? 'Full toolbelt utilization' : am.toolbeltCoverage >= 40 ? 'Moderate diversity' : 'Narrow tool usage'}</div>
-          </div>
-          <div class="auto-metric">
-            <div class="metric-header">
               <span class="metric-name">Commit Velocity <i class="info-tip" data-tip="Average tool calls needed per commit. Lower = more efficient agent. Under 20 is blazing fast.">i</i></span>
             </div>
             <div class="metric-value" style="color: var(--accent-blue);">${am.commitVelocity !== null ? am.commitVelocity : '—'}<span style="font-size:0.7rem;font-weight:500;color:var(--text-muted);margin-left:4px;">${am.commitVelocity !== null ? 'steps/commit' : ''}</span></div>
@@ -2847,14 +2841,12 @@ function renderAutonomySection(am) {
           <div class="breakdown-bar">
             <div class="seg" style="width: ${bAuto}%; background: var(--accent-cyan);" title="Autopilot ${bd.autopilotScore}"></div>
             <div class="seg" style="width: ${bHeal}%; background: var(--accent-green);" title="Self-Heal ${bd.selfHealWeighted}"></div>
-            <div class="seg" style="width: ${bTool}%; background: var(--accent-purple);" title="Toolbelt ${bd.toolbeltWeighted}"></div>
             <div class="seg" style="width: ${bVel}%; background: var(--accent-blue);" title="Velocity ${bd.velocityScore}"></div>
           </div>
           <div class="breakdown-legend">
-            <span><span class="ldot" style="background: var(--accent-cyan);"></span>Autopilot 25%</span>
-            <span><span class="ldot" style="background: var(--accent-green);"></span>Self-Heal 30%</span>
-            <span><span class="ldot" style="background: var(--accent-purple);"></span>Toolbelt 20%</span>
-            <span><span class="ldot" style="background: var(--accent-blue);"></span>Velocity 25%</span>
+            <span><span class="ldot" style="background: var(--accent-cyan);"></span>Autopilot 30%</span>
+            <span><span class="ldot" style="background: var(--accent-green);"></span>Self-Heal 40%</span>
+            <span><span class="ldot" style="background: var(--accent-blue);"></span>Velocity 30%</span>
           </div>
         </div>
         ${am.topVerificationCommands.length > 0 ? `
@@ -2889,7 +2881,7 @@ function renderCacheEfficiency(t) {
       <div class="survival-stats">
         <div><span>${formatTokens(t.totalCacheReadTokens)}</span> tokens from cache</div>
         <div><span>${formatTokens(t.totalInputTokens)}</span> fresh input tokens</div>
-        <div><span style="color:var(--accent-cyan);">$${t.cacheSavingsDollars.toFixed(2)}</span> saved</div>
+        <div><span style="color:var(--accent-cyan);">~$${t.cacheSavingsDollars.toFixed(2)}</span> saved (est.)</div>
         <div><span style="color:${accentColor};">${hitRate}%</span> cache hit rate</div>
       </div>
     </div>
@@ -3277,7 +3269,7 @@ function initCharts() {
       datasets: [
         {
           label: 'Avg $/Commit',
-          data: modelEffLabels.map(m => modelEff[m].avgCostPerCommit),
+          data: modelEffLabels.map(m => modelEff[m].costPerCommit),
           backgroundColor: modelEffLabels.map(m => modelEffColors[m] || '#94a3b8'),
           borderRadius: 4,
           yAxisID: 'y',

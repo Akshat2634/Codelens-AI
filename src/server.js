@@ -16,6 +16,13 @@ export function createServer(initialPayload, rebuildFn) {
     res.type('html').send(dashboardHtml);
   });
 
+  // Serve Chart.js from the local vendor copy (same-origin) instead of a CDN, so the
+  // dashboard works fully offline and honors the privacy-first / all-local promise.
+  const chartJs = readFileSync(path.join(__dirname, 'vendor', 'chart.umd.min.js'), 'utf-8');
+  app.get('/vendor/chart.umd.min.js', (_req, res) => {
+    res.type('application/javascript').set('Cache-Control', 'public, max-age=31536000, immutable').send(chartJs);
+  });
+
   // On-demand re-windowed payloads (lookback / project), memoized per key so the
   // dashboard's global filters can re-scope without a CLI restart. Blame is never
   // recomputed for filter re-windows (kept fast). Default (no params) is the boot payload.
