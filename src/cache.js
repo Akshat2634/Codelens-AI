@@ -4,7 +4,10 @@ import path from 'node:path';
 
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'agent-analytics');
 const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
-const CACHE_VERSION = 5;
+// Bump whenever parsing or pricing logic changes so cached sessions (which store
+// already-computed costs) are recomputed on upgrade instead of served stale.
+// 6: Sonnet 5 date-aware pricing (intro $2/$10 → standard $3/$15 on 2026-09-01).
+const CACHE_VERSION = 6;
 
 export function loadCache() {
   if (!existsSync(CACHE_FILE)) {

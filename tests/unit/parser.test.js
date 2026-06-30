@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
 import {
   calculateCost,
@@ -7,6 +10,7 @@ import {
   getPricingTier,
   isVerificationCommand,
   PRICING,
+  parseAllProjects,
   toRelativePath,
 } from '../../src/claude-parser.js';
 
@@ -42,8 +46,67 @@ test('Fable 5 / Mythos 5 are recognized and priced at $10/$50', () => {
   assert.ok(Math.abs(cost - 60) < 0.0001, `expected 60, got ${cost}`);
 });
 
+test('Sonnet 5 is date-aware: intro $2/$10 through 2026-08-31, standard $3/$15 after', () => {
+  // Sonnet 5 is the sonnet family (known model — must NOT count as estimated spend)
+  assert.equal(getModelFamily('claude-sonnet-5'), 'sonnet');
+
+  const introDay = Date.parse('2026-08-31T23:59:59Z'); // last instant of intro pricing
+  const standardDay = Date.parse('2026-09-01T00:00:00Z'); // first instant of standard pricing
+
+  // Tier selection flips exactly at the 2026-09-01 boundary
+  assert.equal(getPricingTier('claude-sonnet-5', introDay), 'sonnet-5-intro');
+  assert.equal(getPricingTier('claude-sonnet-5', standardDay), 'sonnet');
+  assert.equal(getPricingTier('claude-sonnet-5-20260615', introDay), 'sonnet-5-intro');
+
+  // Older Sonnets are NOT mistaken for Sonnet 5 ('sonnet-4-5' has no 'sonnet-5' substring)
+  assert.equal(getPricingTier('claude-sonnet-4-5', introDay), 'sonnet');
+  assert.equal(getPricingTier('claude-sonnet-4-6', standardDay), 'sonnet');
+  assert.equal(getPricingTier('claude-3-5-sonnet-20241022', introDay), 'sonnet');
+
+  // Cost math: 1M input + 1M output. Intro = $2 + $10 = $12; standard = $3 + $15 = $18.
+  const introCost = calculateCost(1_000_000, 1_000_000, 0, 0, 'claude-sonnet-5', 0, Date.parse('2026-07-15'));
+  assert.ok(Math.abs(introCost - 12) < 0.0001, `expected 12, got ${introCost}`);
+  const standardCost = calculateCost(1_000_000, 1_000_000, 0, 0, 'claude-sonnet-5', 0, Date.parse('2026-10-01'));
+  assert.ok(Math.abs(standardCost - 18) < 0.0001, `expected 18, got ${standardCost}`);
+
+  // Intro cache rates follow the standard multiples of the $2 intro input price
+  const introCache = calculateCost(0, 0, 1_000_000, 1_000_000, 'claude-sonnet-5', 0, Date.parse('2026-07-15'));
+  assert.ok(Math.abs(introCache - (0.20 + 2.50)) < 0.0001, `expected 2.70, got ${introCache}`);
+});
+
+test('Sonnet 5 session straddling the cutover: session.cost reconciles with the daily timeline and prices each side correctly', async () => {
+  // Two usages on either side of the 2026-09-01 cutover, far enough apart (Aug vs
+  // Sep) to land on different days in every timezone: 1M input each.
+  // Aug = intro $2/M, Sep = standard $3/M ⇒ total $5 — NOT $4 (all priced at the
+  // session-start intro rate, the bug this guards).
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codelens-sonnet5-'));
+  try {
+    const proj = path.join(root, 'proj');
+    mkdirSync(proj, { recursive: true });
+    const sid = 'ffffffff-1111-2222-3333-444444444444';
+    const usage = { input_tokens: 1_000_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    const lines = [
+      { type: 'user', sessionId: sid, cwd: '/tmp/x', gitBranch: 'main', timestamp: '2026-08-15T12:00:00.000Z', message: { content: [{ type: 'text', text: 'go' }] } },
+      { type: 'assistant', requestId: 'r1', timestamp: '2026-08-15T12:00:00.000Z', message: { model: 'claude-sonnet-5', usage } },
+      { type: 'assistant', requestId: 'r2', timestamp: '2026-09-15T12:00:00.000Z', message: { model: 'claude-sonnet-5', usage } },
+    ];
+    writeFileSync(path.join(proj, sid + '.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    // Large lookback so the (future-dated) fixture clears the cutoff filter.
+    const { sessions } = await parseAllProjects(root, 100000);
+    const s = sessions.find(x => x.sessionId === sid);
+    assert.ok(s, 'session should be parsed');
+
+    assert.ok(Math.abs(s.cost.totalCost - 5) < 1e-6, `expected $5 split-rate total, got ${s.cost.totalCost}`);
+    const dailySum = Object.values(s.dailyUsage).reduce((a, d) => a + d.cost, 0);
+    assert.ok(Math.abs(s.cost.totalCost - dailySum) < 1e-6, `session.cost ($${s.cost.totalCost}) must reconcile with daily timeline ($${dailySum})`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('PRICING table covers every exported tier', () => {
-  for (const key of ['opus-47', 'opus-46', 'opus-45', 'opus-old', 'sonnet', 'haiku-new', 'haiku-35', 'haiku-3']) {
+  for (const key of ['opus-48', 'opus-47', 'opus-46', 'opus-45', 'opus-old', 'sonnet', 'sonnet-5-intro', 'haiku-new', 'haiku-35', 'haiku-3']) {
     assert.ok(PRICING[key], `missing pricing tier ${key}`);
     const p = PRICING[key];
     assert.ok(p.input > 0 && p.output > 0, `invalid pricing for ${key}`);

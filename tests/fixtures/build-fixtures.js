@@ -125,4 +125,27 @@ session(s4, 'claude-sonnet-4-6-20250929', [
   },
 ]);
 
-console.log('Wrote 4 synthetic sessions to ' + OUT_DIR);
+// ── Session 5: Sonnet 5 work (intro-priced, ~4 days ago)
+const s5 = 'eeeeeeee-1111-2222-3333-444444444444';
+session(s5, 'claude-sonnet-5', [
+  {
+    type: 'user', sessionId: s5, cwd: FAKE_REPO, gitBranch: 'main',
+    timestamp: iso(4 * 24 * 60),
+    message: { content: [{ type: 'text', text: 'Wire up the new pricing tier.' }] },
+  },
+  {
+    type: 'assistant', requestId: 'req-5a',
+    timestamp: iso(4 * 24 * 60 - 1),
+    message: {
+      model: 'claude-sonnet-5',
+      usage: { input_tokens: 5200, output_tokens: 1400, cache_read_input_tokens: 16000, cache_creation_input_tokens: 1800 },
+      content: [
+        { type: 'text', text: 'Adding the tier and tests.' },
+        { type: 'tool_use', name: 'Edit', input: { file_path: FAKE_REPO + '/src/pricing.js' } },
+        { type: 'tool_use', name: 'Bash', input: { command: 'npm test' } },
+      ],
+    },
+  },
+]);
+
+console.log('Wrote 5 synthetic sessions to ' + OUT_DIR);
