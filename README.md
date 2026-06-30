@@ -147,11 +147,15 @@ Token costs are version-aware and calculated per model, accounting for the two p
 | Opus 4.6 | $5/M | $25/M | $0.50/M | $6.25/M | $10/M |
 | Opus 4.5 | $5/M | $25/M | $0.50/M | $6.25/M | $10/M |
 | Opus 4.0/4.1 (legacy) | $15/M | $75/M | $1.50/M | $18.75/M | $30/M |
+| Sonnet 5 (intro, through Aug 31 2026) | $2/M | $10/M | $0.20/M | $2.50/M | $4/M |
+| Sonnet 5 (standard, from Sep 1 2026) | $3/M | $15/M | $0.30/M | $3.75/M | $6/M |
 | Sonnet 3.7/4.0/4.5/4.6 | $3/M | $15/M | $0.30/M | $3.75/M | $6/M |
 | Haiku 4.5 | $1/M | $5/M | $0.10/M | $1.25/M | $2/M |
 | Haiku 3.5 | $0.80/M | $4/M | $0.08/M | $1.00/M | $1.60/M |
 | Haiku 3 | $0.25/M | $1.25/M | $0.03/M | $0.30/M | $0.50/M |
 
+> **Note — Claude Sonnet 5:** Sonnet 5 launched with [introductory pricing](https://www.anthropic.com/news/claude-sonnet-5) of $2 / $10 per MTok through Aug 31, 2026, reverting to standard Sonnet-tier $3 / $15 on Sep 1, 2026. Costs are priced by the rate in effect on each usage's date, so logs stay accurate across the cutover.
+>
 > **Note — Claude Fable 5 / Mythos 5:** Anthropic [suspended access](https://www.anthropic.com/news/claude-fable-5-mythos-5) to both models on Jun 12, 2026 (stated as temporary). Pricing is retained so historical Fable 5 usage already in your session logs is costed correctly at the announced $10 / $50 per-MTok rates.
 >
 > **Note — legacy tiers:** The 0.1× / 1.25× / 2× multipliers describe current models. Claude 3 Haiku predates them and uses Anthropic's originally-published cache rates ($0.30 write / $0.03 read), and 1-hour cache-write rates for retired tiers (e.g. Sonnet 3.7, Haiku 3) are derived at 2× input. These legacy rows are kept only to cost older session logs accurately.

@@ -21,8 +21,14 @@ const PRICING = {
   // temporary, restoration in progress). Pricing is kept here so historical Fable
   // usage already in users' logs is costed correctly; revisit if status/pricing changes.
   fable:        { input: 10,    output: 50,    cacheRead: 1.00,   cacheWrite: 12.50  },
-  // Sonnet 4.0 / 4.5 / 4.6: $3 input, $15 output
+  // Sonnet 3.7 / 4.0 / 4.5 / 4.6 — and Sonnet 5 *standard* pricing (from 2026-09-01): $3 input, $15 output
   sonnet:       { input: 3,     output: 15,    cacheRead: 0.30,   cacheWrite: 3.75   },
+  // Sonnet 5 introductory pricing, in effect through 2026-08-31: $2 input, $10 output.
+  // Reverts to standard Sonnet-tier pricing (the `sonnet` row above) on 2026-09-01 — see
+  // getPricingTier, which selects the tier by usage date. https://www.anthropic.com/news/claude-sonnet-5
+  // Cache rates follow Anthropic's standard multiples of the (intro) input price: read 0.1x = $0.20,
+  // 5-min write 1.25x = $2.50 (the 1-hour write 2x = $4.00 is derived in oneHourCachePremium).
+  'sonnet-5-intro': { input: 2, output: 10,    cacheRead: 0.20,   cacheWrite: 2.50   },
   // Haiku 4.5: $1 input, $5 output
   'haiku-new':  { input: 1,     output: 5,     cacheRead: 0.10,   cacheWrite: 1.25   },
   // Haiku 3.5: $0.80 input, $4 output
@@ -32,6 +38,12 @@ const PRICING = {
 };
 
 const PER_MIL = 1_000_000;
+
+// Claude Sonnet 5 launched with introductory pricing ($2/$10) that runs through
+// 2026-08-31, reverting to standard Sonnet-tier pricing ($3/$15) on 2026-09-01.
+// Usage is priced by the rate in effect on its date so historical logs stay
+// accurate across the cutover. https://www.anthropic.com/news/claude-sonnet-5
+const SONNET5_STANDARD_START_MS = Date.UTC(2026, 8, 1); // 2026-09-01T00:00:00Z
 
 function getModelFamily(modelName) {
   if (!modelName) return null;
@@ -43,7 +55,7 @@ function getModelFamily(modelName) {
   return null;
 }
 
-function getPricingTier(modelName) {
+function getPricingTier(modelName, usageDateMs = Date.now()) {
   if (!modelName) return null;
   const lower = modelName.toLowerCase();
   // Fable 5 / Mythos 5 share $10/$50 pricing
@@ -56,8 +68,16 @@ function getPricingTier(modelName) {
     if (lower.includes('4-5') || lower.includes('4.5')) return 'opus-45';
     return 'opus-old';
   }
-  // All Sonnet versions (3.7, 4.0, 4.5, 4.6) share $3/$15 pricing
-  if (lower.includes('sonnet')) return 'sonnet';
+  if (lower.includes('sonnet')) {
+    // Sonnet 5 has date-dependent pricing: introductory $2/$10 through 2026-08-31,
+    // then standard $3/$15 (the `sonnet` tier). `sonnet-5` won't match `sonnet-4-5`
+    // (substring is `sonnet-4-5`, not `sonnet-5`), so older Sonnets are unaffected.
+    if (lower.includes('sonnet-5') || lower.includes('sonnet5')) {
+      return usageDateMs >= SONNET5_STANDARD_START_MS ? 'sonnet' : 'sonnet-5-intro';
+    }
+    // All older Sonnet versions (3.7, 4.0, 4.5, 4.6) share flat $3/$15 pricing
+    return 'sonnet';
+  }
   // Haiku version detection
   if (lower.includes('haiku')) {
     if (lower.includes('4-5') || lower.includes('4.5') || lower.includes('4-6') || lower.includes('4.6')) return 'haiku-new';
@@ -73,8 +93,8 @@ function oneHourCachePremium(p, cacheCreation1hTokens) {
   return cacheCreation1hTokens * (2 * p.input - p.cacheWrite) / PER_MIL;
 }
 
-function calculateCost(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, cacheCreation1hTokens = 0) {
-  const tier = getPricingTier(modelName);
+function calculateCost(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, cacheCreation1hTokens = 0, usageDateMs = Date.now()) {
+  const tier = getPricingTier(modelName, usageDateMs);
   if (!tier) return 0;
   const p = PRICING[tier];
   return (
@@ -86,8 +106,8 @@ function calculateCost(inputTokens, outputTokens, cacheReadTokens, cacheCreation
   );
 }
 
-function calculateCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, cacheCreation1hTokens = 0) {
-  const tier = getPricingTier(modelName);
+function calculateCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, cacheCreation1hTokens = 0, usageDateMs = Date.now()) {
+  const tier = getPricingTier(modelName, usageDateMs);
   if (!tier) return { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, totalCost: 0 };
   const p = PRICING[tier];
   const inputCost = inputTokens * p.input / PER_MIL;
@@ -420,8 +440,13 @@ async function parseSessionFile(filePath) {
   // presenting a silently-wrong number as fact.
   session.estimatedCost = 0;
 
+  // Date used to pick time-sensitive rates (e.g. Sonnet 5's intro vs standard
+  // pricing). A session is short enough that its start time is the right rate for
+  // all of its usage; per-day costs below re-resolve the rate by each day's date.
+  const sessionDateMs = session.startTime ? Date.parse(session.startTime) : Date.now();
+
   for (const [model, tokens] of Object.entries(modelTokens)) {
-    const cost = calculateCost(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h);
+    const cost = calculateCost(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h, sessionDateMs);
     const totalTokens = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
     session.modelBreakdown[model] = { tokens: totalTokens, cost };
     if (getModelFamily(model) === null) session.estimatedCost += cost;
@@ -440,7 +465,8 @@ async function parseSessionFile(filePath) {
     session.cacheReadTokens,
     session.cacheCreationTokens,
     primaryModel,
-    session.cacheCreation1hTokens
+    session.cacheCreation1hTokens,
+    sessionDateMs
   );
 
   // If multiple models used, recalculate cost from per-model breakdown for accuracy
@@ -452,7 +478,7 @@ async function parseSessionFile(filePath) {
     let cacheCreationCost = 0;
 
     for (const [model, tokens] of Object.entries(modelTokens)) {
-      const breakdown = calculateCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h);
+      const breakdown = calculateCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h, sessionDateMs);
       inputCost += breakdown.inputCost;
       outputCost += breakdown.outputCost;
       cacheReadCost += breakdown.cacheReadCost;
@@ -463,13 +489,30 @@ async function parseSessionFile(filePath) {
     session.cost = { inputCost, outputCost, cacheReadCost, cacheCreationCost, totalCost };
   }
 
-  // Compute per-day usage with accurate per-model cost
+  // Compute per-day usage with accurate per-model cost. Each day is priced at the
+  // rate in effect on it (not the session's start-day rate), so a session that
+  // straddles a pricing change — e.g. Sonnet 5's 2026-09-01 intro→standard cutover —
+  // is costed correctly on each side. We also accumulate the session-level breakdown
+  // and per-model cost here so they reconcile exactly with the daily timeline.
   session.dailyUsage = {};
+  const dailyModelCost = {};
+  const dailyTotal = { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, totalCost: 0 };
+  let dailyCoveredTokens = 0;
   for (const [dateStr, models] of Object.entries(dailyModelTokens)) {
     let dayCost = 0;
     let dayInput = 0, dayOutput = 0, dayCacheRead = 0, dayCacheCreate = 0;
+    // Price this day at the rate in effect on it (noon UTC avoids boundary TZ skew).
+    const dayMs = Date.parse(dateStr + 'T12:00:00Z');
     for (const [model, tokens] of Object.entries(models)) {
-      dayCost += calculateCost(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h);
+      const bd = calculateCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h, dayMs);
+      dayCost += bd.totalCost;
+      dailyModelCost[model] = (dailyModelCost[model] || 0) + bd.totalCost;
+      dailyTotal.inputCost += bd.inputCost;
+      dailyTotal.outputCost += bd.outputCost;
+      dailyTotal.cacheReadCost += bd.cacheReadCost;
+      dailyTotal.cacheCreationCost += bd.cacheCreationCost;
+      dailyTotal.totalCost += bd.totalCost;
+      dailyCoveredTokens += tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
       dayInput += tokens.input;
       dayOutput += tokens.output;
       dayCacheRead += tokens.cacheRead;
@@ -482,6 +525,19 @@ async function parseSessionFile(filePath) {
       cacheCreationTokens: dayCacheCreate,
       cost: dayCost,
     };
+  }
+
+  // When every usage row carried a timestamp (the common case), the per-day buckets
+  // cover the whole session — adopt their per-day-priced totals as authoritative so
+  // session.cost and per-model cost reconcile with the daily timeline even across a
+  // mid-session pricing cutover. If some usage lacked a timestamp (couldn't be
+  // bucketed by day), keep the start-day-priced totals above so no tokens are dropped.
+  const sessionTotalTokens = session.totalInputTokens + session.totalOutputTokens + session.cacheReadTokens + session.cacheCreationTokens;
+  if (sessionTotalTokens > 0 && dailyCoveredTokens === sessionTotalTokens) {
+    session.cost = dailyTotal;
+    for (const [model, cost] of Object.entries(dailyModelCost)) {
+      if (session.modelBreakdown[model]) session.modelBreakdown[model].cost = cost;
+    }
   }
 
   // Calculate duration

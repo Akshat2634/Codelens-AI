@@ -3090,10 +3090,18 @@ function getSortValue(session, col) {
 
 function formatModelName(modelId) {
   if (!modelId) return 'Unknown';
-  // claude-opus-4-6 → Opus 4.6, claude-sonnet-4-5-20250929 → Sonnet 4.5, claude-haiku-4-5-20251001 → Haiku 4.5
+  // claude-opus-4-6 → Opus 4.6, claude-sonnet-4-5-20250929 → Sonnet 4.5,
+  // claude-sonnet-5 → Sonnet 5, claude-fable-5 → Fable 5, claude-haiku-4-5-20251001 → Haiku 4.5
   const m = modelId.toLowerCase().replace('claude-', '');
-  const match = m.match(/^(opus|sonnet|haiku)-(\d+)-(\d+)/);
-  if (match) return match[1].charAt(0).toUpperCase() + match[1].slice(1) + ' ' + match[2] + '.' + match[3];
+  // Match a family followed by a version that's either major-minor (4-6) or a single major (5).
+  // The minor is 1-2 digits not followed by another digit, so an 8-digit date suffix
+  // (e.g. claude-sonnet-5-20260615) isn't mistaken for a minor version.
+  const match = m.match(/^(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d{1,2})(?!\d))?/);
+  if (match) {
+    const family = match[1].charAt(0).toUpperCase() + match[1].slice(1);
+    const version = match[3] ? match[2] + '.' + match[3] : match[2];
+    return family + ' ' + version;
+  }
   // fallback: capitalize first word
   const family = m.replace(/-\d.*/, '');
   return family.charAt(0).toUpperCase() + family.slice(1);
