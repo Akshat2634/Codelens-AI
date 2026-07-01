@@ -3023,7 +3023,7 @@ function renderSessionsTable(sessions) {
             <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')} <i class="info-tip" data-tip="Primary model used in the session. Models marked (sub) are subagents spawned for background tasks like code search and exploration.">i</i></th>
             <th onclick="sortTable('msgCount')" class="${sortCol === 'msgCount' ? 'sorted' : ''}">Msgs${thArrow('msgCount')} <i class="info-tip" data-tip="Total messages in the session (your messages + Claude's responses).">i</i></th>
             <th onclick="sortTable('autopilotRatio')" class="${sortCol === 'autopilotRatio' ? 'sorted' : ''}">Autopilot${thArrow('autopilotRatio')} <i class="info-tip" data-tip="Agent responses per user message. Higher = more autonomous. 5x is excellent.">i</i></th>
-            <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')} <i class="info-tip" data-tip="Estimated cost based on token usage and Anthropic's pricing. Calculated from input, output, cache read (90% discount), and cache write (25% premium) tokens.">i</i></th>
+            <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')} <i class="info-tip" data-tip="Estimated cost based on token usage and Anthropic's pricing. Calculated from input, output, cache read (90% discount), and cache write (25% premium for 5-min TTL, 100% for 1-hour TTL) tokens, plus web search fees. Fast-mode and US data-residency usage is billed at its premium rates.">i</i></th>
             <th onclick="sortTable('commitCount')" class="${sortCol === 'commitCount' ? 'sorted' : ''}">Commits${thArrow('commitCount')} <i class="info-tip" data-tip="Git commits that touch files Claude edited in this session. Falls back to time-window for chat-only sessions. The colored dot shows attribution confidence: green = high, amber = medium, red = low (e.g. time-only match).">i</i></th>
             <th onclick="sortTable('linesAdded')" class="${sortCol === 'linesAdded' ? 'sorted' : ''}">Lines${thArrow('linesAdded')} <i class="info-tip" data-tip="Lines added / lines deleted in matched commits.">i</i></th>
             <th>Grade <i class="info-tip" data-tip="Session efficiency: A = great ROI, B = good, C = average, D = poor, F = no commits or very high cost.">i</i></th>
@@ -3061,8 +3061,8 @@ function renderSessionsTable(sessions) {
                     ${s.commits.length > 0 ? s.commits.map(c => `
                       <div class="commit-item">
                         <span class="commit-hash">${c.hash.slice(0, 7)}</span>
-                        <span class="commit-branch ${c.onMain ? 'main-badge' : ''}">${c.onMain ? 'main' : c.branches[0] || 'branch'}</span>
-                        <span class="commit-subject">${c.subject}</span>
+                        <span class="commit-branch ${c.onMain ? 'main-badge' : ''}">${escapeHtml(c.onMain ? 'main' : c.branches[0] || 'branch')}</span>
+                        <span class="commit-subject">${escapeHtml(c.subject)}</span>
                         <span style="margin-left:auto;color:var(--text-muted);white-space:nowrap;flex-shrink:0;">+${c.totalAdded}/-${c.totalDeleted}</span>
                       </div>
                     `).join('') : '<div style="color:var(--text-muted);">No matched commits</div>'}
@@ -3090,6 +3090,13 @@ function getSortValue(session, col) {
 
 function formatModelName(modelId) {
   if (!modelId) return 'Unknown';
+  // Billing markers appended by the parser: '[fast]' = fast mode (premium
+  // rates), '[us]' = US data residency (1.1x). Surface them so premium-billed
+  // usage is distinguishable from standard usage of the same model.
+  let suffix = '';
+  if (modelId.includes('[fast]')) suffix += ' (fast)';
+  if (modelId.includes('[us]')) suffix += ' (us)';
+  if (suffix) modelId = modelId.replace(/\[fast\]|\[us\]/g, '');
   // claude-opus-4-6 → Opus 4.6, claude-sonnet-4-5-20250929 → Sonnet 4.5,
   // claude-sonnet-5 → Sonnet 5, claude-fable-5 → Fable 5, claude-haiku-4-5-20251001 → Haiku 4.5
   const m = modelId.toLowerCase().replace('claude-', '');
@@ -3100,11 +3107,11 @@ function formatModelName(modelId) {
   if (match) {
     const family = match[1].charAt(0).toUpperCase() + match[1].slice(1);
     const version = match[3] ? match[2] + '.' + match[3] : match[2];
-    return family + ' ' + version;
+    return family + ' ' + version + suffix;
   }
   // fallback: capitalize first word
   const family = m.replace(/-\d.*/, '');
-  return family.charAt(0).toUpperCase() + family.slice(1);
+  return family.charAt(0).toUpperCase() + family.slice(1) + suffix;
 }
 
 function formatDate(iso) {

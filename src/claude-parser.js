@@ -29,6 +29,12 @@ const PRICING = {
   // Cache rates follow Anthropic's standard multiples of the (intro) input price: read 0.1x = $0.20,
   // 5-min write 1.25x = $2.50 (the 1-hour write 2x = $4.00 is derived in oneHourCachePremium).
   'sonnet-5-intro': { input: 2, output: 10,    cacheRead: 0.20,   cacheWrite: 2.50   },
+  // Fast mode (research preview, Opus 4.8/4.7 only): same models at premium
+  // per-token rates. Cache multipliers stack on top of the fast input price.
+  // Requests carry usage.speed === 'fast'; we bucket them via a '[fast]' marker
+  // on the model key. https://platform.claude.com/docs/en/about-claude/pricing
+  'opus-48-fast': { input: 10,  output: 50,    cacheRead: 1.00,   cacheWrite: 12.50  },
+  'opus-47-fast': { input: 30,  output: 150,   cacheRead: 3.00,   cacheWrite: 37.50  },
   // Haiku 4.5: $1 input, $5 output
   'haiku-new':  { input: 1,     output: 5,     cacheRead: 0.10,   cacheWrite: 1.25   },
   // Haiku 3.5: $0.80 input, $4 output
@@ -60,10 +66,14 @@ function getPricingTier(modelName, usageDateMs = Date.now()) {
   const lower = modelName.toLowerCase();
   // Fable 5 / Mythos 5 share $10/$50 pricing
   if (lower.includes('fable') || lower.includes('mythos')) return 'fable';
-  // Opus: check most specific version first
+  // Opus: check most specific version first. '[fast]' is our usage-bucket marker
+  // for requests served in fast mode (usage.speed === 'fast'), which bills at
+  // premium rates on Opus 4.8/4.7. On other models fast requests run (and bill)
+  // at standard speed, so they fall through to the standard tier.
+  const fast = lower.includes('[fast]');
   if (lower.includes('opus')) {
-    if (lower.includes('4-8') || lower.includes('4.8')) return 'opus-48';
-    if (lower.includes('4-7') || lower.includes('4.7')) return 'opus-47';
+    if (lower.includes('4-8') || lower.includes('4.8')) return fast ? 'opus-48-fast' : 'opus-48';
+    if (lower.includes('4-7') || lower.includes('4.7')) return fast ? 'opus-47-fast' : 'opus-47';
     if (lower.includes('4-6') || lower.includes('4.6')) return 'opus-46';
     if (lower.includes('4-5') || lower.includes('4.5')) return 'opus-45';
     return 'opus-old';
@@ -93,33 +103,48 @@ function oneHourCachePremium(p, cacheCreation1hTokens) {
   return cacheCreation1hTokens * (2 * p.input - p.cacheWrite) / PER_MIL;
 }
 
-function calculateCost(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, cacheCreation1hTokens = 0, usageDateMs = Date.now()) {
+// US data residency (usage.inference_geo === 'us', bucketed via a '[us]' marker
+// on the model key) bills a 1.1x multiplier on ALL token categories.
+// https://platform.claude.com/docs/en/about-claude/pricing (data residency)
+const GEO_US_MULTIPLIER = 1.1;
+function geoMultiplier(modelName) {
+  return modelName && modelName.includes('[us]') ? GEO_US_MULTIPLIER : 1;
+}
+
+// Server-side web search bills $10 per 1,000 searches on top of token costs
+// (web fetch is free). Counted from usage.server_tool_use.web_search_requests.
+const WEB_SEARCH_COST_PER_REQUEST = 10 / 1000;
+
+function calculateCost(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, cacheCreation1hTokens = 0, usageDateMs = Date.now(), webSearchRequests = 0) {
   const tier = getPricingTier(modelName, usageDateMs);
   if (!tier) return 0;
   const p = PRICING[tier];
-  return (
+  return geoMultiplier(modelName) * (
     (inputTokens * p.input / PER_MIL) +
     (outputTokens * p.output / PER_MIL) +
     (cacheReadTokens * p.cacheRead / PER_MIL) +
     (cacheCreationTokens * p.cacheWrite / PER_MIL) +
     oneHourCachePremium(p, cacheCreation1hTokens)
-  );
+  ) + webSearchRequests * WEB_SEARCH_COST_PER_REQUEST;
 }
 
-function calculateCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, cacheCreation1hTokens = 0, usageDateMs = Date.now()) {
+function calculateCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, cacheCreation1hTokens = 0, usageDateMs = Date.now(), webSearchRequests = 0) {
   const tier = getPricingTier(modelName, usageDateMs);
-  if (!tier) return { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, totalCost: 0 };
+  if (!tier) return { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, serverToolCost: 0, totalCost: 0 };
   const p = PRICING[tier];
-  const inputCost = inputTokens * p.input / PER_MIL;
-  const outputCost = outputTokens * p.output / PER_MIL;
-  const cacheReadCost = cacheReadTokens * p.cacheRead / PER_MIL;
-  const cacheCreationCost = cacheCreationTokens * p.cacheWrite / PER_MIL + oneHourCachePremium(p, cacheCreation1hTokens);
+  const mult = geoMultiplier(modelName);
+  const inputCost = mult * inputTokens * p.input / PER_MIL;
+  const outputCost = mult * outputTokens * p.output / PER_MIL;
+  const cacheReadCost = mult * cacheReadTokens * p.cacheRead / PER_MIL;
+  const cacheCreationCost = mult * (cacheCreationTokens * p.cacheWrite / PER_MIL + oneHourCachePremium(p, cacheCreation1hTokens));
+  const serverToolCost = webSearchRequests * WEB_SEARCH_COST_PER_REQUEST;
   return {
     inputCost,
     outputCost,
     cacheReadCost,
     cacheCreationCost,
-    totalCost: inputCost + outputCost + cacheReadCost + cacheCreationCost,
+    serverToolCost,
+    totalCost: inputCost + outputCost + cacheReadCost + cacheCreationCost + serverToolCost,
   };
 }
 
@@ -281,7 +306,8 @@ function createEmptySession(sessionId) {
     cacheCreationTokens: 0,
     cacheCreation1hTokens: 0,
     cacheReadTokens: 0,
-    cost: { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, totalCost: 0 },
+    webSearchRequests: 0,
+    cost: { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, serverToolCost: 0, totalCost: 0 },
     model: null,
     modelBreakdown: {},
     toolCalls: {},
@@ -389,23 +415,33 @@ async function parseSessionFile(filePath) {
         // 1-hour-TTL portion of the cache writes (priced at 2x vs 1.25x for 5m).
         // Absent in older log formats — falls back to 0 (all priced at the 5m rate).
         const cacheCreate1h = usage.cache_creation?.ephemeral_1h_input_tokens || 0;
-        const model = msg.model || 'unknown';
+        // Server-side web search bills $10/1k requests on top of tokens.
+        const webSearch = usage.server_tool_use?.web_search_requests || 0;
+        // Bucket usage by model + billing markers so premium-billed requests are
+        // costed at their true rates: '[fast]' = fast mode (usage.speed), '[us]'
+        // = US data residency 1.1x (usage.inference_geo). Markers flow through
+        // getPricingTier/geoMultiplier and are visible in the model breakdown.
+        const markers = (usage.speed === 'fast' ? '[fast]' : '')
+          + (usage.inference_geo === 'us' ? '[us]' : '');
+        const model = (msg.model || 'unknown') + markers;
 
         session.totalInputTokens += input;
         session.totalOutputTokens += output;
         session.cacheReadTokens += cacheRead;
         session.cacheCreationTokens += cacheCreate;
         session.cacheCreation1hTokens += cacheCreate1h;
+        session.webSearchRequests += webSearch;
 
         // Track per-model breakdown
         if (!modelTokens[model]) {
-          modelTokens[model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, cacheCreate1h: 0 };
+          modelTokens[model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, cacheCreate1h: 0, webSearch: 0 };
         }
         modelTokens[model].input += input;
         modelTokens[model].output += output;
         modelTokens[model].cacheRead += cacheRead;
         modelTokens[model].cacheCreate += cacheCreate;
         modelTokens[model].cacheCreate1h += cacheCreate1h;
+        modelTokens[model].webSearch += webSearch;
 
         // Track per-day per-model tokens for daily usage attribution
         const msgTs = obj.timestamp || lastSeenTimestamp;
@@ -414,13 +450,14 @@ async function parseSessionFile(filePath) {
           const dateStr = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
           if (!dailyModelTokens[dateStr]) dailyModelTokens[dateStr] = {};
           if (!dailyModelTokens[dateStr][model]) {
-            dailyModelTokens[dateStr][model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, cacheCreate1h: 0 };
+            dailyModelTokens[dateStr][model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, cacheCreate1h: 0, webSearch: 0 };
           }
           dailyModelTokens[dateStr][model].input += input;
           dailyModelTokens[dateStr][model].output += output;
           dailyModelTokens[dateStr][model].cacheRead += cacheRead;
           dailyModelTokens[dateStr][model].cacheCreate += cacheCreate;
           dailyModelTokens[dateStr][model].cacheCreate1h += cacheCreate1h;
+          dailyModelTokens[dateStr][model].webSearch += webSearch;
         }
       }
 
@@ -446,7 +483,7 @@ async function parseSessionFile(filePath) {
   const sessionDateMs = session.startTime ? Date.parse(session.startTime) : Date.now();
 
   for (const [model, tokens] of Object.entries(modelTokens)) {
-    const cost = calculateCost(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h, sessionDateMs);
+    const cost = calculateCost(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h, sessionDateMs, tokens.webSearch);
     const totalTokens = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
     session.modelBreakdown[model] = { tokens: totalTokens, cost };
     if (getModelFamily(model) === null) session.estimatedCost += cost;
@@ -466,7 +503,8 @@ async function parseSessionFile(filePath) {
     session.cacheCreationTokens,
     primaryModel,
     session.cacheCreation1hTokens,
-    sessionDateMs
+    sessionDateMs,
+    session.webSearchRequests
   );
 
   // If multiple models used, recalculate cost from per-model breakdown for accuracy
@@ -476,17 +514,19 @@ async function parseSessionFile(filePath) {
     let outputCost = 0;
     let cacheReadCost = 0;
     let cacheCreationCost = 0;
+    let serverToolCost = 0;
 
     for (const [model, tokens] of Object.entries(modelTokens)) {
-      const breakdown = calculateCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h, sessionDateMs);
+      const breakdown = calculateCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h, sessionDateMs, tokens.webSearch);
       inputCost += breakdown.inputCost;
       outputCost += breakdown.outputCost;
       cacheReadCost += breakdown.cacheReadCost;
       cacheCreationCost += breakdown.cacheCreationCost;
+      serverToolCost += breakdown.serverToolCost;
       totalCost += breakdown.totalCost;
     }
 
-    session.cost = { inputCost, outputCost, cacheReadCost, cacheCreationCost, totalCost };
+    session.cost = { inputCost, outputCost, cacheReadCost, cacheCreationCost, serverToolCost, totalCost };
   }
 
   // Compute per-day usage with accurate per-model cost. Each day is priced at the
@@ -496,7 +536,7 @@ async function parseSessionFile(filePath) {
   // and per-model cost here so they reconcile exactly with the daily timeline.
   session.dailyUsage = {};
   const dailyModelCost = {};
-  const dailyTotal = { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, totalCost: 0 };
+  const dailyTotal = { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, serverToolCost: 0, totalCost: 0 };
   let dailyCoveredTokens = 0;
   for (const [dateStr, models] of Object.entries(dailyModelTokens)) {
     let dayCost = 0;
@@ -504,13 +544,14 @@ async function parseSessionFile(filePath) {
     // Price this day at the rate in effect on it (noon UTC avoids boundary TZ skew).
     const dayMs = Date.parse(dateStr + 'T12:00:00Z');
     for (const [model, tokens] of Object.entries(models)) {
-      const bd = calculateCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h, dayMs);
+      const bd = calculateCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h, dayMs, tokens.webSearch);
       dayCost += bd.totalCost;
       dailyModelCost[model] = (dailyModelCost[model] || 0) + bd.totalCost;
       dailyTotal.inputCost += bd.inputCost;
       dailyTotal.outputCost += bd.outputCost;
       dailyTotal.cacheReadCost += bd.cacheReadCost;
       dailyTotal.cacheCreationCost += bd.cacheCreationCost;
+      dailyTotal.serverToolCost += bd.serverToolCost;
       dailyTotal.totalCost += bd.totalCost;
       dailyCoveredTokens += tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
       dayInput += tokens.input;
@@ -568,21 +609,45 @@ async function parseSessionFile(filePath) {
   return session;
 }
 
+// Recursively find subagent transcript files under a session's subagents/
+// directory. Claude Code writes them both as direct children
+// (subagents/agent-*.jsonl) and nested under workflow runs
+// (subagents/workflows/<wf-id>/agent-*.jsonl) — a non-recursive scan silently
+// drops all workflow-subagent usage from every displayed number.
+// journal.jsonl is a workflow bookkeeping file with no usage — skip it.
+// Manual walk because readdirSync's `recursive` option needs Node >= 20.
+function listSubagentTranscripts(dir, out = []) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      listSubagentTranscripts(full, out);
+    } else if (entry.isFile() && entry.name.endsWith('.jsonl') && entry.name !== 'journal.jsonl') {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
 async function parseSessionWithSubagents(projectDir, sessionId) {
   const mainFile = path.join(projectDir, `${sessionId}.jsonl`);
   const session = await parseSessionFile(mainFile);
 
-  // Check for subagent directory
+  // Merge every subagent transcript (including workflow-nested ones)
   const subagentDir = path.join(projectDir, sessionId, 'subagents');
   if (existsSync(subagentDir)) {
-    try {
-      const agentFiles = readdirSync(subagentDir).filter(f => f.endsWith('.jsonl'));
-      for (const af of agentFiles) {
-        const subSession = await parseSessionFile(path.join(subagentDir, af));
+    for (const af of listSubagentTranscripts(subagentDir)) {
+      try {
+        const subSession = await parseSessionFile(af);
         mergeSubagentIntoSession(session, subSession);
+      } catch {
+        // Skip unreadable/corrupt subagent files
       }
-    } catch {
-      // Skip if subagent directory is unreadable
     }
   }
 
@@ -595,11 +660,13 @@ function mergeSubagentIntoSession(parent, sub) {
   parent.cacheCreationTokens += sub.cacheCreationTokens;
   parent.cacheCreation1hTokens += sub.cacheCreation1hTokens || 0;
   parent.cacheReadTokens += sub.cacheReadTokens;
+  parent.webSearchRequests += sub.webSearchRequests || 0;
 
   parent.cost.inputCost += sub.cost.inputCost;
   parent.cost.outputCost += sub.cost.outputCost;
   parent.cost.cacheReadCost += sub.cost.cacheReadCost;
   parent.cost.cacheCreationCost += sub.cost.cacheCreationCost;
+  parent.cost.serverToolCost = (parent.cost.serverToolCost || 0) + (sub.cost.serverToolCost || 0);
   parent.cost.totalCost += sub.cost.totalCost;
   parent.estimatedCost = (parent.estimatedCost || 0) + (sub.estimatedCost || 0);
 
@@ -697,6 +764,14 @@ export async function parseAllProjects(claudeDir, days, projectFilter) {
 
       const sessionId = path.basename(file, '.jsonl');
 
+      // Track subagent transcript mtimes too, so cache staleness detection
+      // catches sessions whose subagent files changed without the main file.
+      for (const sf of listSubagentTranscripts(path.join(projectDir, sessionId, 'subagents'))) {
+        try {
+          fileIndex[sf] = statSync(sf).mtimeMs;
+        } catch { }
+      }
+
       try {
         const session = await parseSessionWithSubagents(projectDir, sessionId);
 
@@ -750,6 +825,7 @@ export {
   getModelFamily,
   getPricingTier,
   isVerificationCommand,
+  listSubagentTranscripts,
   PRICING,
   toRelativePath,
 };

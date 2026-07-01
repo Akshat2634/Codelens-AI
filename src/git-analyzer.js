@@ -2,10 +2,15 @@ import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
-export function getGitUser() {
+// Resolve the git user for a specific repo (repo-local config overrides global).
+// Without -C this reads config relative to the process CWD, which can be a
+// different repo (or none) than the one being analyzed — a repo-local
+// user.email would then never match and every commit would be filtered out.
+export function getGitUser(repoPath = null) {
+  const git = repoPath ? `git -C "${repoPath}"` : 'git';
   try {
-    const name = execSync('git config user.name', { encoding: 'utf-8' }).trim();
-    const email = execSync('git config user.email', { encoding: 'utf-8' }).trim();
+    const name = execSync(`${git} config user.name`, { encoding: 'utf-8' }).trim();
+    const email = execSync(`${git} config user.email`, { encoding: 'utf-8' }).trim();
     return { name, email };
   } catch {
     return { name: 'unknown', email: 'unknown' };
@@ -159,7 +164,7 @@ export function analyzeGitRepo(repoPath, days) {
     return { repoPath, commits: [], allCommits: [], defaultBranch: null };
   }
 
-  const user = getGitUser();
+  const user = getGitUser(repoPath);
 
   try {
     const raw = execSync(
@@ -167,13 +172,34 @@ export function analyzeGitRepo(repoPath, days) {
       { encoding: 'utf-8', maxBuffer: 256 * 1024 * 1024 }
     );
 
-    const allCommits = parseGitLog(raw);
+    let allCommits = parseGitLog(raw);
 
     // Get default branch hashes for onMain tagging
     const { hashes: mainHashes, branchName } = getMainBranchHashes(repoPath);
     for (const commit of allCommits) {
       commit.onMain = mainHashes.has(commit.hash);
     }
+
+    // `--all` returns rebase-merge / cherry-pick copies of the same change as
+    // distinct hashes (feature branch + its rewritten copy on main). Author
+    // email, author date (%aI, preserved by rebase/cherry-pick), and the
+    // per-file diffstat identify the underlying patch — keep one copy,
+    // preferring the one on the default branch, so commit and line counts
+    // aren't double-counted after a "Rebase and merge".
+    const byPatch = new Map();
+    const deduped = [];
+    for (const commit of allCommits) {
+      const sig = `${commit.authorEmail}|${commit.timestamp}|` +
+        commit.files.map(f => `${f.path}:${f.added}:${f.deleted}`).sort().join(',');
+      const existing = byPatch.get(sig);
+      if (existing === undefined) {
+        byPatch.set(sig, deduped.length);
+        deduped.push(commit);
+      } else if (commit.onMain && !deduped[existing].onMain) {
+        deduped[existing] = commit;
+      }
+    }
+    allCommits = deduped;
 
     // Enforce the lookback window on AUTHOR date (%aI), matching every downstream
     // metric (all of which bucket on author date). `--since` filters on committer
