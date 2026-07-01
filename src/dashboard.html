@@ -1493,14 +1493,12 @@
       to { opacity: 1; transform: translateY(0); }
     }
     .share-modal-title {
-      font-family: var(--font-display);
-      font-size: 1.2rem;
-      font-weight: 700;
+      font-family: var(--font-head);
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
       margin-bottom: 4px;
-      background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
+      color: var(--text-primary);
     }
     .share-modal-subtitle {
       font-size: 0.85rem;
@@ -1569,7 +1567,7 @@
     .share-preview-wrap canvas {
       width: 100%;
       max-width: 420px;
-      aspect-ratio: 3 / 4;
+      height: auto;
       border-radius: var(--radius-sm);
       box-shadow: 0 8px 32px var(--shadow-card);
     }
@@ -3216,21 +3214,31 @@ function initCharts() {
   // Token Burn Rate — stacked daily bars, one axis. (Cumulative overlay was a
   // second-axis anti-pattern; the "Split view" toggle covers per-type reading.)
   const dailyTokens = DATA.daily;
+  // Cache reads dwarf fresh input/output by 100x+ under heavy caching, so on a
+  // linear axis those segments compute to well under a pixel. Give every
+  // non-zero segment a small perceptibility floor (zero days stay null =
+  // nothing drawn), and only draw the card-colored spacer border on segments
+  // tall enough to survive it — on a sub-pixel segment the border IS the
+  // segment and paints it out entirely. Exact values live in the tooltip;
+  // the Split view toggle gives a log-scale reading of the small series.
+  const maxDayTokens = Math.max(1, ...dailyTokens.map(d => (d.inputTokens || 0) + (d.outputTokens || 0) + (d.cacheReadTokens || 0)));
+  const spacerBorder = ctx => (ctx.raw && ctx.raw > maxDayTokens * 0.02 ? 1 : 0);
   tokenBurnChart = new Chart(document.getElementById('chart-token-burn'), {
     type: 'bar',
     data: {
       labels: dailyTokens.map(dateLabel),
       datasets: [
-        { label: 'Input', data: dailyTokens.map(d => d.inputTokens || 0), backgroundColor: withAlpha(T.blue, 0.9) },
-        { label: 'Output', data: dailyTokens.map(d => d.outputTokens || 0), backgroundColor: withAlpha(T.purple, 0.9) },
-        { label: 'Cache Read', data: dailyTokens.map(d => d.cacheReadTokens || 0), backgroundColor: withAlpha(T.cyan, 0.75) },
+        { label: 'Input', data: dailyTokens.map(d => d.inputTokens || null), backgroundColor: withAlpha(T.blue, 0.9) },
+        { label: 'Output', data: dailyTokens.map(d => d.outputTokens || null), backgroundColor: withAlpha(T.purple, 0.9) },
+        { label: 'Cache Read', data: dailyTokens.map(d => d.cacheReadTokens || null), backgroundColor: withAlpha(T.cyan, 0.75) },
       ].map(ds => ({
         ...ds,
         stack: 'tokens',
-        borderColor: T.card,       // 2px spacer between stacked segments
-        borderWidth: 1,
+        borderColor: T.card,
+        borderWidth: spacerBorder,
         borderRadius: 2,
         borderSkipped: false,
+        minBarLength: 3,
         barPercentage: 0.72,
         categoryPercentage: 0.86,
         maxBarThickness: 56,
@@ -3244,8 +3252,8 @@ function initCharts() {
         legend: { position: 'top', align: 'end' },
         tooltip: {
           callbacks: {
-            label: ctx => ` ${ctx.dataset.label}: ${formatTokens(ctx.parsed.y)} tokens`,
-            footer: items => 'Day total: ' + formatTokens(items.reduce((a, i) => a + i.parsed.y, 0)),
+            label: ctx => ` ${ctx.dataset.label}: ${formatTokens(ctx.parsed.y || 0)} tokens`,
+            footer: items => 'Day total: ' + formatTokens(items.reduce((a, i) => a + (i.parsed.y || 0), 0)),
           },
         },
       },
@@ -3630,6 +3638,7 @@ window.toggleTokenBurnPercent = function() {
   tokenBurnPercentMode = !tokenBurnPercentMode;
   const T = chartTokens();
   const lineColors = [T.blue, T.purple, T.cyan];
+  const maxDayTokens = Math.max(1, ...DATA.daily.map(d => (d.inputTokens || 0) + (d.outputTokens || 0) + (d.cacheReadTokens || 0)));
   tokenBurnChart.data.datasets.forEach((ds, i) => {
     if (tokenBurnPercentMode) {
       // Split view — each token type as its own line on a log axis
@@ -3643,14 +3652,16 @@ window.toggleTokenBurnPercent = function() {
       ds.pointBackgroundColor = lineColors[i];
       ds.tension = 0.35;
     } else {
-      // Restore stacked bar view
+      // Restore stacked bar view (same perceptibility rules as initCharts:
+      // spacer border only on segments tall enough to survive it, 3px floor)
       ds.type = 'bar';
       ds.backgroundColor = withAlpha(lineColors[i], i === 2 ? 0.75 : 0.9);
       ds.stack = 'tokens';
       ds.borderColor = T.card;
-      ds.borderWidth = 1;
+      ds.borderWidth = ctx => (ctx.raw && ctx.raw > maxDayTokens * 0.02 ? 1 : 0);
       ds.borderRadius = 2;
       ds.borderSkipped = false;
+      ds.minBarLength = 3;
       delete ds.fill;
       delete ds.pointRadius;
       delete ds.tension;
@@ -3828,32 +3839,50 @@ function drawMiniHeatmap(ctx, x, y, w, heatmapData, th, isLight) {
   }
 }
 
-function drawInsightRow(ctx, x, y, w, insight, th) {
+const INSIGHT_FONT = '400 12px "Instrument Sans", sans-serif';
+const INSIGHT_LINE_H = 17;
+
+// Wrap insight text to at most two lines for the card (ellipsis only if even
+// two lines can't hold it). Pure measurement — usable before the canvas is
+// resized, so the card height can be computed from the wrapped line count.
+function wrapInsightText(ctx, text, maxW) {
+  ctx.letterSpacing = '0px';
+  ctx.font = INSIGHT_FONT;
+  if (ctx.measureText(text).width <= maxW) return [text];
+  const words = text.split(' ');
+  let line1 = '';
+  let i = 0;
+  while (i < words.length) {
+    const candidate = line1 ? line1 + ' ' + words[i] : words[i];
+    if (ctx.measureText(candidate).width > maxW && line1) break;
+    line1 = candidate;
+    i++;
+  }
+  let line2 = words.slice(i).join(' ');
+  while (ctx.measureText(line2).width > maxW && line2.length > 3) {
+    line2 = line2.slice(0, -4) + '…';
+  }
+  return line2 ? [line1, line2] : [line1];
+}
+
+function drawInsightRow(ctx, x, y, w, insight, lines, th) {
   const color = INSIGHT_COLORS[insight.type] || INSIGHT_COLORS.info;
   // Dot indicator
   ctx.beginPath();
   ctx.arc(x + 6, y + 8, 4, 0, Math.PI * 2);
   ctx.fillStyle = color;
   ctx.fill();
-  // Text (truncate if needed)
-  ctx.font = '400 12px "Instrument Sans", sans-serif';
+  ctx.letterSpacing = '0px';
+  ctx.font = INSIGHT_FONT;
   ctx.fillStyle = th.insightText;
-  let text = insight.text;
-  // Truncate to fit width
-  const maxW = w - 24;
-  while (ctx.measureText(text).width > maxW && text.length > 3) {
-    text = text.slice(0, -4) + '...';
-  }
-  ctx.fillText(text, x + 18, y + 12);
+  lines.forEach((line, li) => {
+    ctx.fillText(line, x + 18, y + 12 + li * INSIGHT_LINE_H);
+  });
+  return 11 + lines.length * INSIGHT_LINE_H; // row height consumed
 }
 
 function renderShareCard(canvas) {
-  const W = 600, H = 800;
-  canvas.width = W * 2;
-  canvas.height = H * 2;
-  const ctx = canvas.getContext('2d');
-  ctx.scale(2, 2);
-
+  const W = 600;
   const isLight = shareCardTheme === 'light';
   const th = isLight ? SHARE_THEME.light : SHARE_THEME.dark;
 
@@ -3862,18 +3891,45 @@ function renderShareCard(canvas) {
   const t = d.tokenAnalytics;
   const ls = d.lineSurvival;
 
-  // ── Background ──
+  // New-palette accents, stepped per card theme (mirrors the dashboard tokens)
+  const cOrange = isLight ? '#B57603' : '#C4840B';
+  const cGreen  = isLight ? '#20813C' : '#2E9E4F';
+  const cBlue   = isLight ? '#2A78D6' : '#3987E5';
+  const cPurple = isLight ? '#5D50C9' : '#9085E9';
+  const cTeal   = isLight ? '#14936B' : '#1FA97C';
+
+  const ctx = canvas.getContext('2d');
+
+  // ── Measure first: wrap insights so the card height fits the content
+  //    (a fixed 800px canvas left a dead gap above the footer) ──
+  const topInsights = (d.insights || []).slice(0, 3);
+  const insightLines = topInsights.map(i => wrapInsightText(ctx, i.text, W - 64 - 24));
+  const insightsBlockH = topInsights.length > 0
+    ? 24 + insightLines.reduce((a, l) => a + 11 + l.length * INSIGHT_LINE_H + 8, 0)
+    : 0;
+  // Fixed section offsets + measured insights + footer zone
+  const heatRows = 7, heatCellH = 10, heatGap = 2;
+  const heatH = heatRows * (heatCellH + heatGap);
+  const H = 136                    // header (logo, subtitle, dates, rule)
+    + 20 + 116                     // grade + stat boxes
+    + 24 + 18 + 34 * 3             // efficiency label + three bars
+    + 34 + 14 + heatH              // heatmap label + grid
+    + insightsBlockH
+    + 62;                          // footer zone
+
+  canvas.width = W * 2;
+  canvas.height = H * 2;
+  ctx.scale(2, 2);
+
+  // ── Background: warm ink / warm paper with a faint work-lamp falloff ──
   const bgGrad = ctx.createLinearGradient(0, 0, W, H);
   bgGrad.addColorStop(0, th.bg1);
   bgGrad.addColorStop(0.5, th.bg2);
   bgGrad.addColorStop(1, th.bg1);
   ctx.fillStyle = bgGrad;
   ctx.fillRect(0, 0, W, H);
-
-  // Subtle orbs
-  drawOrb(ctx, W * 0.2, H * 0.12, 200, th.orb1);
-  drawOrb(ctx, W * 0.85, H * 0.35, 180, th.orb2);
-  drawOrb(ctx, W * 0.3, H * 0.85, 160, th.orb3);
+  drawOrb(ctx, W * 0.5, 0, 300, th.orb1);
+  drawOrb(ctx, W * 0.1, H * 0.9, 200, th.orb3);
 
   // Border
   drawRoundRect(ctx, 0, 0, W, H, 16);
@@ -3881,42 +3937,36 @@ function renderShareCard(canvas) {
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // ── Header with logo bars ──
+  // ── Header: brand bars + wordmark in masthead style ──
   let y = 36;
-  // Draw 3-bar logo
   const barX = 32;
   const barW = 5;
   const barGap = 4;
   const barBaseY = y + 26;
   drawRoundRect(ctx, barX, barBaseY - 16, barW, 16, 2);
-  ctx.fillStyle = '#C4840B';
+  ctx.fillStyle = cOrange;
   ctx.fill();
   drawRoundRect(ctx, barX + barW + barGap, barBaseY - 26, barW, 26, 2);
-  ctx.fillStyle = '#2E9E4F';
+  ctx.fillStyle = cGreen;
   ctx.fill();
   drawRoundRect(ctx, barX + (barW + barGap) * 2, barBaseY - 20, barW, 20, 2);
-  ctx.fillStyle = '#3987E5';
+  ctx.fillStyle = cBlue;
   ctx.fill();
-  // Title text after logo
-  const titleX = barX + (barW + barGap) * 3 + 8;
-  ctx.font = 'bold 28px "IBM Plex Mono", monospace';
-  const titleGrad = ctx.createLinearGradient(titleX, y, titleX + 240, y + 28);
-  if (isLight) {
-    titleGrad.addColorStop(0, '#2563eb');
-    titleGrad.addColorStop(0.5, '#7c3aed');
-    titleGrad.addColorStop(1, '#0891b2');
-  } else {
-    titleGrad.addColorStop(0, '#3987E5');
-    titleGrad.addColorStop(0.5, '#9085E9');
-    titleGrad.addColorStop(1, '#1FA97C');
-  }
-  ctx.fillStyle = titleGrad;
-  ctx.fillText('Codelens AI', titleX, y + 26);
+  // Wordmark: ink "Codelens" + amber "AI" (no gradient text)
+  const titleX = barX + (barW + barGap) * 3 + 10;
+  ctx.font = '800 27px "Bricolage Grotesque", "Instrument Sans", sans-serif';
+  ctx.fillStyle = th.textPrimary;
+  ctx.fillText('Codelens', titleX, y + 26);
+  const codelensW = ctx.measureText('Codelens').width;
+  ctx.fillStyle = cOrange;
+  ctx.fillText(' AI', titleX + codelensW, y + 26);
 
   y += 44;
-  ctx.font = '300 13px "Instrument Sans", sans-serif';
-  ctx.fillStyle = th.textMuted;
-  ctx.fillText('AI Coding Report Card', 32, y);
+  ctx.font = '600 10px "IBM Plex Mono", monospace';
+  ctx.fillStyle = cOrange;
+  ctx.letterSpacing = '0.18em';
+  ctx.fillText('AI CODING REPORT CARD', 32, y);
+  ctx.letterSpacing = '0px';
 
   y += 20;
   const fmtDate = iso => {
@@ -3930,12 +3980,17 @@ function renderShareCard(canvas) {
   ctx.fillStyle = th.textDim;
   ctx.fillText(dateLabel, 32, y);
 
-  // Thin separator
+  // Header rule with amber lead-in (echoes the masthead divider)
   y += 16;
-  ctx.strokeStyle = th.separator;
+  ctx.strokeStyle = cOrange;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(32, y);
+  ctx.lineTo(80, y);
+  ctx.stroke();
+  ctx.strokeStyle = th.separator;
+  ctx.beginPath();
+  ctx.moveTo(80, y);
   ctx.lineTo(W - 32, y);
   ctx.stroke();
 
@@ -3947,11 +4002,6 @@ function renderShareCard(canvas) {
   const boxH = 52;
   const boxGap = 12;
   const boxStartX = 160;
-  // Deeper accent colors for light theme so they pop against white bg
-  const cOrange = isLight ? '#d97706' : '#C4840B';
-  const cGreen  = isLight ? '#059669' : '#2E9E4F';
-  const cBlue   = isLight ? '#2563eb' : '#3987E5';
-  const cPurple = isLight ? '#7c3aed' : '#9085E9';
   drawStatBox(ctx, boxStartX, y, boxW, boxH, '$' + s.totalCost.toFixed(2), 'Total Spend', cOrange, th);
   drawStatBox(ctx, boxStartX + boxW + boxGap, y, boxW, boxH, String(s.totalCommits), 'Commits Shipped', cGreen, th);
   drawStatBox(ctx, boxStartX, y + boxH + boxGap, boxW, boxH,
@@ -3959,59 +4009,56 @@ function renderShareCard(canvas) {
   drawStatBox(ctx, boxStartX + boxW + boxGap, y + boxH + boxGap, boxW, boxH,
     String(s.totalSessions), 'Sessions', cPurple, th);
 
-  // ── Efficiency Bars ──
-  y += (boxH + boxGap) * 2 + 24;
-  ctx.font = '600 10px "IBM Plex Mono", monospace';
-  ctx.fillStyle = th.textDim;
-  ctx.letterSpacing = '0.08em';
-  ctx.fillText('EFFICIENCY', 32, y);
-  ctx.letterSpacing = '0';
-  y += 18;
+  // Section label helper: amber tick + mono caps (echoes the numbered kickers)
+  const sectionLabel = (text, ly) => {
+    ctx.fillStyle = cOrange;
+    ctx.fillRect(32, ly - 8, 3, 9);
+    ctx.font = '600 10px "IBM Plex Mono", monospace';
+    ctx.fillStyle = th.textMuted;
+    ctx.letterSpacing = '0.12em';
+    ctx.fillText(text, 42, ly);
+    ctx.letterSpacing = '0px';
+  };
 
-  // Each bar gets its own accent color for visual variety
-  const effColor = isLight ? '#0d9488' : '#1FA97C';    // cyan/teal
-  const cacheColor = isLight ? '#7c3aed' : '#9085E9';  // purple
-  const survColor = isLight ? '#059669' : '#2E9E4F';    // green
-  drawProgressBar(ctx, 32, y, W - 64, 'Token Efficiency', t.tokenEfficiencyRate, '%', effColor, th);
+  // ── Efficiency Bars — same semantic hues as the dashboard:
+  //    efficiency = green, cache = teal/aqua, survival = purple ──
+  y += (boxH + boxGap) * 2 + 24;
+  sectionLabel('EFFICIENCY', y);
+  y += 18;
+  drawProgressBar(ctx, 32, y, W - 64, 'Token Efficiency', t.tokenEfficiencyRate, '%', cGreen, th);
   y += 34;
-  drawProgressBar(ctx, 32, y, W - 64, 'Cache Hit Rate', t.cacheHitRate, '%', cacheColor, th);
+  drawProgressBar(ctx, 32, y, W - 64, 'Cache Hit Rate', t.cacheHitRate, '%', cTeal, th);
   y += 34;
-  drawProgressBar(ctx, 32, y, W - 64, 'Line Survival', ls.survivalRate, '%', survColor, th);
+  drawProgressBar(ctx, 32, y, W - 64, 'Line Survival', ls.survivalRate, '%', cPurple, th);
 
   // ── Heatmap ──
-  y += 40;
-  ctx.font = '600 10px "IBM Plex Mono", monospace';
-  ctx.fillStyle = th.textDim;
-  ctx.fillText('PRODUCTIVITY HEATMAP', 32, y);
+  y += 34;
+  sectionLabel('PRODUCTIVITY HEATMAP', y);
   y += 14;
   drawMiniHeatmap(ctx, 32, y, W - 64, d.heatmap.commits, th, isLight);
+  y += heatH;
 
   // ── Top Insights ──
-  y += 100;
-  const topInsights = (d.insights || []).slice(0, 3);
   if (topInsights.length > 0) {
-    ctx.font = '600 10px "IBM Plex Mono", monospace';
-    ctx.fillStyle = th.textDim;
-    ctx.fillText('KEY INSIGHTS', 32, y);
+    y += 24;
+    sectionLabel('KEY INSIGHTS', y);
     y += 14;
-    for (const insight of topInsights) {
-      drawInsightRow(ctx, 32, y, W - 64, insight, th);
-      y += 28;
-    }
+    topInsights.forEach((insight, i) => {
+      const used = drawInsightRow(ctx, 32, y, W - 64, insight, insightLines[i], th);
+      y += used + 8;
+    });
   }
 
   // ── Footer ──
-  ctx.font = '400 10px "Instrument Sans", sans-serif';
-  ctx.fillStyle = th.textDim;
-  ctx.fillText('Generated by Codelens AI  ·  codelensai-dev.vercel.app', 32, H - 24);
-
-  // Subtle footer separator
   ctx.strokeStyle = th.separatorLight;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(32, H - 40);
   ctx.lineTo(W - 32, H - 40);
   ctx.stroke();
+  ctx.font = '400 10px "Instrument Sans", sans-serif';
+  ctx.fillStyle = th.textDim;
+  ctx.fillText('Generated by Codelens AI  ·  codelensai-dev.vercel.app', 32, H - 24);
 }
 
 let shareCardTheme = 'dark';
