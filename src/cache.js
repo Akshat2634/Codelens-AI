@@ -10,7 +10,9 @@ const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
 // 6: Sonnet 5 date-aware pricing (intro $2/$10 → standard $3/$15 on 2026-09-01).
 // 7: fast-mode/US-residency billing markers, web-search fees, cache keyed on
 //    (days, project) so a cache built for one window/filter can't serve another.
-const CACHE_VERSION = 7;
+// 8: window-clipped usage for sessions spanning the cutoff, per-tier
+//    cacheSavingsDollars on each session.
+const CACHE_VERSION = 8;
 
 export function loadCache(options = {}) {
   if (!existsSync(CACHE_FILE)) {
@@ -22,10 +24,13 @@ export function loadCache(options = {}) {
     const data = JSON.parse(raw);
     if (data.version !== CACHE_VERSION) return null;
     // Sessions were parsed with the lookback window and project filter baked in
-    // (mtime cutoff, startTime filter, folder filter). Serving them under
+    // (mtime cutoff, window clipping, folder filter). Serving them under
     // different options would display the wrong data — treat as a miss.
     if (data.days !== options.days) return null;
     if ((data.project || null) !== (options.project || null)) return null;
+    // The rolling window moves daily and sessions are clipped to it at parse
+    // time, so a cache built on an earlier day would serve stale clipping.
+    if (options.cutoffDay && data.cutoffDay !== options.cutoffDay) return null;
     return data;
   } catch {
     return null;
@@ -39,6 +44,7 @@ export function saveCache(sessions, fileIndex, options = {}) {
     lastParsedAt: new Date().toISOString(),
     days: options.days,
     project: options.project || null,
+    cutoffDay: options.cutoffDay || null,
     fileIndex,
     sessions,
   };

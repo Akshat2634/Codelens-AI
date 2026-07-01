@@ -199,11 +199,16 @@ export function correlateSessions(sessions, commitsByRepo) {
     });
   }
 
-  // Identify organic commits (not claimed by any session)
+  // Identify organic commits (not claimed by any session). Dedupe by hash —
+  // the same repository reachable under two paths (manual worktree, second
+  // clone) yields identical commit lists, and pushing a commit once per repo
+  // entry would double-count organic totals.
   const organicCommits = [];
+  const seenOrganic = new Set();
   for (const [, analysis] of Object.entries(commitsByRepo)) {
     for (const commit of analysis.commits) {
-      if (!claimedCommits.has(commit.hash)) {
+      if (!claimedCommits.has(commit.hash) && !seenOrganic.has(commit.hash)) {
+        seenOrganic.add(commit.hash);
         organicCommits.push({ ...commit });
       }
     }

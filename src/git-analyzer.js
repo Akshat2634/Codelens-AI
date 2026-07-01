@@ -234,7 +234,11 @@ export function analyzeGitRepo(repoPath, days) {
     // Enforce the lookback window on AUTHOR date (%aI), matching every downstream
     // metric (all of which bucket on author date). `--since` filters on committer
     // date, which can differ from author date after a rebase or cherry-pick.
-    const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
+    // Same calendar-day cutoff formula as the session parser (setDate is
+    // DST-aware; a fixed days*24h product drifts an hour across DST changes).
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const cutoffMs = cutoffDate.getTime();
 
     // Filter to the current user (case-insensitive — git records emails verbatim
     // and the case can vary) within the author-date window.

@@ -34,12 +34,15 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false, plan
   let sessions;
   let fileIndex;
   const startParse = Date.now();
-  const cacheOptions = { days, project: project || null };
   // Same cutoff computation as parseAllProjects, so the cache staleness scan and
   // the parser agree on which files are inside the lookback window.
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
   const cutoffMs = cutoffDate.getTime();
+  // cutoffDay keys the cache to the day it was built: sessions are clipped to
+  // the rolling window at parse time, so yesterday's cache would serve
+  // yesterday's clipping. Costs one full re-parse per day.
+  const cacheOptions = { days, project: project || null, cutoffDay: cutoffDate.toDateString() };
 
   if (forceRefresh) {
     deleteCache();
@@ -56,10 +59,10 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false, plan
     const cachedCount = Object.keys(cached.fileIndex).length - modifiedCount - deletedCount;
 
     if (newCount === 0 && modifiedCount === 0 && deletedCount === 0) {
-      // Re-apply the start-time cutoff: the cache may have been written days ago,
-      // and the rolling window has moved since — sessions that have aged out must
-      // not be served as if they were inside the current window.
-      sessions = cached.sessions.filter(s => new Date(s.startTime).getTime() >= cutoffMs);
+      // Re-apply the window filter (same rule as the parser: keep sessions with
+      // any activity in the window). The cutoffDay cache key means this cache
+      // was built today, so per-session clipping is already current.
+      sessions = cached.sessions.filter(s => new Date(s.endTime || s.startTime).getTime() >= cutoffMs);
       fileIndex = cached.fileIndex;
       console.log(`  ${icon.ok} Parsing sessions ${c.dim}── ${sessions.length} cached (${fmt(Date.now() - startParse)})${c.reset}`);
     } else {

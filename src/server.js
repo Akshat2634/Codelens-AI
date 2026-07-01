@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { commitLinesForSession } from './correlator.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -71,16 +72,32 @@ export function createServer(initialPayload, rebuildFn) {
 
     let sessions = payload.sessions;
 
-    // Filter to main branch commits only if requested
+    // Filter to main branch commits only if requested. Line counts keep the
+    // same AI-attribution rule as the unfiltered view (session-file overlap via
+    // commitLinesForSession), and derived per-commit fields are recomputed so
+    // they don't reflect the unfiltered commit set.
     if (mainOnly) {
       sessions = sessions.map(s => {
         const mainCommits = s.commits.filter(c => c.onMain);
+        let linesAdded = 0;
+        let linesDeleted = 0;
+        for (const c of mainCommits) {
+          const { added, deleted } = commitLinesForSession(s, c);
+          linesAdded += added;
+          linesDeleted += deleted;
+        }
+        const netLines = linesAdded - linesDeleted;
         return {
           ...s,
           commits: mainCommits,
           commitCount: mainCommits.length,
-          linesAdded: mainCommits.reduce((sum, c) => sum + c.totalAdded, 0),
-          linesDeleted: mainCommits.reduce((sum, c) => sum + c.totalDeleted, 0),
+          commitsOnMain: mainCommits.length,
+          linesAdded,
+          linesDeleted,
+          netLines,
+          costPerCommit: mainCommits.length > 0 ? s.cost.totalCost / mainCommits.length : null,
+          costPerLine: linesAdded > 0 ? s.cost.totalCost / linesAdded : null,
+          costPerNetLine: netLines > 0 ? s.cost.totalCost / netLines : null,
         };
       });
     }
