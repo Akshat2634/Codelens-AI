@@ -1,9 +1,11 @@
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 
 export function createServer(initialPayload, rebuildFn) {
   const app = express();
@@ -14,6 +16,14 @@ export function createServer(initialPayload, rebuildFn) {
 
   app.get('/', (_req, res) => {
     res.type('html').send(dashboardHtml);
+  });
+
+  // Serve Chart.js from the installed package instead of a CDN, so the
+  // dashboard works offline and on networks that block third-party CDNs.
+  // require.resolve gives dist/chart.cjs; the UMD bundle sits beside it.
+  const chartJsFile = path.join(path.dirname(require.resolve('chart.js')), 'chart.umd.min.js');
+  app.get('/vendor/chart.umd.min.js', (_req, res) => {
+    res.type('application/javascript').sendFile(chartJsFile);
   });
 
   // Full payload (single fetch for dashboard)

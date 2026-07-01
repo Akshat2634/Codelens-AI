@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Codelens AI — Agent Productivity Dashboard</title>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='8' y='14' width='4' height='12' rx='1.5' fill='%23e67e22'/%3E%3Crect x='14' y='6' width='4' height='20' rx='1.5' fill='%232ecc71'/%3E%3Crect x='20' y='10' width='4' height='16' rx='1.5' fill='%233498db'/%3E%3C/svg%3E">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='8' y='14' width='4' height='12' rx='1.5' fill='%23C4840B'/%3E%3Crect x='14' y='6' width='4' height='20' rx='1.5' fill='%232E9E4F'/%3E%3Crect x='20' y='10' width='4' height='16' rx='1.5' fill='%233987E5'/%3E%3C/svg%3E">
+  <script src="/vendor/chart.umd.min.js"></script>
   <script>
     (function() {
       var pref = localStorage.getItem('codelens-theme') || 'system';
@@ -26,125 +26,142 @@
     }
 
     :root {
-      --bg-primary: #0a0e17;
-      --bg-secondary: #111827;
-      --bg-card: #151d2b;
-      --bg-hover: #1e2a3a;
-      --bg-elevated: #1a2332;
-      --border: #1f2d3d;
-      --border-subtle: #162030;
-      --text-primary: #f0f4f8;
-      --text-secondary: #94a3b8;
-      --text-muted: #64748b;
-      --accent-green: #22d3a8;
-      --accent-red: #ef4444;
-      --accent-orange: #f59e0b;
-      --accent-blue: #3b82f6;
-      --accent-purple: #a855f7;
-      --accent-cyan: #06b6d4;
-      --grade-a: #22d3a8;
-      --grade-b: #3b82f6;
-      --grade-c: #f59e0b;
-      --grade-d: #f0883e;
-      --grade-f: #ef4444;
-      --glow-green: rgba(34, 211, 168, 0.15);
-      --glow-blue: rgba(59, 130, 246, 0.15);
-      --glow-purple: rgba(168, 85, 247, 0.15);
-      --glow-orange: rgba(245, 158, 11, 0.15);
-      --glow-red: rgba(239, 68, 68, 0.15);
-      --radius: 12px;
-      --radius-sm: 8px;
-      --font-display: 'JetBrains Mono', 'SF Mono', monospace;
-      --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      /* ── Warm-ink instrument panel (dark) ──
+         Chart accents are a CVD-validated categorical set (dataviz skill
+         validator, surface #161411): worst adjacent ΔE in the sanctioned
+         floor band; charts pair colors with legends, 2px spacers and labels. */
+      --bg-primary: #0C0B09;
+      --bg-secondary: #12100D;
+      --bg-card: #161411;
+      --bg-hover: #221E17;
+      --bg-elevated: #1B1814;
+      --border: #2B261E;
+      --border-subtle: #211D16;
+      --text-primary: #F2EFE8;
+      --text-secondary: #A9A296;
+      --text-muted: #746D60;
+      --accent-green: #2E9E4F;
+      --accent-red: #E66767;
+      --accent-orange: #C4840B;
+      --accent-orange-bright: #E8A93C;
+      --accent-blue: #3987E5;
+      --accent-purple: #9085E9;
+      --accent-cyan: #1FA97C;
+      --accent-pink: #D55181;
+      --grade-a: #2E9E4F;
+      --grade-b: #3987E5;
+      --grade-c: #C4840B;
+      --grade-d: #D95926;
+      --grade-f: #E66767;
+      --glow-green: rgba(46, 158, 79, 0.14);
+      --glow-blue: rgba(57, 135, 229, 0.14);
+      --glow-purple: rgba(144, 133, 233, 0.14);
+      --glow-orange: rgba(196, 132, 11, 0.14);
+      --glow-red: rgba(230, 103, 103, 0.14);
+      --radius: 10px;
+      --radius-sm: 7px;
+      --font-display: 'IBM Plex Mono', 'SF Mono', monospace;
+      --font-head: 'Bricolage Grotesque', 'Instrument Sans', sans-serif;
+      --font-body: 'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      --grid-line: rgba(242, 239, 232, 0.022);
 
-      /* Glassmorphism & overlay tokens */
-      --glass-bg-from: rgba(21, 29, 43, 0.8);
-      --glass-bg-to: rgba(15, 23, 35, 0.6);
-      --glass-border: rgba(255, 255, 255, 0.05);
-      --glass-border-hover: rgba(255, 255, 255, 0.1);
-      --overlay-subtle: rgba(255, 255, 255, 0.01);
-      --overlay-light: rgba(255, 255, 255, 0.02);
-      --overlay-soft: rgba(255, 255, 255, 0.03);
-      --overlay-medium: rgba(255, 255, 255, 0.04);
-      --overlay-strong: rgba(255, 255, 255, 0.06);
-      --overlay-intense: rgba(255, 255, 255, 0.08);
-      --shadow-card: rgba(0, 0, 0, 0.3);
-      --shadow-card-hover: rgba(0, 0, 0, 0.4);
-      --shadow-medium: rgba(0, 0, 0, 0.2);
-      --shadow-elevated: rgba(0, 0, 0, 0.25);
-      --tooltip-bg: rgba(10, 14, 23, 0.95);
-      --tooltip-border: rgba(255, 255, 255, 0.06);
-      --noise-opacity: 0.015;
-      --funnel-text: rgba(255, 255, 255, 0.9);
+      /* Panel & overlay tokens (bezel over glass) */
+      --glass-bg-from: rgba(24, 21, 17, 0.88);
+      --glass-bg-to: rgba(16, 14, 11, 0.72);
+      --glass-border: rgba(242, 239, 232, 0.07);
+      --glass-border-hover: rgba(242, 239, 232, 0.14);
+      --overlay-subtle: rgba(242, 239, 232, 0.012);
+      --overlay-light: rgba(242, 239, 232, 0.024);
+      --overlay-soft: rgba(242, 239, 232, 0.035);
+      --overlay-medium: rgba(242, 239, 232, 0.05);
+      --overlay-strong: rgba(242, 239, 232, 0.07);
+      --overlay-intense: rgba(242, 239, 232, 0.1);
+      --shadow-card: rgba(0, 0, 0, 0.35);
+      --shadow-card-hover: rgba(0, 0, 0, 0.45);
+      --shadow-medium: rgba(0, 0, 0, 0.22);
+      --shadow-elevated: rgba(0, 0, 0, 0.28);
+      --tooltip-bg: rgba(14, 12, 10, 0.96);
+      --tooltip-border: rgba(242, 239, 232, 0.09);
+      --noise-opacity: 0.02;
+      --funnel-text: rgba(255, 255, 255, 0.92);
 
       /* Grade background tokens */
-      --grade-a-bg: rgba(34, 211, 168, 0.13);
-      --grade-b-bg: rgba(59, 130, 246, 0.13);
-      --grade-c-bg: rgba(245, 158, 11, 0.13);
-      --grade-d-bg: rgba(240, 136, 62, 0.13);
-      --grade-f-bg: rgba(239, 68, 68, 0.13);
+      --grade-a-bg: rgba(46, 158, 79, 0.14);
+      --grade-b-bg: rgba(57, 135, 229, 0.14);
+      --grade-c-bg: rgba(217, 154, 33, 0.14);
+      --grade-d-bg: rgba(217, 89, 38, 0.14);
+      --grade-f-bg: rgba(230, 103, 103, 0.14);
     }
 
-    /* ── Light Theme ─────────────────────────────── */
+    /* ── Warm-paper ledger (light) ──
+       Same semantic slots, stepped darker for the paper surface and
+       validated as a set against #FDFCFA (worst adjacent ΔE 20.7). */
     [data-theme="light"] {
-      --bg-primary: #f8fafc;
-      --bg-secondary: #f1f5f9;
-      --bg-card: #ffffff;
-      --bg-hover: #e2e8f0;
-      --bg-elevated: #f1f5f9;
-      --border: #cbd5e1;
-      --border-subtle: #e2e8f0;
-      --text-primary: #0f172a;
-      --text-secondary: #475569;
-      --text-muted: #64748b;
-      --accent-green: #0d9488;
-      --accent-red: #dc2626;
-      --accent-orange: #d97706;
-      --accent-blue: #2563eb;
-      --accent-purple: #7c3aed;
-      --accent-cyan: #0891b2;
-      --grade-a: #0d9488;
-      --grade-b: #2563eb;
-      --grade-c: #d97706;
-      --grade-d: #ea580c;
-      --grade-f: #dc2626;
-      --glow-green: rgba(13, 148, 136, 0.1);
-      --glow-blue: rgba(37, 99, 235, 0.1);
-      --glow-purple: rgba(124, 58, 237, 0.1);
-      --glow-orange: rgba(217, 119, 6, 0.1);
-      --glow-red: rgba(220, 38, 38, 0.1);
-      --glass-bg-from: rgba(255, 255, 255, 0.7);
-      --glass-bg-to: rgba(241, 245, 249, 0.5);
-      --glass-border: rgba(0, 0, 0, 0.06);
-      --glass-border-hover: rgba(0, 0, 0, 0.12);
-      --overlay-subtle: rgba(0, 0, 0, 0.01);
-      --overlay-light: rgba(0, 0, 0, 0.02);
-      --overlay-soft: rgba(0, 0, 0, 0.03);
-      --overlay-medium: rgba(0, 0, 0, 0.04);
-      --overlay-strong: rgba(0, 0, 0, 0.06);
-      --overlay-intense: rgba(0, 0, 0, 0.08);
-      --shadow-card: rgba(0, 0, 0, 0.06);
-      --shadow-card-hover: rgba(0, 0, 0, 0.1);
-      --shadow-medium: rgba(0, 0, 0, 0.08);
-      --shadow-elevated: rgba(0, 0, 0, 0.12);
-      --tooltip-bg: rgba(15, 23, 42, 0.92);
+      --bg-primary: #F6F4EF;
+      --bg-secondary: #F0EDE6;
+      --bg-card: #FDFCFA;
+      --bg-hover: #EAE6DC;
+      --bg-elevated: #F3F0E9;
+      --border: #D9D3C6;
+      --border-subtle: #E8E3D8;
+      --text-primary: #1B1811;
+      --text-secondary: #59534A;
+      --text-muted: #8B8375;
+      --accent-green: #20813C;
+      --accent-red: #D64444;
+      --accent-orange: #B57603;
+      --accent-orange-bright: #A56A00;
+      --accent-blue: #2A78D6;
+      --accent-purple: #5D50C9;
+      --accent-cyan: #14936B;
+      --accent-pink: #C74A74;
+      --grade-a: #20813C;
+      --grade-b: #2A78D6;
+      --grade-c: #B57603;
+      --grade-d: #C24E1D;
+      --grade-f: #D64444;
+      --glow-green: rgba(32, 129, 60, 0.1);
+      --glow-blue: rgba(42, 120, 214, 0.1);
+      --glow-purple: rgba(93, 80, 201, 0.1);
+      --glow-orange: rgba(181, 118, 3, 0.1);
+      --glow-red: rgba(214, 68, 68, 0.1);
+      --grid-line: rgba(27, 24, 17, 0.035);
+      --glass-bg-from: rgba(253, 252, 250, 0.85);
+      --glass-bg-to: rgba(246, 244, 239, 0.6);
+      --glass-border: rgba(27, 24, 17, 0.08);
+      --glass-border-hover: rgba(27, 24, 17, 0.16);
+      --overlay-subtle: rgba(27, 24, 17, 0.012);
+      --overlay-light: rgba(27, 24, 17, 0.025);
+      --overlay-soft: rgba(27, 24, 17, 0.035);
+      --overlay-medium: rgba(27, 24, 17, 0.05);
+      --overlay-strong: rgba(27, 24, 17, 0.07);
+      --overlay-intense: rgba(27, 24, 17, 0.09);
+      --shadow-card: rgba(63, 55, 40, 0.07);
+      --shadow-card-hover: rgba(63, 55, 40, 0.12);
+      --shadow-medium: rgba(63, 55, 40, 0.09);
+      --shadow-elevated: rgba(63, 55, 40, 0.13);
+      --tooltip-bg: rgba(27, 24, 17, 0.94);
       --tooltip-border: rgba(255, 255, 255, 0.1);
-      --noise-opacity: 0.008;
-      --funnel-text: rgba(0, 0, 0, 0.8);
-      --grade-a-bg: rgba(13, 148, 136, 0.1);
-      --grade-b-bg: rgba(37, 99, 235, 0.1);
-      --grade-c-bg: rgba(217, 119, 6, 0.1);
-      --grade-d-bg: rgba(234, 88, 12, 0.1);
-      --grade-f-bg: rgba(220, 38, 38, 0.1);
+      --noise-opacity: 0.012;
+      --funnel-text: rgba(0, 0, 0, 0.82);
+      --grade-a-bg: rgba(32, 129, 60, 0.1);
+      --grade-b-bg: rgba(42, 120, 214, 0.1);
+      --grade-c-bg: rgba(181, 118, 3, 0.12);
+      --grade-d-bg: rgba(194, 78, 29, 0.1);
+      --grade-f-bg: rgba(214, 68, 68, 0.1);
     }
 
     body {
       font-family: var(--font-body);
+      /* Drafting-table field: a fine engineering grid over warm ink/paper,
+         with a faint amber work-lamp falloff from the top. */
       background:
-        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(59, 130, 246, 0.03), transparent),
-        radial-gradient(ellipse 60% 40% at 100% 50%, rgba(168, 85, 247, 0.02), transparent),
-        radial-gradient(ellipse 50% 30% at 0% 80%, rgba(34, 211, 168, 0.02), transparent),
+        linear-gradient(var(--grid-line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+        radial-gradient(ellipse 90% 55% at 50% -12%, rgba(196, 132, 11, 0.07), transparent 62%),
+        radial-gradient(ellipse 55% 38% at 0% 88%, rgba(46, 158, 79, 0.04), transparent 70%),
         var(--bg-primary);
+      background-size: 48px 48px, 48px 48px, auto, auto, auto;
       color: var(--text-primary);
       line-height: 1.6;
       min-height: 100vh;
@@ -163,135 +180,146 @@
 
     .container { max-width: 1320px; margin: 0 auto; padding: 32px; position: relative; z-index: 1; }
 
-    /* Header */
+    /* Header — left-aligned masthead, drafting-sheet title block */
     header {
-      text-align: center;
-      padding: 56px 0 40px;
-      border-bottom: none;
-      margin-bottom: 40px;
+      text-align: left;
+      padding: 52px 0 30px;
+      margin-bottom: 44px;
       position: relative;
-      overflow: hidden;
     }
-    header::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background:
-        radial-gradient(ellipse 60% 50% at 20% 50%, rgba(59, 130, 246, 0.08), transparent),
-        radial-gradient(ellipse 50% 60% at 80% 30%, rgba(168, 85, 247, 0.06), transparent),
-        radial-gradient(ellipse 40% 40% at 50% 80%, rgba(34, 211, 168, 0.04), transparent);
-      z-index: 0;
-      animation: headerShift 20s ease-in-out infinite alternate;
-    }
-    @keyframes headerShift {
-      0% { opacity: 0.7; transform: scale(1); }
-      100% { opacity: 1; transform: scale(1.05); }
-    }
-    header > * { position: relative; z-index: 1; }
     header::after {
       content: '';
       position: absolute;
       bottom: 0;
-      left: 10%;
-      right: 10%;
+      left: 0;
+      right: 0;
       height: 1px;
-      background: linear-gradient(90deg, transparent, var(--border), transparent);
-      z-index: 1;
+      background: linear-gradient(90deg, var(--accent-orange) 0, var(--accent-orange) 72px, var(--border) 72px, var(--border) 100%);
     }
-    header h1 {
+    .masthead-kicker {
       font-family: var(--font-display);
-      font-size: 2.8rem;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-      background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple), var(--accent-cyan));
-      background-size: 200% 200%;
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      animation: gradientMove 8s ease-in-out infinite;
-      margin-bottom: 12px;
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.32em;
+      text-transform: uppercase;
+      color: var(--accent-orange);
+      margin-bottom: 14px;
       display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 12px;
+      gap: 10px;
+    }
+    .masthead-kicker::after {
+      content: '';
+      flex: 0 0 46px;
+      height: 1px;
+      background: var(--accent-orange);
+      opacity: 0.45;
+    }
+    header h1 {
+      font-family: var(--font-head);
+      font-size: clamp(2.6rem, 5.5vw, 3.6rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1;
+      color: var(--text-primary);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+    }
+    header h1 em {
+      font-style: normal;
+      color: var(--accent-orange);
     }
     .logo-bars {
       display: flex;
       align-items: flex-end;
-      gap: 3px;
-      -webkit-text-fill-color: initial;
+      gap: 4px;
+      align-self: center;
+      transform: translateY(2px);
     }
-    .logo-bars .bar-orange {
-      width: 5px;
-      height: 18px;
-      border-radius: 2px;
-      background: #e67e22;
-    }
-    .logo-bars .bar-teal {
-      width: 5px;
-      height: 28px;
-      border-radius: 2px;
-      background: #2ecc71;
-    }
-    .logo-bars .bar-blue {
-      width: 5px;
-      height: 22px;
-      border-radius: 2px;
-      background: #3498db;
-    }
-    @keyframes gradientMove {
-      0%, 100% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
+    .logo-bars span { border-radius: 2px; width: 6px; transform-origin: bottom; animation: barBreath 3.2s ease-in-out infinite; }
+    .logo-bars .bar-orange { height: 20px; background: var(--accent-orange); animation-delay: 0s; }
+    .logo-bars .bar-teal { height: 32px; background: var(--accent-green); animation-delay: 0.4s; }
+    .logo-bars .bar-blue { height: 25px; background: var(--accent-blue); animation-delay: 0.8s; }
+    @keyframes barBreath {
+      0%, 100% { transform: scaleY(1); }
+      50% { transform: scaleY(0.78); }
     }
     header .tagline {
       color: var(--text-secondary);
-      font-size: 1.1rem;
-      font-weight: 300;
+      font-size: 1.02rem;
+      font-weight: 400;
+      max-width: 640px;
+      line-height: 1.55;
     }
     .meta-info {
       display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 24px;
-      margin-top: 16px;
-      font-size: 0.85rem;
+      justify-content: flex-start;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 22px;
+      font-size: 0.72rem;
       color: var(--text-muted);
     }
     .meta-info .badge {
-      background: var(--overlay-medium);
-      backdrop-filter: blur(12px);
-      border: 1px solid var(--overlay-strong);
-      border-radius: 20px;
-      padding: 5px 14px;
-      transition: background 0.3s;
+      font-family: var(--font-display);
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      background: var(--overlay-light);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 5px 12px;
+      transition: border-color 0.25s, color 0.25s;
     }
     .meta-info .badge:hover {
-      background: var(--overlay-intense);
+      border-color: var(--glass-border-hover);
+      color: var(--text-secondary);
+    }
+    .meta-info .badge:first-child {
+      color: var(--accent-green);
+      border-color: var(--grade-a-bg);
+      background: var(--grade-a-bg);
     }
 
-    /* Shared section heading style */
+    /* Shared section heading style — numbered drafting-sheet kickers */
+    #app { counter-reset: section; }
     .stats-section {
-      margin-bottom: 48px;
+      margin-bottom: 52px;
     }
     .stats-section h2 {
       font-family: var(--font-display);
-      font-size: 0.85rem;
-      margin-bottom: 16px;
-      color: var(--text-muted);
+      font-size: 0.78rem;
+      margin-bottom: 18px;
+      color: var(--text-secondary);
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.16em;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
     }
-    .stats-section h2::before {
+    #app h2 { counter-increment: section; }
+    #app h2::after {
       content: '';
-      display: inline-block;
-      width: 3px;
-      height: 16px;
-      background: var(--accent-blue);
-      border-radius: 2px;
+      flex: 1;
+      height: 1px;
+      background: var(--border-subtle);
+      margin-left: 6px;
+    }
+    #app h2::before {
+      content: counter(section, decimal-leading-zero);
+      font-family: var(--font-display);
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: var(--accent-orange);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      line-height: 1;
+      letter-spacing: 0.08em;
+      background: var(--overlay-light);
     }
 
     /* Hero Stats — 3+1 layout */
@@ -307,9 +335,9 @@
       gap: 12px;
     }
     .stat-card {
-      background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--glass-border);
+      background: linear-gradient(180deg, var(--overlay-light), transparent 46%), var(--bg-card);
+      box-shadow: inset 0 1px 0 var(--overlay-medium);
+      border: 1px solid var(--border-subtle);
       border-radius: var(--radius);
       padding: 20px 24px;
       display: flex;
@@ -476,12 +504,15 @@
     }
     .insights h2 {
       font-family: var(--font-display);
-      font-size: 0.85rem;
-      margin-bottom: 16px;
-      color: var(--text-muted);
+      font-size: 0.78rem;
+      margin-bottom: 18px;
+      color: var(--text-secondary);
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.16em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
     .insight-list {
       display: grid;
@@ -526,9 +557,9 @@
       margin-bottom: 48px;
     }
     .chart-card {
-      background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--glass-border);
+      background: linear-gradient(180deg, var(--overlay-light), transparent 46%), var(--bg-card);
+      box-shadow: inset 0 1px 0 var(--overlay-medium);
+      border: 1px solid var(--border-subtle);
       border-radius: var(--radius);
       padding: 24px;
       transition: border-color 0.3s, box-shadow 0.3s;
@@ -584,9 +615,9 @@
       margin-bottom: 48px;
     }
     .survival-card {
-      background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--glass-border);
+      background: linear-gradient(180deg, var(--overlay-light), transparent 46%), var(--bg-card);
+      box-shadow: inset 0 1px 0 var(--overlay-medium);
+      border: 1px solid var(--border-subtle);
       border-radius: var(--radius);
       padding: 24px;
     }
@@ -713,7 +744,7 @@
     }
     .heatmap-cell:hover {
       transform: scale(1.4);
-      box-shadow: 0 0 8px rgba(34, 211, 168, 0.3);
+      box-shadow: 0 0 8px rgba(46, 158, 79, 0.3);
       z-index: 10;
       position: relative;
     }
@@ -735,17 +766,20 @@
     }
     .sessions-section h2 {
       font-family: var(--font-display);
-      font-size: 0.85rem;
-      margin-bottom: 16px;
-      color: var(--text-muted);
+      font-size: 0.78rem;
+      margin-bottom: 18px;
+      color: var(--text-secondary);
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.16em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
     .sessions-table-wrap {
-      background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--glass-border);
+      background: linear-gradient(180deg, var(--overlay-light), transparent 46%), var(--bg-card);
+      box-shadow: inset 0 1px 0 var(--overlay-medium);
+      border: 1px solid var(--border-subtle);
       border-radius: var(--radius);
       overflow-x: auto;
       overflow-y: visible;
@@ -823,7 +857,7 @@
     tbody tr:hover .grade-badge {
       transform: scale(1.1);
     }
-    tr.orphaned { background: rgba(245, 158, 11, 0.06); }
+    tr.orphaned { background: rgba(196, 132, 11, 0.06); }
     .expand-chevron {
       display: inline-block;
       width: 16px;
@@ -878,7 +912,7 @@
       background: var(--bg-hover);
       color: var(--text-muted);
     }
-    .main-badge { background: rgba(63, 185, 80, 0.15); color: var(--accent-green); }
+    .main-badge { background: var(--grade-a-bg); color: var(--accent-green); }
     .pagination {
       display: flex;
       align-items: center;
@@ -953,9 +987,9 @@
       gap: 16px;
     }
     .token-stat-card {
-      background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--glass-border);
+      background: linear-gradient(180deg, var(--overlay-light), transparent 46%), var(--bg-card);
+      box-shadow: inset 0 1px 0 var(--overlay-medium);
+      border: 1px solid var(--border-subtle);
       border-radius: var(--radius);
       padding: 20px 24px;
       text-align: center;
@@ -1091,9 +1125,9 @@
       display: grid;
       grid-template-columns: repeat(4, 1fr);
       gap: 0;
-      background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--glass-border);
+      background: linear-gradient(180deg, var(--overlay-light), transparent 46%), var(--bg-card);
+      box-shadow: inset 0 1px 0 var(--overlay-medium);
+      border: 1px solid var(--border-subtle);
       border-radius: var(--radius);
       overflow: hidden;
       position: relative;
@@ -1133,7 +1167,7 @@
       position: relative;
       z-index: 2;
     }
-    .period-card.today::before { background: var(--accent-green); box-shadow: 0 0 8px rgba(34, 211, 168, 0.4); }
+    .period-card.today::before { background: var(--accent-green); box-shadow: 0 0 8px rgba(46, 158, 79, 0.4); }
     .period-card.week::before { background: var(--accent-blue); }
     .period-card.month::before { background: var(--accent-purple); }
     .period-card.all-time::before { background: var(--accent-orange); }
@@ -1174,9 +1208,9 @@
       margin-bottom: 48px;
     }
     .token-funnel-card {
-      background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--glass-border);
+      background: linear-gradient(180deg, var(--overlay-light), transparent 46%), var(--bg-card);
+      box-shadow: inset 0 1px 0 var(--overlay-medium);
+      border: 1px solid var(--border-subtle);
       border-radius: var(--radius);
       padding: 24px;
     }
@@ -1303,7 +1337,7 @@
       width: 42px;
       height: 42px;
       border-radius: 50%;
-      border: 1px solid var(--glass-border);
+      border: 1px solid var(--border-subtle);
       background: var(--overlay-medium);
       backdrop-filter: blur(12px);
       color: var(--text-secondary);
@@ -1330,7 +1364,7 @@
       display: flex;
       align-items: center;
       border-radius: 22px;
-      border: 1px solid var(--glass-border);
+      border: 1px solid var(--border-subtle);
       background: var(--overlay-medium);
       backdrop-filter: blur(12px);
       padding: 3px;
@@ -1378,7 +1412,7 @@
         radial-gradient(ellipse 40% 40% at 50% 80%, rgba(13, 148, 136, 0.04), transparent);
     }
     [data-theme="light"] .info-tip:hover::after {
-      color: #e2e8f0;
+      color: #E8E3D8;
     }
     [data-theme="light"] tr.orphaned {
       background: rgba(217, 119, 6, 0.06);
@@ -1420,8 +1454,8 @@
     /* ── Share Button Glow ─────────────────────── */
     .share-btn:hover {
       color: var(--accent-purple);
-      border-color: rgba(168, 85, 247, 0.3);
-      box-shadow: 0 0 12px rgba(168, 85, 247, 0.15);
+      border-color: rgba(144, 133, 233, 0.3);
+      box-shadow: 0 0 12px rgba(144, 133, 233, 0.15);
     }
 
     /* ── Share Modal ───────────────────────────── */
@@ -1443,7 +1477,7 @@
     .share-modal {
       background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
       backdrop-filter: blur(20px);
-      border: 1px solid var(--glass-border);
+      border: 1px solid var(--border-subtle);
       border-radius: var(--radius);
       padding: 32px;
       max-width: 680px;
@@ -1480,7 +1514,7 @@
       width: 32px;
       height: 32px;
       border-radius: 50%;
-      border: 1px solid var(--glass-border);
+      border: 1px solid var(--border-subtle);
       background: var(--overlay-medium);
       color: var(--text-secondary);
       font-size: 1.2rem;
@@ -1550,7 +1584,7 @@
       gap: 8px;
       padding: 10px 20px;
       border-radius: var(--radius-sm);
-      border: 1px solid var(--glass-border);
+      border: 1px solid var(--border-subtle);
       background: var(--overlay-medium);
       color: var(--text-secondary);
       font-family: var(--font-body);
@@ -1565,12 +1599,12 @@
       transform: translateY(-1px);
     }
     .share-action-btn.primary {
-      background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(168, 85, 247, 0.2));
-      border-color: rgba(59, 130, 246, 0.3);
+      background: linear-gradient(135deg, rgba(57, 135, 229, 0.2), rgba(144, 133, 233, 0.2));
+      border-color: rgba(57, 135, 229, 0.3);
       color: var(--text-primary);
     }
     .share-action-btn.primary:hover {
-      background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(168, 85, 247, 0.3));
+      background: linear-gradient(135deg, rgba(57, 135, 229, 0.3), rgba(144, 133, 233, 0.3));
     }
     .share-toast {
       text-align: center;
@@ -1593,12 +1627,12 @@
     .autonomy-section { margin-bottom: 48px; }
     .autonomy-section h2 {
       font-family: var(--font-display);
-      font-size: 1rem;
-      font-weight: 700;
+      font-size: 0.78rem;
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.1em;
+      letter-spacing: 0.16em;
       color: var(--text-secondary);
-      margin-bottom: 24px;
+      margin-bottom: 20px;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -1622,9 +1656,9 @@
       justify-content: center;
       gap: 12px;
       padding: 28px 20px;
-      background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--glass-border);
+      background: linear-gradient(180deg, var(--overlay-light), transparent 46%), var(--bg-card);
+      box-shadow: inset 0 1px 0 var(--overlay-medium);
+      border: 1px solid var(--border-subtle);
       border-radius: var(--radius);
       position: relative;
       overflow: hidden;
@@ -1633,7 +1667,7 @@
       content: '';
       position: absolute;
       inset: 0;
-      background: radial-gradient(circle at 50% 20%, var(--auto-glow, rgba(34, 211, 168, 0.08)), transparent 70%);
+      background: radial-gradient(circle at 50% 20%, var(--auto-glow, rgba(46, 158, 79, 0.08)), transparent 70%);
       pointer-events: none;
     }
     .autonomy-ring {
@@ -1692,9 +1726,9 @@
       .autonomy-cards { grid-template-columns: 1fr; }
     }
     .auto-metric {
-      background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--glass-border);
+      background: linear-gradient(180deg, var(--overlay-light), transparent 46%), var(--bg-card);
+      box-shadow: inset 0 1px 0 var(--overlay-medium);
+      border: 1px solid var(--border-subtle);
       border-radius: var(--radius);
       padding: 20px;
       display: flex;
@@ -1792,7 +1826,7 @@
       margin-top: 16px;
       grid-column: 1 / -1;
       background: linear-gradient(145deg, var(--glass-bg-from), var(--glass-bg-to));
-      border: 1px solid var(--glass-border);
+      border: 1px solid var(--border-subtle);
       border-radius: var(--radius);
       padding: 16px 20px;
     }
@@ -1838,16 +1872,17 @@
       margin-bottom: 40px;
       padding: 28px 32px;
       border-radius: var(--radius);
-      background:
-        linear-gradient(135deg, rgba(59, 130, 246, 0.06), rgba(168, 85, 247, 0.04));
-      border: 1px solid var(--glass-border);
+      background: linear-gradient(180deg, var(--overlay-light), transparent 55%), var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-left: 3px solid var(--accent-orange);
+      box-shadow: inset 0 1px 0 var(--overlay-medium);
       overflow: hidden;
     }
     .narrative::before {
       content: '';
       position: absolute;
       inset: 0;
-      background: radial-gradient(ellipse 60% 80% at 100% 0%, rgba(168, 85, 247, 0.12), transparent);
+      background: radial-gradient(ellipse 55% 90% at 100% 0%, var(--glow-orange), transparent 70%);
       pointer-events: none;
     }
     .narrative-kicker {
@@ -1856,7 +1891,7 @@
       font-weight: 700;
       letter-spacing: 0.12em;
       text-transform: uppercase;
-      color: var(--accent-purple);
+      color: var(--accent-orange);
       margin-bottom: 10px;
       display: flex; align-items: center; gap: 8px;
       position: relative;
@@ -1864,8 +1899,8 @@
     .narrative-kicker::before {
       content: '';
       width: 6px; height: 6px; border-radius: 50%;
-      background: var(--accent-purple);
-      box-shadow: 0 0 10px var(--accent-purple);
+      background: var(--accent-orange);
+      box-shadow: 0 0 10px var(--accent-orange);
     }
     .narrative-headline {
       font-family: var(--font-body);
@@ -1888,7 +1923,7 @@
       padding: 14px 16px;
       border-radius: var(--radius-sm);
       background: var(--overlay-light);
-      border: 1px solid var(--glass-border);
+      border: 1px solid var(--border-subtle);
     }
     .narrative-metric .nm-label {
       font-size: 0.7rem;
@@ -1970,7 +2005,8 @@
           </button>
         </div>
       </div>
-      <h1><span class="logo-bars"><span class="bar-orange"></span><span class="bar-teal"></span><span class="bar-blue"></span></span>Codelens AI</h1>
+      <div class="masthead-kicker">Agent ROI &middot; Instrument Panel</div>
+      <h1><span class="logo-bars"><span class="bar-orange"></span><span class="bar-teal"></span><span class="bar-blue"></span></span>Codelens <em>AI</em></h1>
       <p class="tagline">Correlates your AI coding agent's token spend with actual git output — see what shipped, what churned, and what it cost.</p>
       <div class="meta-info">
         <span class="badge" id="date-range"></span>
@@ -1991,8 +2027,8 @@
         100% { opacity: 0; transform: translateX(32px) scale(0.96); }
       }
       @keyframes dep-pulse {
-        0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.25), 0 16px 48px rgba(0,0,0,0.5); }
-        50%       { box-shadow: 0 0 0 6px rgba(245,158,11,0), 0 16px 48px rgba(0,0,0,0.5); }
+        0%, 100% { box-shadow: 0 0 0 0 rgba(196,132,11,0.25), 0 16px 48px rgba(0,0,0,0.5); }
+        50%       { box-shadow: 0 0 0 6px rgba(196,132,11,0), 0 16px 48px rgba(0,0,0,0.5); }
       }
       @keyframes dep-scan {
         0%   { transform: translateY(-100%); }
@@ -2007,7 +2043,7 @@
         width: 280px;
         max-width: calc(100vw - 40px);
         background: linear-gradient(160deg, var(--glass-bg-from) 0%, var(--glass-bg-to) 100%);
-        border: 1px solid rgba(245,158,11,0.45);
+        border: 1px solid rgba(196,132,11,0.45);
         border-radius: 12px;
         overflow: hidden;
         font-family: var(--font-body);
@@ -2024,20 +2060,20 @@
       /* Light theme overrides */
       [data-theme="light"] #deprecation-banner {
         background: linear-gradient(160deg, rgba(255,252,245,0.97) 0%, rgba(255,248,230,0.95) 100%);
-        box-shadow: 0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(245,158,11,0.15);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(196,132,11,0.15);
       }
-      [data-theme="light"] #dep-message { color: #475569; }
-      [data-theme="light"] #dep-message strong { color: #0f172a; }
+      [data-theme="light"] #dep-message { color: #59534A; }
+      [data-theme="light"] #dep-message strong { color: #1B1811; }
       [data-theme="light"] #dep-cmd-row {
-        background: rgba(6,182,212,0.06);
-        border-color: rgba(6,182,212,0.3);
+        background: rgba(31,169,124,0.06);
+        border-color: rgba(31,169,124,0.3);
       }
       [data-theme="light"] #dep-copy {
-        background: rgba(6,182,212,0.1);
-        border-color: rgba(6,182,212,0.25);
-        color: #475569;
+        background: rgba(31,169,124,0.1);
+        border-color: rgba(31,169,124,0.25);
+        color: #59534A;
       }
-      [data-theme="light"] #dep-copy:hover { background: rgba(6,182,212,0.2); color: #0891b2; }
+      [data-theme="light"] #dep-copy:hover { background: rgba(31,169,124,0.2); color: #0891b2; }
       #dep-scanline {
         position: absolute;
         inset: 0;
@@ -2051,7 +2087,7 @@
         position: absolute;
         left: 0; right: 0;
         height: 40%;
-        background: linear-gradient(to bottom, transparent, rgba(245,158,11,0.04), transparent);
+        background: linear-gradient(to bottom, transparent, rgba(196,132,11,0.04), transparent);
         animation: dep-scan 3.5s linear infinite;
       }
       #dep-top-bar {
@@ -2115,10 +2151,10 @@
         display: flex;
         align-items: stretch;
         gap: 0;
-        border: 1px solid rgba(6,182,212,0.25);
+        border: 1px solid rgba(31,169,124,0.25);
         border-radius: 8px;
         overflow: hidden;
-        background: rgba(6,182,212,0.04);
+        background: rgba(31,169,124,0.04);
       }
       #dep-cmd {
         flex: 1;
@@ -2133,9 +2169,9 @@
         text-overflow: ellipsis;
       }
       #dep-copy {
-        background: rgba(6,182,212,0.08);
+        background: rgba(31,169,124,0.08);
         border: none;
-        border-left: 1px solid rgba(6,182,212,0.2);
+        border-left: 1px solid rgba(31,169,124,0.2);
         color: var(--text-muted);
         cursor: pointer;
         padding: 0 12px;
@@ -2145,7 +2181,7 @@
         align-items: center;
         gap: 5px;
       }
-      #dep-copy:hover { background: rgba(6,182,212,0.18); color: var(--accent-cyan); }
+      #dep-copy:hover { background: rgba(31,169,124,0.18); color: var(--accent-cyan); }
       #dep-copy-label {
         font-family: var(--font-display);
         font-size: 9px;
@@ -2274,22 +2310,42 @@ function updateThemeSwitcher(pref) {
   });
 }
 
-function updateChartTheme(theme) {
-  const isLight = theme === 'light';
-  Chart.defaults.color = isLight ? '#475569' : '#94a3b8';
-  Chart.defaults.borderColor = isLight ? '#cbd5e1' : '#1f2d3d';
-  Chart.defaults.plugins.tooltip.backgroundColor = isLight ? 'rgba(15, 23, 42, 0.92)' : 'rgba(10, 14, 23, 0.95)';
-  Chart.defaults.plugins.tooltip.borderColor = isLight ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.08)';
-  Object.values(Chart.instances || {}).forEach(chart => {
-    if (chart.options.scales) {
-      Object.values(chart.options.scales).forEach(scale => {
-        if (scale.grid) scale.grid.color = isLight ? '#e2e8f0' : '#1f2d3d';
-        if (scale.ticks) scale.ticks.color = isLight ? '#475569' : '#94a3b8';
-        if (scale.title) scale.title.color = isLight ? '#475569' : '#94a3b8';
-      });
-    }
-    chart.update('none');
-  });
+// Read the live design tokens so charts always match the active theme.
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function hexToRgb(hex) {
+  const h = hex.replace('#', '');
+  const v = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+  return [parseInt(v.slice(0, 2), 16), parseInt(v.slice(2, 4), 16), parseInt(v.slice(4, 6), 16)];
+}
+function withAlpha(hex, a) {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+function chartTokens() {
+  return {
+    blue: cssVar('--accent-blue'),
+    purple: cssVar('--accent-purple'),
+    cyan: cssVar('--accent-cyan'),
+    orange: cssVar('--accent-orange'),
+    green: cssVar('--accent-green'),
+    pink: cssVar('--accent-pink'),
+    red: cssVar('--accent-red'),
+    muted: cssVar('--text-muted'),
+    secondary: cssVar('--text-secondary'),
+    grid: cssVar('--border-subtle'),
+    card: cssVar('--bg-card'),
+  };
+}
+
+function updateChartTheme() {
+  // Series and chrome colors are sampled from the design tokens at build time,
+  // so a theme flip rebuilds the charts against the new token values.
+  if (typeof Chart === 'undefined' || !DATA) return;
+  Object.values(Chart.instances || {}).forEach(chart => chart.destroy());
+  initCharts();
+  initHeatmap();
 }
 
 function initTheme() {
@@ -2401,7 +2457,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           const btn = document.getElementById('dep-copy');
           lbl.textContent = '✓ Done';
           btn.style.color = 'var(--accent-green)';
-          btn.style.background = 'rgba(34,211,168,0.12)';
+          btn.style.background = 'rgba(46,158,79,0.12)';
           setTimeout(() => { lbl.textContent = 'Copy'; btn.style.color = ''; btn.style.background = ''; }, 1800);
         });
       });
@@ -2533,7 +2589,7 @@ function renderHeroStats(s) {
   const scoreDeg = Math.round(es.score * 3.6);
   return `<div class="stats-section">
     <h2>Performance Overview <i class="info-tip" data-tip="High-level metrics for your AI coding sessions — cost, output, efficiency, and overall score.">i</i></h2>
-    ${s.pricingEstimatedPct > 0 ? `<div style="margin:0 0 14px;padding:10px 14px;border-radius:10px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);font-size:0.8rem;color:var(--text-secondary);">⚠️ ~${s.pricingEstimatedPct}% of the cost above is <strong>estimated</strong> — some sessions used a model with no known pricing and were billed at the Sonnet fallback rate.</div>` : ''}
+    ${s.pricingEstimatedPct > 0 ? `<div style="margin:0 0 14px;padding:10px 14px;border-radius:10px;background:rgba(196,132,11,0.12);border:1px solid rgba(196,132,11,0.3);font-size:0.8rem;color:var(--text-secondary);">⚠️ ~${s.pricingEstimatedPct}% of the cost above is <strong>estimated</strong> — some sessions used a model with no known pricing and were billed at the Sonnet fallback rate.</div>` : ''}
     <div class="hero-stats">
       <div class="hero-stats-left">
         <div class="stat-card glow cost-card">
@@ -2860,12 +2916,12 @@ function renderTokenFunnel(t) {
         </div>
         <div class="funnel-bar">
           <div class="segment" style="width:${pProd}%;background:var(--accent-green);" title="Productive: ${formatTokens(t.funnel.productive)}">${parseFloat(pProd) > 8 ? pProd + '% Shipped' : ''}</div>
-          <div class="segment" style="width:${pExpl}%;background:rgba(59,130,246,0.4);" title="Exploratory: ${formatTokens(t.funnel.exploratory)}">${parseFloat(pExpl) > 8 ? pExpl + '% Idle' : ''}</div>
+          <div class="segment" style="width:${pExpl}%;background:rgba(57,135,229,0.4);" title="Exploratory: ${formatTokens(t.funnel.exploratory)}">${parseFloat(pExpl) > 8 ? pExpl + '% Idle' : ''}</div>
           <div class="segment ${wasteHigh ? 'waste-pulse' : ''}" style="width:${pOrph}%;background:var(--accent-red);" title="WASTED: ${formatTokens(t.funnel.orphaned)}">${parseFloat(pOrph) > 5 ? pOrph + '% WASTED' : ''}</div>
         </div>
         <div class="funnel-legend">
           <span><span class="dot" style="background:var(--accent-green);"></span>Productive (${pProd}%) — led to commits</span>
-          <span><span class="dot" style="background:rgba(59,130,246,0.4);"></span>Exploratory (${pExpl}%) — short sessions, no commits</span>
+          <span><span class="dot" style="background:rgba(57,135,229,0.4);"></span>Exploratory (${pExpl}%) — short sessions, no commits</span>
           <span><span class="dot" style="background:var(--accent-red);"></span>WASTED (${pOrph}%) — long sessions, zero output</span>
         </div>
       </div>
@@ -2882,7 +2938,7 @@ function renderAutonomySection(am) {
   const deg = Math.round((s / 100) * 360);
 
   // Glow color map
-  const glowMap = { A: 'rgba(34,211,168,0.08)', B: 'rgba(59,130,246,0.08)', C: 'rgba(245,158,11,0.08)', D: 'rgba(240,136,62,0.08)', F: 'rgba(239,68,68,0.08)' };
+  const glowMap = { A: 'rgba(46,158,79,0.08)', B: 'rgba(57,135,229,0.08)', C: 'rgba(196,132,11,0.08)', D: 'rgba(240,136,62,0.08)', F: 'rgba(230,103,103,0.08)' };
 
   // Velocity bar: lower is better, cap at 100 steps
   const velPct = am.commitVelocity !== null ? Math.max(0, 100 - am.commitVelocity) : 0;
@@ -3133,120 +3189,118 @@ function formatDateRange(startIso, endIso) {
 }
 
 function initCharts() {
-  const isLight = getTheme() === 'light';
-  Chart.defaults.color = isLight ? '#475569' : '#94a3b8';
-  Chart.defaults.borderColor = isLight ? '#cbd5e1' : '#1f2d3d';
-  Chart.defaults.font.family = "'DM Sans', sans-serif";
-  Chart.defaults.plugins.tooltip.backgroundColor = isLight ? 'rgba(15, 23, 42, 0.92)' : 'rgba(10, 14, 23, 0.95)';
-  Chart.defaults.plugins.tooltip.borderColor = isLight ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.08)';
+  const T = chartTokens();
+  const monoFont = { family: "'IBM Plex Mono', monospace", size: 10 };
+  const bodyFont = { family: "'Instrument Sans', sans-serif", size: 11 };
+
+  Chart.defaults.color = T.muted;
+  Chart.defaults.borderColor = T.grid;
+  Chart.defaults.font.family = "'Instrument Sans', sans-serif";
+  Chart.defaults.plugins.tooltip.backgroundColor = cssVar('--tooltip-bg');
+  Chart.defaults.plugins.tooltip.borderColor = cssVar('--tooltip-border');
   Chart.defaults.plugins.tooltip.borderWidth = 1;
   Chart.defaults.plugins.tooltip.cornerRadius = 8;
-  Chart.defaults.plugins.tooltip.titleFont = { family: "'JetBrains Mono', monospace", size: 12, weight: '600' };
-  Chart.defaults.plugins.tooltip.bodyFont = { family: "'DM Sans', sans-serif", size: 12 };
+  Chart.defaults.plugins.tooltip.titleFont = { ...monoFont, size: 11, weight: '600' };
+  Chart.defaults.plugins.tooltip.bodyFont = { ...bodyFont, size: 12 };
   Chart.defaults.plugins.tooltip.padding = { top: 10, right: 14, bottom: 10, left: 14 };
+  Chart.defaults.plugins.legend.labels.usePointStyle = true;
+  Chart.defaults.plugins.legend.labels.pointStyle = 'rectRounded';
+  Chart.defaults.plugins.legend.labels.boxWidth = 9;
+  Chart.defaults.plugins.legend.labels.boxHeight = 9;
+  Chart.defaults.plugins.legend.labels.padding = 16;
+  Chart.defaults.plugins.legend.labels.font = bodyFont;
 
-  // Token Burn Rate chart
+  const dateLabel = d => new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const axisTitle = text => ({ display: true, text, color: T.muted, font: { ...monoFont, size: 9 } });
+
+  // Token Burn Rate — stacked daily bars, one axis. (Cumulative overlay was a
+  // second-axis anti-pattern; the "Split view" toggle covers per-type reading.)
   const dailyTokens = DATA.daily;
-  let cumulative = 0;
-  const cumulativeData = dailyTokens.map(d => { cumulative += (d.totalTokens || 0); return cumulative; });
-
   tokenBurnChart = new Chart(document.getElementById('chart-token-burn'), {
     type: 'bar',
     data: {
-      labels: dailyTokens.map(d => new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })),
+      labels: dailyTokens.map(dateLabel),
       datasets: [
-        {
-          label: 'Input',
-          data: dailyTokens.map(d => d.inputTokens || 0),
-          backgroundColor: 'rgba(59, 130, 246, 0.8)',
-          stack: 'tokens',
-          borderRadius: 2,
-        },
-        {
-          label: 'Output',
-          data: dailyTokens.map(d => d.outputTokens || 0),
-          backgroundColor: 'rgba(168, 85, 247, 0.8)',
-          stack: 'tokens',
-          borderRadius: 2,
-        },
-        {
-          label: 'Cache Read',
-          data: dailyTokens.map(d => d.cacheReadTokens || 0),
-          backgroundColor: 'rgba(6, 182, 212, 0.6)',
-          stack: 'tokens',
-          borderRadius: 2,
-        },
-        {
-          label: 'Cumulative',
-          data: cumulativeData,
-          type: 'line',
-          borderColor: '#f59e0b',
-          borderDash: [5, 5],
-          pointRadius: 0,
-          fill: false,
-          yAxisID: 'y1',
-        },
-      ],
+        { label: 'Input', data: dailyTokens.map(d => d.inputTokens || 0), backgroundColor: withAlpha(T.blue, 0.9) },
+        { label: 'Output', data: dailyTokens.map(d => d.outputTokens || 0), backgroundColor: withAlpha(T.purple, 0.9) },
+        { label: 'Cache Read', data: dailyTokens.map(d => d.cacheReadTokens || 0), backgroundColor: withAlpha(T.cyan, 0.75) },
+      ].map(ds => ({
+        ...ds,
+        stack: 'tokens',
+        borderColor: T.card,       // 2px spacer between stacked segments
+        borderWidth: 1,
+        borderRadius: 2,
+        borderSkipped: false,
+        barPercentage: 0.72,
+        categoryPercentage: 0.86,
+        maxBarThickness: 56,
+      })),
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'top' },
+        legend: { position: 'top', align: 'end' },
         tooltip: {
           callbacks: {
-            label: ctx => {
-              const val = ctx.parsed.y;
-              return ` ${ctx.dataset.label}: ${formatTokens(val)} tokens`;
-            },
+            label: ctx => ` ${ctx.dataset.label}: ${formatTokens(ctx.parsed.y)} tokens`,
+            footer: items => 'Day total: ' + formatTokens(items.reduce((a, i) => a + i.parsed.y, 0)),
           },
         },
       },
       scales: {
-        x: { stacked: true },
+        x: { stacked: true, grid: { display: false }, border: { color: T.grid }, ticks: { font: monoFont, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
         y: {
           stacked: true,
           position: 'left',
-          title: { display: true, text: 'Tokens / Day' },
-          ticks: { callback: v => formatTokens(v) },
-        },
-        y1: {
-          position: 'right',
-          title: { display: true, text: 'Cumulative' },
-          grid: { drawOnChartArea: false },
-          ticks: { callback: v => formatTokens(v) },
+          title: axisTitle('TOKENS / DAY'),
+          grid: { color: T.grid },
+          border: { display: false },
+          ticks: { font: monoFont, callback: v => formatTokens(v), maxTicksLimit: 6 },
         },
       },
     },
   });
 
-  // Timeline chart
+  // Cost vs Output — two synced lanes sharing the x axis (small multiples in
+  // one canvas), never a dual overlaid axis.
   const daily = DATA.daily;
   const avgCost = daily.reduce((s, d) => s + d.cost, 0) / (daily.length || 1);
   timelineChart = new Chart(document.getElementById('chart-timeline'), {
     type: 'line',
     data: {
-      labels: daily.map(d => new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })),
+      labels: daily.map(dateLabel),
       datasets: [
         {
           label: 'Cost ($)',
           data: daily.map(d => d.cost),
-          borderColor: '#f59e0b',
-          backgroundColor: 'rgba(245,158,11,0.1)',
+          borderColor: T.orange,
+          backgroundColor: withAlpha(T.orange, 0.09),
           fill: true,
-          tension: 0.3,
-          yAxisID: 'y',
-          pointRadius: daily.map(d => d.cost > avgCost * 3 ? 6 : 3),
+          tension: 0.35,
+          borderWidth: 2,
+          yAxisID: 'y1',
+          pointRadius: daily.length < 3 ? 4 : daily.map(d => d.cost > avgCost * 3 ? 4 : 0),
+          pointBackgroundColor: T.orange,
+          pointBorderColor: T.card,
+          pointBorderWidth: 1.5,
+          pointHoverRadius: 5,
         },
         {
           label: 'Lines Added',
           data: daily.map(d => d.linesAdded),
-          borderColor: '#22d3a8',
-          backgroundColor: 'rgba(34,211,168,0.1)',
+          borderColor: T.green,
+          backgroundColor: withAlpha(T.green, 0.09),
           fill: true,
-          tension: 0.3,
-          yAxisID: 'y1',
+          tension: 0.35,
+          borderWidth: 2,
+          yAxisID: 'y',
+          pointRadius: daily.length < 3 ? 4 : 0,
+          pointHoverRadius: 5,
+          pointBackgroundColor: T.green,
+          pointBorderColor: T.card,
+          pointBorderWidth: 1.5,
         },
       ],
     },
@@ -3255,42 +3309,31 @@ function initCharts() {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'top' },
+        legend: { position: 'top', align: 'end' },
         tooltip: {
           callbacks: {
             title: ctx => ctx[0].label,
+            label: ctx => ctx.datasetIndex === 0
+              ? ` Cost: $${ctx.parsed.y.toFixed(2)}`
+              : ` Lines added: ${ctx.parsed.y.toLocaleString()}`,
             afterBody: ctx => {
-              const idx = ctx[0].dataIndex;
-              const day = DATA.daily[idx];
-              return 'Sessions: ' + (day.sessions || 0);
+              const day = DATA.daily[ctx[0].dataIndex];
+              return 'Sessions: ' + (day.sessions || 0) + ' · Commits: ' + (day.commits || 0);
             },
           },
         },
       },
       scales: {
+        x: { grid: { display: false }, border: { color: T.grid }, ticks: { font: monoFont, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
         y: {
           type: 'linear', position: 'left',
-          title: { display: true, text: 'Cost ($)' },
+          stack: 'roi', stackWeight: 1,
+          beginAtZero: true,
+          title: axisTitle('LINES ADDED'),
+          grid: { color: T.grid },
+          border: { display: false },
           ticks: {
-            callback: function(v) {
-              if (this.type === 'logarithmic') {
-                const nice = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
-                return nice.includes(v) ? '$' + v : '';
-              }
-              return '$' + v;
-            },
-          },
-          afterBuildTicks: function(axis) {
-            if (axis.type === 'logarithmic') {
-              axis.min = 0.5;
-            }
-          },
-        },
-        y1: {
-          type: 'linear', position: 'right',
-          title: { display: true, text: 'Lines Added' },
-          grid: { drawOnChartArea: false },
-          ticks: {
+            font: monoFont, maxTicksLimit: 5,
             callback: function(v) {
               if (this.type === 'logarithmic') {
                 const nice = [1, 5, 10, 50, 100, 500, 1000, 5000];
@@ -3300,20 +3343,38 @@ function initCharts() {
             },
           },
           afterBuildTicks: function(axis) {
-            if (axis.type === 'logarithmic') {
-              axis.min = 1;
-            }
+            if (axis.type === 'logarithmic') axis.min = 1;
+          },
+        },
+        y1: {
+          type: 'linear', position: 'left',
+          stack: 'roi', stackWeight: 1.1, offset: true,
+          beginAtZero: true,
+          title: axisTitle('COST ($)'),
+          grid: { color: T.grid },
+          border: { display: false },
+          ticks: {
+            font: monoFont, maxTicksLimit: 5,
+            callback: function(v) {
+              if (this.type === 'logarithmic') {
+                const nice = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+                return nice.includes(v) ? '$' + v : '';
+              }
+              return '$' + v;
+            },
+          },
+          afterBuildTicks: function(axis) {
+            if (axis.type === 'logarithmic') axis.min = 0.5;
           },
         },
       },
     },
   });
 
-  // Model doughnut
+  // Model doughnut — thin ring, 2px card-colored spacers between segments
   const models = DATA.modelBreakdown;
   const modelLabels = Object.keys(models).filter(k => models[k].cost > 0);
-  const modelColors = { opus: '#a855f7', sonnet: '#3b82f6', haiku: '#22d3a8', fable: '#ec4899', unknown: '#94a3b8' };
-  const modelTotalCost = modelLabels.reduce((s, m) => s + models[m].cost, 0);
+  const modelColors = { opus: T.purple, sonnet: T.blue, haiku: T.green, fable: T.pink, unknown: T.muted };
   new Chart(document.getElementById('chart-models'), {
     type: 'doughnut',
     data: {
@@ -3323,13 +3384,16 @@ function initCharts() {
       })(),
       datasets: [{
         data: modelLabels.map(m => models[m].cost),
-        backgroundColor: modelLabels.map(m => modelColors[m] || '#94a3b8'),
-        borderWidth: 0,
+        backgroundColor: modelLabels.map(m => modelColors[m] || T.muted),
+        borderColor: T.card,
+        borderWidth: 2,
+        hoverOffset: 8,
       }],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      cutout: '68%',
       plugins: {
         legend: { position: 'bottom' },
         tooltip: {
@@ -3366,7 +3430,7 @@ function initCharts() {
     modelNote.innerHTML = 'ℹ️ Claude Fable 5 / Mythos 5 is generally available — Anthropic restored access on Jul 1, 2026 after a temporary suspension. Costs shown use the $10 / $50 per-MTok pricing — <a href="https://platform.claude.com/docs/en/about-claude/models/introducing-claude-fable-5" target="_blank" rel="noopener" style="color:var(--accent-blue);">see Anthropic\'s Claude Fable 5 documentation ↗</a>.';
   }
 
-  // Tool usage horizontal bar
+  // Tool usage — one entity type, one hue (count is magnitude, not identity)
   const tools = DATA.toolBreakdown;
   const toolEntries = Object.entries(tools).sort((a, b) => b[1] - a[1]).slice(0, 10);
   new Chart(document.getElementById('chart-tools'), {
@@ -3375,12 +3439,11 @@ function initCharts() {
       labels: toolEntries.map(([t]) => t),
       datasets: [{
         data: toolEntries.map(([, c]) => c),
-        backgroundColor: toolEntries.map((_, i) => {
-          const hue = 200 + i * 15;
-          return `hsl(${hue}, 60%, 55%)`;
-        }),
+        backgroundColor: withAlpha(T.blue, 0.85),
+        hoverBackgroundColor: T.blue,
         borderWidth: 0,
-        borderRadius: 4,
+        borderRadius: 3,
+        barPercentage: 0.7,
       }],
     },
     options: {
@@ -3388,65 +3451,66 @@ function initCharts() {
       responsive: true,
       maintainAspectRatio: false,
       plugins: { legend: { display: false } },
-      scales: { x: { grid: { display: false } } },
+      scales: {
+        x: { grid: { color: T.grid }, border: { display: false }, ticks: { font: monoFont, maxTicksLimit: 6 } },
+        y: { grid: { display: false }, border: { color: T.grid }, ticks: { font: { ...monoFont, size: 10.5 } } },
+      },
     },
   });
 
-  // Cost per Commit by Model
+  // Cost per Commit by Model — single measure, single axis; commit volume
+  // rides in the category label and tooltip instead of a second axis.
   const modelEff = DATA.modelBreakdown;
   const modelEffLabels = Object.keys(modelEff).filter(k => modelEff[k].commits > 0);
-  const modelEffColors = { opus: '#a855f7', sonnet: '#3b82f6', haiku: '#22d3a8', unknown: '#94a3b8' };
   new Chart(document.getElementById('chart-model-efficiency'), {
     type: 'bar',
     data: {
-      labels: modelEffLabels.map(m => m.charAt(0).toUpperCase() + m.slice(1) + ' ($' + modelEff[m].cost.toFixed(0) + ' total)'),
-      datasets: [
-        {
-          label: 'Avg $/Commit',
-          data: modelEffLabels.map(m => modelEff[m].avgCostPerCommit),
-          backgroundColor: modelEffLabels.map(m => modelEffColors[m] || '#94a3b8'),
-          borderRadius: 4,
-          yAxisID: 'y',
-        },
-        {
-          label: 'Commits',
-          data: modelEffLabels.map(m => Math.round(modelEff[m].commits)),
-          backgroundColor: modelEffLabels.map(m => {
-            const c = modelEffColors[m] || '#94a3b8';
-            return c + '40';
-          }),
-          borderRadius: 4,
-          yAxisID: 'y1',
-        },
-      ],
+      labels: modelEffLabels.map(m => [
+        m.charAt(0).toUpperCase() + m.slice(1),
+        Math.round(modelEff[m].commits) + ' commits',
+      ]),
+      datasets: [{
+        label: 'Avg $/Commit',
+        data: modelEffLabels.map(m => modelEff[m].avgCostPerCommit),
+        backgroundColor: modelEffLabels.map(m => withAlpha(modelColors[m] || T.muted, 0.85)),
+        hoverBackgroundColor: modelEffLabels.map(m => modelColors[m] || T.muted),
+        borderRadius: 3,
+        barPercentage: 0.55,
+      }],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'top' },
+        legend: { display: false },
         tooltip: {
           callbacks: {
-            label: ctx => {
-              if (ctx.datasetIndex === 0) return ` Avg $/Commit: $${ctx.parsed.y.toFixed(2)}`;
-              return ` Commits: ${ctx.parsed.y}`;
+            title: items => {
+              const l = items[0].label.split(',');
+              return l[0];
             },
+            label: ctx => ` Avg $/Commit: $${ctx.parsed.y.toFixed(2)}`,
             afterBody: (items) => {
               const idx = items[0].dataIndex;
               const m = modelEffLabels[idx];
               const d = modelEff[m];
-              const lines = [];
-              lines.push(`Sessions: ${d.sessions}`);
-              lines.push(`Total: $${d.cost.toFixed(2)} | ${formatTokens(d.tokens)} tokens`);
-              if (d.tokensPerCommit) lines.push(`${formatTokens(d.tokensPerCommit)} tokens/commit`);
-              return lines;
+              return [
+                `Commits: ${Math.round(d.commits)} · Sessions: ${d.sessions}`,
+                `Total: $${d.cost.toFixed(2)} | ${formatTokens(d.tokens)} tokens`,
+                d.tokensPerCommit ? `${formatTokens(d.tokensPerCommit)} tokens/commit` : '',
+              ].filter(Boolean);
             },
           },
         },
       },
       scales: {
-        y: { type: 'linear', position: 'left', title: { display: true, text: 'Avg $/Commit' }, ticks: { callback: v => '$' + v.toFixed(1) } },
-        y1: { type: 'linear', position: 'right', title: { display: true, text: 'Commits' }, grid: { drawOnChartArea: false } },
+        x: { grid: { display: false }, border: { color: T.grid }, ticks: { font: monoFont } },
+        y: {
+          title: axisTitle('AVG $ / COMMIT'),
+          grid: { color: T.grid },
+          border: { display: false },
+          ticks: { font: monoFont, maxTicksLimit: 6, callback: v => '$' + Number(v).toFixed(1) },
+        },
       },
     },
   });
@@ -3457,6 +3521,7 @@ function initHeatmap() {
   if (!container) return;
   const heatmap = DATA.heatmap.commits;
   const maxVal = Math.max(1, ...heatmap.flat());
+  const green = cssVar('--accent-green');
 
   let html = '<div class="heatmap-grid">';
   for (let day = 0; day < 7; day++) {
@@ -3464,7 +3529,7 @@ function initHeatmap() {
     for (let hour = 0; hour < 24; hour++) {
       const val = heatmap[day][hour];
       const intensity = val / maxVal;
-      const bg = val === 0 ? 'var(--bg-hover)' : `rgba(34,211,168,${0.2 + intensity * 0.8})`;
+      const bg = val === 0 ? 'var(--bg-hover)' : withAlpha(green, 0.18 + intensity * 0.82);
       html += `<div class="heatmap-cell" style="background:${bg};" title="${DAY_LABELS[day]} ${hour}:00 — ${val} commits"></div>`;
     }
   }
@@ -3481,7 +3546,7 @@ function initHeatmap() {
   html += '<span>Fewer</span><div style="display:flex;gap:1px;">';
   const legendSteps = [0.2, 0.4, 0.6, 0.8, 1.0];
   for (const step of legendSteps) {
-    html += `<div style="width:14px;height:14px;border-radius:3px;background:rgba(34,211,168,${0.2 + step * 0.8});"></div>`;
+    html += `<div style="width:14px;height:14px;border-radius:3px;background:${withAlpha(green, 0.18 + step * 0.82)};"></div>`;
   }
   html += '</div><span>More commits</span></div>';
 
@@ -3563,81 +3628,38 @@ window.toggleTimelineScale = function() {
 window.toggleTokenBurnPercent = function() {
   if (!tokenBurnChart) return;
   tokenBurnPercentMode = !tokenBurnPercentMode;
-  const dailyTokens = DATA.daily;
-  if (tokenBurnPercentMode) {
-    // Switch to split line view — each token type gets its own line
-    tokenBurnChart.data.datasets[0].type = 'line';
-    tokenBurnChart.data.datasets[0].borderColor = 'rgba(59, 130, 246, 1)';
-    tokenBurnChart.data.datasets[0].backgroundColor = 'rgba(59, 130, 246, 0.1)';
-    tokenBurnChart.data.datasets[0].fill = true;
-    tokenBurnChart.data.datasets[0].stack = undefined;
-    tokenBurnChart.data.datasets[0].borderWidth = 2;
-    tokenBurnChart.data.datasets[0].pointRadius = 2;
-    tokenBurnChart.data.datasets[0].tension = 0.3;
-
-    tokenBurnChart.data.datasets[1].type = 'line';
-    tokenBurnChart.data.datasets[1].borderColor = 'rgba(168, 85, 247, 1)';
-    tokenBurnChart.data.datasets[1].backgroundColor = 'rgba(168, 85, 247, 0.1)';
-    tokenBurnChart.data.datasets[1].fill = true;
-    tokenBurnChart.data.datasets[1].stack = undefined;
-    tokenBurnChart.data.datasets[1].borderWidth = 2;
-    tokenBurnChart.data.datasets[1].pointRadius = 2;
-    tokenBurnChart.data.datasets[1].tension = 0.3;
-
-    tokenBurnChart.data.datasets[2].type = 'line';
-    tokenBurnChart.data.datasets[2].borderColor = 'rgba(6, 182, 212, 1)';
-    tokenBurnChart.data.datasets[2].backgroundColor = 'rgba(6, 182, 212, 0.1)';
-    tokenBurnChart.data.datasets[2].fill = true;
-    tokenBurnChart.data.datasets[2].stack = undefined;
-    tokenBurnChart.data.datasets[2].borderWidth = 2;
-    tokenBurnChart.data.datasets[2].pointRadius = 2;
-    tokenBurnChart.data.datasets[2].tension = 0.3;
-
-    tokenBurnChart.data.datasets[3].hidden = true;
-    tokenBurnChart.options.scales.x.stacked = false;
-    tokenBurnChart.options.scales.y.stacked = false;
-    tokenBurnChart.options.scales.y.type = 'logarithmic';
-    tokenBurnChart.options.scales.y.title.text = 'Tokens / Day (log)';
-    tokenBurnChart.options.scales.y1.display = false;
-  } else {
-    // Restore stacked bar view
-    tokenBurnChart.data.datasets[0].type = 'bar';
-    tokenBurnChart.data.datasets[0].backgroundColor = 'rgba(59, 130, 246, 0.8)';
-    tokenBurnChart.data.datasets[0].stack = 'tokens';
-    tokenBurnChart.data.datasets[0].borderRadius = 2;
-    delete tokenBurnChart.data.datasets[0].borderColor;
-    delete tokenBurnChart.data.datasets[0].fill;
-    delete tokenBurnChart.data.datasets[0].borderWidth;
-    delete tokenBurnChart.data.datasets[0].pointRadius;
-    delete tokenBurnChart.data.datasets[0].tension;
-
-    tokenBurnChart.data.datasets[1].type = 'bar';
-    tokenBurnChart.data.datasets[1].backgroundColor = 'rgba(168, 85, 247, 0.8)';
-    tokenBurnChart.data.datasets[1].stack = 'tokens';
-    tokenBurnChart.data.datasets[1].borderRadius = 2;
-    delete tokenBurnChart.data.datasets[1].borderColor;
-    delete tokenBurnChart.data.datasets[1].fill;
-    delete tokenBurnChart.data.datasets[1].borderWidth;
-    delete tokenBurnChart.data.datasets[1].pointRadius;
-    delete tokenBurnChart.data.datasets[1].tension;
-
-    tokenBurnChart.data.datasets[2].type = 'bar';
-    tokenBurnChart.data.datasets[2].backgroundColor = 'rgba(6, 182, 212, 0.6)';
-    tokenBurnChart.data.datasets[2].stack = 'tokens';
-    tokenBurnChart.data.datasets[2].borderRadius = 2;
-    delete tokenBurnChart.data.datasets[2].borderColor;
-    delete tokenBurnChart.data.datasets[2].fill;
-    delete tokenBurnChart.data.datasets[2].borderWidth;
-    delete tokenBurnChart.data.datasets[2].pointRadius;
-    delete tokenBurnChart.data.datasets[2].tension;
-
-    tokenBurnChart.data.datasets[3].hidden = false;
-    tokenBurnChart.options.scales.x.stacked = true;
-    tokenBurnChart.options.scales.y.stacked = true;
-    tokenBurnChart.options.scales.y.type = 'linear';
-    tokenBurnChart.options.scales.y.title.text = 'Tokens / Day';
-    tokenBurnChart.options.scales.y1.display = true;
-  }
+  const T = chartTokens();
+  const lineColors = [T.blue, T.purple, T.cyan];
+  tokenBurnChart.data.datasets.forEach((ds, i) => {
+    if (tokenBurnPercentMode) {
+      // Split view — each token type as its own line on a log axis
+      ds.type = 'line';
+      ds.borderColor = lineColors[i];
+      ds.backgroundColor = withAlpha(lineColors[i], 0.08);
+      ds.fill = true;
+      ds.stack = undefined;
+      ds.borderWidth = 2;
+      ds.pointRadius = 2;
+      ds.pointBackgroundColor = lineColors[i];
+      ds.tension = 0.35;
+    } else {
+      // Restore stacked bar view
+      ds.type = 'bar';
+      ds.backgroundColor = withAlpha(lineColors[i], i === 2 ? 0.75 : 0.9);
+      ds.stack = 'tokens';
+      ds.borderColor = T.card;
+      ds.borderWidth = 1;
+      ds.borderRadius = 2;
+      ds.borderSkipped = false;
+      delete ds.fill;
+      delete ds.pointRadius;
+      delete ds.tension;
+    }
+  });
+  tokenBurnChart.options.scales.x.stacked = !tokenBurnPercentMode;
+  tokenBurnChart.options.scales.y.stacked = !tokenBurnPercentMode;
+  tokenBurnChart.options.scales.y.type = tokenBurnPercentMode ? 'logarithmic' : 'linear';
+  tokenBurnChart.options.scales.y.title.text = tokenBurnPercentMode ? 'TOKENS / DAY (LOG)' : 'TOKENS / DAY';
   tokenBurnChart.update();
   const btn = document.querySelector('#chart-token-burn').closest('.chart-card').querySelector('.scale-toggle');
   if (btn) btn.textContent = tokenBurnPercentMode ? 'Stacked' : 'Split view';
@@ -3645,29 +3667,29 @@ window.toggleTokenBurnPercent = function() {
 
 /* ── Share Report Card ─────────────────────────── */
 
-const GRADE_HEX = { A: '#22d3a8', B: '#3b82f6', C: '#f59e0b', D: '#f0883e', F: '#ef4444' };
-const INSIGHT_COLORS = { warning: '#f59e0b', success: '#22d3a8', info: '#3b82f6', tip: '#a855f7' };
+const GRADE_HEX = { A: '#2E9E4F', B: '#3987E5', C: '#C4840B', D: '#D95926', F: '#E66767' };
+const INSIGHT_COLORS = { warning: '#C4840B', success: '#2E9E4F', info: '#3987E5', tip: '#9085E9' };
 
 const SHARE_THEME = {
   dark: {
-    bg1: '#0a0e17', bg2: '#111827',
-    orb1: 'rgba(59, 130, 246, 0.06)', orb2: 'rgba(168, 85, 247, 0.05)', orb3: 'rgba(34, 211, 168, 0.04)',
+    bg1: '#0C0B09', bg2: '#171410',
+    orb1: 'rgba(57, 135, 229, 0.06)', orb2: 'rgba(144, 133, 233, 0.05)', orb3: 'rgba(46, 158, 79, 0.04)',
     border: 'rgba(255,255,255,0.06)',
     glassBg: 'rgba(255,255,255,0.03)', glassBorder: 'rgba(255,255,255,0.06)',
-    textPrimary: '#f0f4f8', textSecondary: '#94a3b8', textMuted: '#64748b', textDim: '#475569',
+    textPrimary: '#F2EFE8', textSecondary: '#A9A296', textMuted: '#746D60', textDim: '#5C564B',
     barTrack: 'rgba(255,255,255,0.06)', heatmapEmpty: 'rgba(255,255,255,0.04)',
     separator: 'rgba(255,255,255,0.06)', separatorLight: 'rgba(255,255,255,0.04)',
-    insightText: '#cbd5e1',
+    insightText: '#CFC9BD',
   },
   light: {
-    bg1: '#f8fafc', bg2: '#e2e8f0',
-    orb1: 'rgba(59, 130, 246, 0.08)', orb2: 'rgba(168, 85, 247, 0.06)', orb3: 'rgba(34, 211, 168, 0.05)',
+    bg1: '#F6F4EF', bg2: '#E8E3D8',
+    orb1: 'rgba(57, 135, 229, 0.08)', orb2: 'rgba(144, 133, 233, 0.06)', orb3: 'rgba(46, 158, 79, 0.05)',
     border: 'rgba(0,0,0,0.08)',
     glassBg: 'rgba(0,0,0,0.03)', glassBorder: 'rgba(0,0,0,0.08)',
-    textPrimary: '#0f172a', textSecondary: '#475569', textMuted: '#64748b', textDim: '#94a3b8',
+    textPrimary: '#1B1811', textSecondary: '#59534A', textMuted: '#8B8375', textDim: '#A69E8F',
     barTrack: 'rgba(0,0,0,0.06)', heatmapEmpty: 'rgba(0,0,0,0.05)',
     separator: 'rgba(0,0,0,0.08)', separatorLight: 'rgba(0,0,0,0.05)',
-    insightText: '#334155',
+    insightText: '#4A453C',
   }
 };
 
@@ -3710,13 +3732,13 @@ function drawGradeCircle(ctx, cx, cy, r, grade, th) {
   ctx.lineCap = 'round';
   ctx.stroke();
   // Grade letter
-  ctx.font = 'bold 36px "JetBrains Mono", monospace';
+  ctx.font = 'bold 36px "IBM Plex Mono", monospace';
   ctx.fillStyle = color;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(grade, cx, cy);
   // Label below
-  ctx.font = '600 10px "JetBrains Mono", monospace';
+  ctx.font = '600 10px "IBM Plex Mono", monospace';
   ctx.fillStyle = th.textMuted;
   ctx.fillText('ROI GRADE', cx, cy + r + 18);
   ctx.textAlign = 'left';
@@ -3732,11 +3754,11 @@ function drawStatBox(ctx, x, y, w, h, value, label, accentColor, th) {
   ctx.lineWidth = 1;
   ctx.stroke();
   // Value
-  ctx.font = 'bold 20px "JetBrains Mono", monospace';
+  ctx.font = 'bold 20px "IBM Plex Mono", monospace';
   ctx.fillStyle = accentColor;
   ctx.fillText(value, x + 14, y + 28);
   // Label
-  ctx.font = '400 11px "DM Sans", sans-serif';
+  ctx.font = '400 11px "Instrument Sans", sans-serif';
   ctx.fillStyle = th.textMuted;
   ctx.fillText(label, x + 14, y + h - 10);
 }
@@ -3747,7 +3769,7 @@ function drawProgressBar(ctx, x, y, w, label, value, suffix, color, th) {
   const valueW = 50;
   const barW = w - labelW - valueW - 16;
   // Label
-  ctx.font = '400 12px "DM Sans", sans-serif';
+  ctx.font = '400 12px "Instrument Sans", sans-serif';
   ctx.fillStyle = th.textSecondary;
   ctx.fillText(label, x, y + 10);
   // Bar track
@@ -3763,7 +3785,7 @@ function drawProgressBar(ctx, x, y, w, label, value, suffix, color, th) {
     ctx.fill();
   }
   // Value text
-  ctx.font = '600 12px "JetBrains Mono", monospace';
+  ctx.font = '600 12px "IBM Plex Mono", monospace';
   ctx.fillStyle = color;
   ctx.textAlign = 'right';
   ctx.fillText(Math.round(value) + suffix, x + w, y + 11);
@@ -3783,7 +3805,7 @@ function drawMiniHeatmap(ctx, x, y, w, heatmapData, th, isLight) {
 
   for (let day = 0; day < rows; day++) {
     // Day label
-    ctx.font = '500 8px "JetBrains Mono", monospace';
+    ctx.font = '500 8px "IBM Plex Mono", monospace';
     ctx.fillStyle = th.textDim;
     ctx.fillText(dayLabels[day], x, y + day * (cellH + gap) + cellH - 1);
     for (let hour = 0; hour < cols; hour++) {
@@ -3796,9 +3818,9 @@ function drawMiniHeatmap(ctx, x, y, w, heatmapData, th, isLight) {
       } else {
         const intensity = val / maxVal;
         if (isLight) {
-          ctx.fillStyle = `rgba(5,150,105,${0.25 + intensity * 0.75})`;
+          ctx.fillStyle = `rgba(32,129,60,${0.25 + intensity * 0.75})`;
         } else {
-          ctx.fillStyle = `rgba(34,211,168,${0.2 + intensity * 0.8})`;
+          ctx.fillStyle = `rgba(46,158,79,${0.2 + intensity * 0.8})`;
         }
       }
       ctx.fill();
@@ -3814,7 +3836,7 @@ function drawInsightRow(ctx, x, y, w, insight, th) {
   ctx.fillStyle = color;
   ctx.fill();
   // Text (truncate if needed)
-  ctx.font = '400 12px "DM Sans", sans-serif';
+  ctx.font = '400 12px "Instrument Sans", sans-serif';
   ctx.fillStyle = th.insightText;
   let text = insight.text;
   // Truncate to fit width
@@ -3867,32 +3889,32 @@ function renderShareCard(canvas) {
   const barGap = 4;
   const barBaseY = y + 26;
   drawRoundRect(ctx, barX, barBaseY - 16, barW, 16, 2);
-  ctx.fillStyle = '#e67e22';
+  ctx.fillStyle = '#C4840B';
   ctx.fill();
   drawRoundRect(ctx, barX + barW + barGap, barBaseY - 26, barW, 26, 2);
-  ctx.fillStyle = '#2ecc71';
+  ctx.fillStyle = '#2E9E4F';
   ctx.fill();
   drawRoundRect(ctx, barX + (barW + barGap) * 2, barBaseY - 20, barW, 20, 2);
-  ctx.fillStyle = '#3498db';
+  ctx.fillStyle = '#3987E5';
   ctx.fill();
   // Title text after logo
   const titleX = barX + (barW + barGap) * 3 + 8;
-  ctx.font = 'bold 28px "JetBrains Mono", monospace';
+  ctx.font = 'bold 28px "IBM Plex Mono", monospace';
   const titleGrad = ctx.createLinearGradient(titleX, y, titleX + 240, y + 28);
   if (isLight) {
     titleGrad.addColorStop(0, '#2563eb');
     titleGrad.addColorStop(0.5, '#7c3aed');
     titleGrad.addColorStop(1, '#0891b2');
   } else {
-    titleGrad.addColorStop(0, '#3b82f6');
-    titleGrad.addColorStop(0.5, '#a855f7');
-    titleGrad.addColorStop(1, '#06b6d4');
+    titleGrad.addColorStop(0, '#3987E5');
+    titleGrad.addColorStop(0.5, '#9085E9');
+    titleGrad.addColorStop(1, '#1FA97C');
   }
   ctx.fillStyle = titleGrad;
   ctx.fillText('Codelens AI', titleX, y + 26);
 
   y += 44;
-  ctx.font = '300 13px "DM Sans", sans-serif';
+  ctx.font = '300 13px "Instrument Sans", sans-serif';
   ctx.fillStyle = th.textMuted;
   ctx.fillText('AI Coding Report Card', 32, y);
 
@@ -3904,7 +3926,7 @@ function renderShareCard(canvas) {
   const dateLabel = (d.meta.startDate && d.meta.endDate)
     ? fmtDate(d.meta.startDate) + '  –  ' + fmtDate(d.meta.endDate)
     : 'Last ' + d.meta.daysAnalyzed + ' days';
-  ctx.font = '500 11px "JetBrains Mono", monospace';
+  ctx.font = '500 11px "IBM Plex Mono", monospace';
   ctx.fillStyle = th.textDim;
   ctx.fillText(dateLabel, 32, y);
 
@@ -3926,10 +3948,10 @@ function renderShareCard(canvas) {
   const boxGap = 12;
   const boxStartX = 160;
   // Deeper accent colors for light theme so they pop against white bg
-  const cOrange = isLight ? '#d97706' : '#f59e0b';
-  const cGreen  = isLight ? '#059669' : '#22d3a8';
-  const cBlue   = isLight ? '#2563eb' : '#3b82f6';
-  const cPurple = isLight ? '#7c3aed' : '#a855f7';
+  const cOrange = isLight ? '#d97706' : '#C4840B';
+  const cGreen  = isLight ? '#059669' : '#2E9E4F';
+  const cBlue   = isLight ? '#2563eb' : '#3987E5';
+  const cPurple = isLight ? '#7c3aed' : '#9085E9';
   drawStatBox(ctx, boxStartX, y, boxW, boxH, '$' + s.totalCost.toFixed(2), 'Total Spend', cOrange, th);
   drawStatBox(ctx, boxStartX + boxW + boxGap, y, boxW, boxH, String(s.totalCommits), 'Commits Shipped', cGreen, th);
   drawStatBox(ctx, boxStartX, y + boxH + boxGap, boxW, boxH,
@@ -3939,7 +3961,7 @@ function renderShareCard(canvas) {
 
   // ── Efficiency Bars ──
   y += (boxH + boxGap) * 2 + 24;
-  ctx.font = '600 10px "JetBrains Mono", monospace';
+  ctx.font = '600 10px "IBM Plex Mono", monospace';
   ctx.fillStyle = th.textDim;
   ctx.letterSpacing = '0.08em';
   ctx.fillText('EFFICIENCY', 32, y);
@@ -3947,9 +3969,9 @@ function renderShareCard(canvas) {
   y += 18;
 
   // Each bar gets its own accent color for visual variety
-  const effColor = isLight ? '#0d9488' : '#06b6d4';    // cyan/teal
-  const cacheColor = isLight ? '#7c3aed' : '#a855f7';  // purple
-  const survColor = isLight ? '#059669' : '#22d3a8';    // green
+  const effColor = isLight ? '#0d9488' : '#1FA97C';    // cyan/teal
+  const cacheColor = isLight ? '#7c3aed' : '#9085E9';  // purple
+  const survColor = isLight ? '#059669' : '#2E9E4F';    // green
   drawProgressBar(ctx, 32, y, W - 64, 'Token Efficiency', t.tokenEfficiencyRate, '%', effColor, th);
   y += 34;
   drawProgressBar(ctx, 32, y, W - 64, 'Cache Hit Rate', t.cacheHitRate, '%', cacheColor, th);
@@ -3958,7 +3980,7 @@ function renderShareCard(canvas) {
 
   // ── Heatmap ──
   y += 40;
-  ctx.font = '600 10px "JetBrains Mono", monospace';
+  ctx.font = '600 10px "IBM Plex Mono", monospace';
   ctx.fillStyle = th.textDim;
   ctx.fillText('PRODUCTIVITY HEATMAP', 32, y);
   y += 14;
@@ -3968,7 +3990,7 @@ function renderShareCard(canvas) {
   y += 100;
   const topInsights = (d.insights || []).slice(0, 3);
   if (topInsights.length > 0) {
-    ctx.font = '600 10px "JetBrains Mono", monospace';
+    ctx.font = '600 10px "IBM Plex Mono", monospace';
     ctx.fillStyle = th.textDim;
     ctx.fillText('KEY INSIGHTS', 32, y);
     y += 14;
@@ -3979,7 +4001,7 @@ function renderShareCard(canvas) {
   }
 
   // ── Footer ──
-  ctx.font = '400 10px "DM Sans", sans-serif';
+  ctx.font = '400 10px "Instrument Sans", sans-serif';
   ctx.fillStyle = th.textDim;
   ctx.fillText('Generated by Codelens AI  ·  codelensai-dev.vercel.app', 32, H - 24);
 
