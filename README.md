@@ -156,7 +156,7 @@ Token costs are version-aware and calculated per model, accounting for the two p
 
 > **Note — Claude Sonnet 5:** Sonnet 5 launched with [introductory pricing](https://www.anthropic.com/news/claude-sonnet-5) of $2 / $10 per MTok through Aug 31, 2026, reverting to standard Sonnet-tier $3 / $15 on Sep 1, 2026. Costs are priced by the rate in effect on each usage's date, so logs stay accurate across the cutover.
 >
-> **Note — Claude Fable 5 / Mythos 5:** Anthropic [suspended access](https://www.anthropic.com/news/claude-fable-5-mythos-5) to both models on Jun 12, 2026 (stated as temporary). Pricing is retained so historical Fable 5 usage already in your session logs is costed correctly at the announced $10 / $50 per-MTok rates.
+> **Note — Claude Fable 5 / Mythos 5:** Claude Fable 5 / Mythos 5 is generally available again — Anthropic [restored access](https://platform.claude.com/docs/en/about-claude/models/introducing-claude-fable-5) on Jul 1, 2026 after a temporary suspension (Jun 12–30, 2026). The $10 / $50 per-MTok rates apply to both live and historical Fable 5 usage in your session logs.
 >
 > **Note — legacy tiers:** The 0.1× / 1.25× / 2× multipliers describe current models. Claude 3 Haiku predates them and uses Anthropic's originally-published cache rates ($0.30 write / $0.03 read), and 1-hour cache-write rates for retired tiers (e.g. Sonnet 3.7, Haiku 3) are derived at 2× input. These legacy rows are kept only to cost older session logs accurately.
 

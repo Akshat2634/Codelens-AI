@@ -3349,14 +3349,14 @@ function initCharts() {
     },
   });
 
-  // Disclaimer shown only when Fable 5 / Mythos 5 appears in the breakdown:
-  // Anthropic suspended access to both models on 2026-06-12 (stated as temporary).
+  // Note shown only when Fable 5 / Mythos 5 appears in the breakdown:
+  // Anthropic restored access to both models on 2026-07-01 after a temporary suspension.
   const modelNote = document.getElementById('model-note');
   // Only when Fable/Mythos actually appears in the chart (modelLabels = cost > 0).
   // Both fable and mythos map to the 'fable' family, so this covers either.
   if (modelNote && modelLabels.includes('fable')) {
     modelNote.style.display = 'block';
-    modelNote.innerHTML = '⚠️ Claude Fable 5 / Mythos 5 access was suspended by Anthropic on Jun 12, 2026 (stated as temporary). Costs shown use the announced $10 / $50 per-MTok pricing — <a href="https://www.anthropic.com/news/claude-fable-5-mythos-5" target="_blank" rel="noopener" style="color:var(--accent-blue);">see Anthropic\'s announcement ↗</a>.';
+    modelNote.innerHTML = 'ℹ️ Claude Fable 5 / Mythos 5 is generally available — Anthropic restored access on Jul 1, 2026 after a temporary suspension. Costs shown use the $10 / $50 per-MTok pricing — <a href="https://platform.claude.com/docs/en/about-claude/models/introducing-claude-fable-5" target="_blank" rel="noopener" style="color:var(--accent-blue);">see Anthropic\'s Claude Fable 5 documentation ↗</a>.';
   }
 
   // Tool usage horizontal bar

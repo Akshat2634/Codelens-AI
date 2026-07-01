@@ -15,11 +15,11 @@ const PRICING = {
   'opus-45':    { input: 5,     output: 25,    cacheRead: 0.50,   cacheWrite: 6.25   },
   // Opus 4.0 / 4.1 (legacy): $15 input, $75 output
   'opus-old':   { input: 15,    output: 75,    cacheRead: 1.50,   cacheWrite: 18.75  },
-  // Fable 5 / Mythos 5: $10 input, $50 output — per Anthropic's announcement:
-  // https://www.anthropic.com/news/claude-fable-5-mythos-5
-  // NOTE: Anthropic suspended access to both models on 2026-06-12 (stated as
-  // temporary, restoration in progress). Pricing is kept here so historical Fable
-  // usage already in users' logs is costed correctly; revisit if status/pricing changes.
+  // Fable 5 / Mythos 5: $10 input, $50 output — Anthropic's documentation:
+  // https://platform.claude.com/docs/en/about-claude/models/introducing-claude-fable-5
+  // Generally available; access was restored on 2026-07-01 after a temporary
+  // suspension (2026-06-12 to 2026-06-30). These rates cost both live and
+  // historical Fable usage in users' logs.
   fable:        { input: 10,    output: 50,    cacheRead: 1.00,   cacheWrite: 12.50  },
   // Sonnet 3.7 / 4.0 / 4.5 / 4.6 — and Sonnet 5 *standard* pricing (from 2026-09-01): $3 input, $15 output
   sonnet:       { input: 3,     output: 15,    cacheRead: 0.30,   cacheWrite: 3.75   },
