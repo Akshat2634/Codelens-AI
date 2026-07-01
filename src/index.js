@@ -34,25 +34,34 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false, plan
   let sessions;
   let fileIndex;
   const startParse = Date.now();
+  const cacheOptions = { days, project: project || null };
+  // Same cutoff computation as parseAllProjects, so the cache staleness scan and
+  // the parser agree on which files are inside the lookback window.
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+  const cutoffMs = cutoffDate.getTime();
 
   if (forceRefresh) {
     deleteCache();
     console.log(`  ${icon.arrow} Cache cleared, performing full parse...`);
   }
 
-  const cached = forceRefresh ? null : loadCache();
+  const cached = forceRefresh ? null : loadCache(cacheOptions);
 
   if (cached) {
-    const stale = getStaleFiles(claudeDir, cached.fileIndex);
+    const stale = getStaleFiles(claudeDir, cached.fileIndex, cutoffMs);
     const newCount = stale.newFiles.length;
     const modifiedCount = stale.modifiedFiles.length;
     const deletedCount = stale.deletedFiles.length;
     const cachedCount = Object.keys(cached.fileIndex).length - modifiedCount - deletedCount;
 
     if (newCount === 0 && modifiedCount === 0 && deletedCount === 0) {
-      sessions = cached.sessions;
+      // Re-apply the start-time cutoff: the cache may have been written days ago,
+      // and the rolling window has moved since — sessions that have aged out must
+      // not be served as if they were inside the current window.
+      sessions = cached.sessions.filter(s => new Date(s.startTime).getTime() >= cutoffMs);
       fileIndex = cached.fileIndex;
-      console.log(`  ${icon.ok} Parsing sessions ${c.dim}── ${cached.sessions.length} cached (${fmt(Date.now() - startParse)})${c.reset}`);
+      console.log(`  ${icon.ok} Parsing sessions ${c.dim}── ${sessions.length} cached (${fmt(Date.now() - startParse)})${c.reset}`);
     } else {
       const { sessions: freshSessions, fileIndex: freshIndex } = await parseAllProjects(claudeDir, days, project);
       sessions = freshSessions;
@@ -88,7 +97,7 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false, plan
   payload.meta.gitUser = getGitUser();
 
   // Save cache for next run
-  saveCache(sessions, fileIndex);
+  saveCache(sessions, fileIndex, cacheOptions);
 
   return payload;
 }
