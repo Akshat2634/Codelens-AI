@@ -1900,6 +1900,28 @@
       background: var(--accent-orange);
       box-shadow: 0 0 10px var(--accent-orange);
     }
+    .narrative-headline .hl-delta {
+      display: inline-block;
+      padding: 0 12px 2px;
+      border-radius: 10px;
+      font-size: 0.82em;
+      line-height: 1.5;
+      white-space: nowrap;
+    }
+    .narrative-headline .hl-bad {
+      color: var(--accent-red);
+      background: var(--grade-f-bg);
+      box-shadow: inset 0 0 0 1px var(--grade-f-bg);
+    }
+    .narrative-headline .hl-good {
+      color: var(--accent-green);
+      background: var(--grade-a-bg);
+      box-shadow: inset 0 0 0 1px var(--grade-a-bg);
+    }
+    .narrative-headline .hl-flat {
+      color: var(--text-secondary);
+      background: var(--overlay-medium);
+    }
     .narrative-headline {
       font-family: var(--font-body);
       font-size: clamp(1.35rem, 2.4vw, 1.75rem);
@@ -2551,7 +2573,9 @@ function renderWeeklyNarrative(n) {
       const flat = Math.abs(m.deltaPct) < 2;
       const cls = flat ? 'flat' : (better ? 'up' : 'down');
       const sign = m.deltaPct > 0 ? '+' : '';
-      const arrow = flat ? '•' : (better ? '▲' : '▼');
+      // Arrow = direction of change (▲ increase, ▼ decrease); the color says
+      // whether that's good — "▼ +38%" read as spend going down.
+      const arrow = flat ? '•' : (m.deltaPct > 0 ? '▲' : '▼');
       deltaHtml = `<span class="nm-delta ${cls}">${arrow} ${sign}${m.deltaPct}% vs last week</span>`;
     } else {
       deltaHtml = `<span class="nm-delta flat">— new</span>`;
@@ -2563,9 +2587,14 @@ function renderWeeklyNarrative(n) {
     </div>`;
   }).join('');
   const bulletsHtml = (n.bullets || []).map(b => `<li>${escapeHtml(b)}</li>`).join('');
+  // Highlight the week-over-week verdict phrase as a tinted chip
+  const headlineHtml = escapeHtml(n.headline)
+    .replace(/(\d+% pricier than last week)/, '<span class="hl-delta hl-bad">$1</span>')
+    .replace(/(\d+% cheaper than last week)/, '<span class="hl-delta hl-good">$1</span>')
+    .replace(/(on par with last week)/, '<span class="hl-delta hl-flat">$1</span>');
   return `<div class="narrative">
     <div class="narrative-kicker">Weekly Report</div>
-    <div class="narrative-headline">${escapeHtml(n.headline)}</div>
+    <div class="narrative-headline">${headlineHtml}</div>
     ${metricsHtml ? `<div class="narrative-metrics">${metricsHtml}</div>` : ''}
     ${bulletsHtml ? `<ul class="narrative-bullets">${bulletsHtml}</ul>` : ''}
   </div>`;

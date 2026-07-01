@@ -146,11 +146,16 @@ function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics) {
     const msgAssistant = ss.reduce((a, b) => a + b.assistantMessageCount, 0);
     const autopilot = msgUser > 0 ? msgAssistant / msgUser : 0;
 
+    // Per-family spend, scaled to each session's in-window share so it sums to
+    // the window cost above (whole-session family costs against a windowed
+    // total read as ">100% of spend" when a session straddles the boundary).
     const modelCost = {};
-    for (const s of ss) {
+    for (const { s, w } of perSession) {
+      if (!w.active) continue;
+      const scale = s.cost.totalCost > 0 ? w.cost / s.cost.totalCost : 0;
       for (const [m, data] of Object.entries(s.modelBreakdown)) {
         const fam = getModelFamily(m) || 'unknown';
-        modelCost[fam] = (modelCost[fam] || 0) + data.cost;
+        modelCost[fam] = (modelCost[fam] || 0) + data.cost * scale;
       }
     }
     const dominantModel = Object.entries(modelCost).sort((a, b) => b[1] - a[1])[0] || null;
