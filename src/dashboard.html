@@ -2646,7 +2646,7 @@ function renderHeroStats(s) {
 function renderCostByPeriod(p) {
   if (!p) return '';
   return `<div class="stats-section">
-    <h2>Cost Breakdown <i class="info-tip" data-tip="Spending breakdown across time periods — today, this week, this month, and all time.">i</i></h2>
+    <h2>Cost Breakdown <i class="info-tip" data-tip="Spending breakdown across time periods — today, this week, this month, and the full analyzed window (--days).">i</i></h2>
     <div class="period-stats">
       <div class="period-card today">
         <div class="period-label">Today</div>
@@ -2667,7 +2667,7 @@ function renderCostByPeriod(p) {
         <div class="period-tokens">${formatTokens(p.month.tokens)} tokens</div>
       </div>
       <div class="period-card all-time">
-        <div class="period-label">All Time</div>
+        <div class="period-label">Last ${DATA.meta.daysAnalyzed} Days (full window)</div>
         <div class="period-cost">$${p.allTime.cost.toFixed(2)}</div>
         <div class="period-meta">${p.allTime.sessions} sessions &middot; ${p.allTime.commits} commits</div>
         <div class="period-tokens">${formatTokens(p.allTime.tokens)} tokens</div>
@@ -2677,7 +2677,7 @@ function renderCostByPeriod(p) {
       <span><span class="dot" style="background: var(--accent-green);"></span>Today</span>
       <span><span class="dot" style="background: var(--accent-blue);"></span>Last 7 Days</span>
       <span><span class="dot" style="background: var(--accent-purple);"></span>This Month</span>
-      <span><span class="dot" style="background: var(--accent-orange);"></span>All Time</span>
+      <span><span class="dot" style="background: var(--accent-orange);"></span>Full analyzed window</span>
     </div>
   </div>`;
 }

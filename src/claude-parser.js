@@ -319,10 +319,19 @@ function createEmptySession(sessionId) {
     totalBashCalls: 0,
     verificationBashCalls: 0,
     estimatedCost: 0,
+    // What the cache-read tokens would have cost at full input price minus what
+    // was paid — computed per pricing tier (a flat 9x of cacheReadCost is wrong
+    // for tiers like haiku-3 whose cache-read price isn't exactly 0.1x input).
+    cacheSavingsDollars: 0,
   };
 }
 
-async function parseSessionFile(filePath) {
+// cutoffMs clips usage accumulation to the lookback window: a session started
+// before the window but resumed inside it (--resume appends to the same JSONL)
+// keeps only its in-window tokens/cost, so totals and the daily timeline agree
+// with the window instead of dropping or over-counting the session. Message and
+// tool counts stay whole-session — they describe the session, not the window.
+async function parseSessionFile(filePath, cutoffMs = 0) {
   const sessionId = path.basename(filePath, '.jsonl');
   const session = createEmptySession(sessionId);
   const seenRequestIds = new Set();
@@ -404,9 +413,12 @@ async function parseSessionFile(filePath) {
     const isNewRequest = requestId && !seenRequestIds.has(requestId);
     if (requestId) seenRequestIds.add(requestId);
 
-    // Accumulate usage only for new requests
+    // Accumulate usage only for new requests, and only inside the lookback
+    // window (usage without a resolvable timestamp is kept rather than lost)
+    const usageTs = obj.timestamp || lastSeenTimestamp;
+    const inWindow = !cutoffMs || !usageTs || Date.parse(usageTs) >= cutoffMs;
     if (isNewRequest || !requestId) {
-      const usage = msg.usage;
+      const usage = inWindow ? msg.usage : null;
       if (usage) {
         const input = usage.input_tokens || 0;
         const output = usage.output_tokens || 0;
@@ -484,6 +496,12 @@ async function parseSessionFile(filePath) {
 
   for (const [model, tokens] of Object.entries(modelTokens)) {
     const cost = calculateCost(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h, sessionDateMs, tokens.webSearch);
+    // Avoided cost of cache reads at this model's actual rates
+    const tier = getPricingTier(model, sessionDateMs);
+    if (tier) {
+      const p = PRICING[tier];
+      session.cacheSavingsDollars += geoMultiplier(model) * tokens.cacheRead * (p.input - p.cacheRead) / PER_MIL;
+    }
     const totalTokens = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
     session.modelBreakdown[model] = { tokens: totalTokens, cost };
     if (getModelFamily(model) === null) session.estimatedCost += cost;
@@ -637,16 +655,16 @@ function listSubagentTranscripts(dir, out = []) {
   return out;
 }
 
-async function parseSessionWithSubagents(projectDir, sessionId) {
+async function parseSessionWithSubagents(projectDir, sessionId, cutoffMs = 0) {
   const mainFile = path.join(projectDir, `${sessionId}.jsonl`);
-  const session = await parseSessionFile(mainFile);
+  const session = await parseSessionFile(mainFile, cutoffMs);
 
   // Merge every subagent transcript (including workflow-nested ones)
   const subagentDir = path.join(projectDir, sessionId, 'subagents');
   if (existsSync(subagentDir)) {
     for (const af of listSubagentTranscripts(subagentDir)) {
       try {
-        const subSession = await parseSessionFile(af);
+        const subSession = await parseSessionFile(af, cutoffMs);
         mergeSubagentIntoSession(session, subSession);
       } catch {
         // Skip unreadable/corrupt subagent files
@@ -671,6 +689,7 @@ function mergeSubagentIntoSession(parent, sub) {
   parent.cost.cacheCreationCost += sub.cost.cacheCreationCost;
   parent.cost.serverToolCost = (parent.cost.serverToolCost || 0) + (sub.cost.serverToolCost || 0);
   parent.cost.totalCost += sub.cost.totalCost;
+  parent.cacheSavingsDollars = (parent.cacheSavingsDollars || 0) + (sub.cacheSavingsDollars || 0);
   parent.estimatedCost = (parent.estimatedCost || 0) + (sub.estimatedCost || 0);
 
   // Message counts intentionally NOT merged — we only report
@@ -788,15 +807,17 @@ export async function parseAllProjects(claudeDir, days, projectFilter) {
       }
 
       try {
-        const session = await parseSessionWithSubagents(projectDir, sessionId);
+        const session = await parseSessionWithSubagents(projectDir, sessionId, cutoffMs);
 
         // Skip empty sessions (no messages)
         if (!session.startTime || (session.userMessageCount === 0 && session.assistantMessageCount === 0)) {
           continue;
         }
 
-        // Apply date filter on session start time
-        if (new Date(session.startTime).getTime() < cutoffMs) continue;
+        // Keep sessions with ANY activity inside the window (a session started
+        // before the window but resumed inside it was parsed with its usage
+        // clipped to the window — dropping it whole would lose that usage).
+        if (new Date(session.endTime).getTime() < cutoffMs) continue;
 
         // Derive project name from the session's actual repo path (cwd),
         // falling back to the folder name if repoPath is unavailable

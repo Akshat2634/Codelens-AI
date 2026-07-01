@@ -53,9 +53,12 @@ function computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, t
   const totalRawInput = totalInputTokens + totalCacheReadTokens + totalCacheCreationTokens;
   const cacheHitRate = totalRawInput > 0
     ? Math.round((totalCacheReadTokens / totalRawInput) * 100) : 0;
-  const totalCacheReadCost = correlatedSessions.reduce((s, c) => s + c.cost.cacheReadCost, 0);
-  // Cache reads are 90% cheaper — savings = what it would have cost at full price minus what was paid
-  const cacheSavingsDollars = totalCacheReadCost * 9;
+  // Avoided cost of cache reads, computed per pricing tier by the parser
+  // (a flat 9x of cacheReadCost misprices tiers like haiku-3 whose cache-read
+  // rate isn't exactly 0.1x input). Fallback for sessions parsed before the
+  // field existed: the 0.1x approximation.
+  const cacheSavingsDollars = correlatedSessions.reduce(
+    (s, c) => s + (c.cacheSavingsDollars ?? c.cost.cacheReadCost * 9), 0);
 
   return {
     totalAllTokens,
@@ -106,13 +109,39 @@ function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics) {
   };
 
   const aggregate = (startMs, endMs) => {
-    // Session-level metrics (cost, tokens, msgs, model spend) bucket by session start.
-    const ss = correlatedSessions.filter(s => {
-      const t = new Date(s.startTime).getTime();
+    // Cost and tokens bucket by ACTUAL usage day (dailyUsage), matching
+    // costByPeriod, so the same numerator feeds $/commit as the commits
+    // counted below — a whole-session bucket by start time would divide
+    // last week's spend by this week's commits when a session straddles
+    // the boundary. Sessions count if they had any activity in the window.
+    const dayInWindow = (dateStr) => {
+      const t = Date.parse(dateStr + 'T12:00:00');
       return t >= startMs && t < endMs;
-    });
-    const cost = ss.reduce((a, b) => a + b.cost.totalCost, 0);
-    const tokens = ss.reduce((a, b) => a + b.totalInputTokens + b.totalOutputTokens + b.cacheReadTokens + b.cacheCreationTokens, 0);
+    };
+    const windowUsage = (s) => {
+      const entries = Object.entries(s.dailyUsage || {});
+      if (entries.length === 0) {
+        // No per-day data — fall back to whole-session bucketing by start time
+        const t = new Date(s.startTime).getTime();
+        return t >= startMs && t < endMs
+          ? { cost: s.cost.totalCost, tokens: s.totalInputTokens + s.totalOutputTokens + s.cacheReadTokens + s.cacheCreationTokens, active: true }
+          : { cost: 0, tokens: 0, active: false };
+      }
+      let cost = 0;
+      let tokens = 0;
+      let active = false;
+      for (const [dateStr, day] of entries) {
+        if (!dayInWindow(dateStr)) continue;
+        active = true;
+        cost += day.cost;
+        tokens += day.inputTokens + day.outputTokens + day.cacheReadTokens + (day.cacheCreationTokens || 0);
+      }
+      return { cost, tokens, active };
+    };
+    const perSession = correlatedSessions.map(s => ({ s, w: windowUsage(s) }));
+    const ss = perSession.filter(x => x.w.active).map(x => x.s);
+    const cost = perSession.reduce((a, x) => a + x.w.cost, 0);
+    const tokens = perSession.reduce((a, x) => a + x.w.tokens, 0);
     const msgUser = ss.reduce((a, b) => a + b.userMessageCount, 0);
     const msgAssistant = ss.reduce((a, b) => a + b.assistantMessageCount, 0);
     const autopilot = msgUser > 0 ? msgAssistant / msgUser : 0;
@@ -656,8 +685,17 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   const totalLinesAdded = correlatedSessions.reduce((s, c) => s + c.linesAdded, 0);
   const totalLinesDeleted = correlatedSessions.reduce((s, c) => s + c.linesDeleted, 0);
   const totalNetLines = totalLinesAdded - totalLinesDeleted;
+  // Unique AI-touched files: keyed by repo + path (the same relative path in
+  // two repos is two files) and filtered to files the session actually wrote,
+  // matching the AI-attributed line counts displayed beside this number.
   const totalFilesChanged = new Set(
-    correlatedSessions.flatMap(c => c.commits.flatMap(co => co.files.map(f => f.path)))
+    correlatedSessions.flatMap(s => {
+      const sessionFiles = new Set(s.filesWritten || []);
+      const chatOnly = sessionFiles.size === 0;
+      return s.commits.flatMap(co => co.files
+        .filter(f => chatOnly || sessionFiles.has(f.path))
+        .map(f => `${s.repoPath || ''}|${f.path}`));
+    })
   ).size;
   const totalInputTokens = correlatedSessions.reduce((s, c) => s + c.totalInputTokens, 0);
   const totalOutputTokens = correlatedSessions.reduce((s, c) => s + c.totalOutputTokens, 0);
@@ -701,9 +739,13 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
       day.totalTokens += dayData.inputTokens + dayData.outputTokens + dayData.cacheReadTokens + (dayData.cacheCreationTokens || 0);
     }
 
-    // Count each session once, on its start day, so sum(daily.sessions) equals
-    // totalSessions. (Cost/tokens are still spread across every active day above.)
-    ensureDay(startDate).sessions++;
+    // Count each session once, on its first in-window activity day, so
+    // sum(daily.sessions) equals totalSessions without creating pre-window
+    // timeline days for sessions that started before the lookback window.
+    const firstActivityDay = session.dailyUsage && Object.keys(session.dailyUsage).length > 0
+      ? Object.keys(session.dailyUsage).sort()[0]
+      : startDate;
+    ensureDay(firstActivityDay).sessions++;
 
     // Commits attributed to their own timestamps. Lines use the AI-attributed
     // (session-file-overlap) counts so the timeline reconciles with
@@ -1004,7 +1046,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
         ? new Date(Math.min(...correlatedSessions.map(s => new Date(s.startTime).getTime()))).toISOString()
         : null,
       endDate: correlatedSessions.length > 0
-        ? new Date(Math.max(...correlatedSessions.map(s => new Date(s.startTime).getTime()))).toISOString()
+        ? new Date(Math.max(...correlatedSessions.map(s => new Date(s.endTime || s.startTime).getTime()))).toISOString()
         : null,
       defaultBranches: Object.fromEntries(
         Object.entries(commitsByRepo).map(([repo, a]) => [repo.split('/').pop(), a.defaultBranch]).filter(([, b]) => b)
