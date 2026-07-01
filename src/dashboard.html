@@ -2989,7 +2989,7 @@ function renderCacheEfficiency(t) {
       <div class="survival-bar"><div class="fill" style="width: ${hitRate}%; background: ${gradient};"></div></div>
       <div class="survival-stats">
         <div><span>${formatTokens(t.totalCacheReadTokens)}</span> tokens from cache</div>
-        <div><span>${formatTokens(t.totalInputTokens)}</span> fresh input tokens</div>
+        <div><span>${formatTokens(t.totalInputTokens + t.totalCacheCreationTokens)}</span> fresh input tokens (incl. cache writes)</div>
         <div><span style="color:var(--accent-cyan);">$${t.cacheSavingsDollars.toFixed(2)}</span> vs. uncached pricing</div>
         <div><span style="color:${accentColor};">${hitRate}%</span> cache hit rate</div>
       </div>

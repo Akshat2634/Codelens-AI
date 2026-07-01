@@ -51,18 +51,48 @@ function getMainBranchHashes(repoPath) {
   const mainBranch = detectDefaultBranch(repoPath);
   if (!mainBranch) return { hashes: new Set(), branchName: null };
 
-  try {
-    const raw = execSync(
-      `git -C "${repoPath}" log ${mainBranch} --format=%H`,
-      { encoding: 'utf-8', maxBuffer: 50 * 1024 * 1024 }
-    );
-    return {
-      hashes: new Set(raw.trim().split('\n').filter(Boolean)),
-      branchName: mainBranch,
-    };
-  } catch {
-    return { hashes: new Set(), branchName: mainBranch };
+  // Union local and remote-tracking refs: a missing or stale local main must
+  // not under-report the "commits on main" rate when origin/main has them.
+  const hashes = new Set();
+  for (const ref of [mainBranch, `origin/${mainBranch}`]) {
+    try {
+      const raw = execSync(
+        `git -C "${repoPath}" log ${ref} --format=%H`,
+        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 50 * 1024 * 1024 }
+      );
+      for (const h of raw.trim().split('\n')) {
+        if (h) hashes.add(h);
+      }
+    } catch {
+      // ref doesn't exist locally — try the next one
+    }
   }
+  return { hashes, branchName: mainBranch };
+}
+
+// Git C-quotes paths containing non-ASCII or special characters
+// ("src/caf\303\251.js"). Unquote them or file-overlap matching silently
+// fails for those files.
+function unquoteGitPath(raw) {
+  if (raw.length < 2 || !raw.startsWith('"') || !raw.endsWith('"')) return raw;
+  const inner = raw.slice(1, -1);
+  const bytes = [];
+  for (let i = 0; i < inner.length; i++) {
+    if (inner[i] !== '\\') {
+      bytes.push(inner.charCodeAt(i));
+      continue;
+    }
+    const next = inner[i + 1];
+    if (next >= '0' && next <= '7') {
+      bytes.push(parseInt(inner.slice(i + 1, i + 4), 8));
+      i += 3;
+    } else {
+      const escapes = { n: 10, t: 9, r: 13, '"': 34, '\\': 92 };
+      bytes.push(escapes[next] ?? next.charCodeAt(0));
+      i += 1;
+    }
+  }
+  return Buffer.from(bytes).toString('utf8');
 }
 
 // Resolve git's --numstat rename syntax to the NEW path so it matches the
@@ -147,7 +177,7 @@ function parseGitLog(raw) {
       if (parts.length >= 3) {
         const added = parts[0] === '-' ? 0 : parseInt(parts[0], 10) || 0;
         const deleted = parts[1] === '-' ? 0 : parseInt(parts[1], 10) || 0;
-        const filePath = parseNumstatPath(parts.slice(2).join('\t')); // resolve renames + tabs
+        const filePath = parseNumstatPath(unquoteGitPath(parts.slice(2).join('\t'))); // unquote + resolve renames
         current.files.push({ path: filePath, added, deleted });
         current.totalAdded += added;
         current.totalDeleted += deleted;
