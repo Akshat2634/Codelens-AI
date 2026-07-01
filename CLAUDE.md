@@ -13,9 +13,9 @@
 - **Runtime:** Node.js >= 18, ES modules (`"type": "module"`)
 - **Backend:** Express.js 5.0.0
 - **CLI:** Commander.js 13.0.0
-- **Frontend:** Single-file HTML (`src/dashboard.html`) with vanilla JS + Chart.js 4.4.7
+- **Frontend:** Single-file HTML (`src/dashboard.html`) with vanilla JS + Chart.js 4.5.1 (vendored via npm, served at `/vendor/chart.umd.min.js` — no CDN, works offline)
 - **Testing:** Playwright (E2E)
-- **Styling:** Inline CSS with CSS variables, glassmorphism design, dark/light theme
+- **Styling:** Inline CSS design tokens, "warm-ink instrument panel" (dark) / "warm-paper ledger" (light) theme; fonts: Bricolage Grotesque (display), Instrument Sans (body), IBM Plex Mono (data). Chart palette is CVD-validated per theme — don't swap chart hues casually.
 
 ## Project Structure
 
