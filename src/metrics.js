@@ -47,8 +47,10 @@ function computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, t
   const outputInputRatio = effectiveInput > 0
     ? Math.round((totalOutputTokens / effectiveInput) * 100) / 100 : 0;
 
-  // Cache efficiency
-  const totalRawInput = totalInputTokens + totalCacheReadTokens;
+  // Cache efficiency. Cache-creation tokens are also prompt tokens processed
+  // fresh (at a write premium), so they belong in the denominator — otherwise
+  // "share of input served from cache" is overstated under heavy caching.
+  const totalRawInput = totalInputTokens + totalCacheReadTokens + totalCacheCreationTokens;
   const cacheHitRate = totalRawInput > 0
     ? Math.round((totalCacheReadTokens / totalRawInput) * 100) : 0;
   const totalCacheReadCost = correlatedSessions.reduce((s, c) => s + c.cost.cacheReadCost, 0);
@@ -265,8 +267,11 @@ function computeLineSurvival(correlatedSessions) {
     for (const commit of (session.commits || [])) {
       for (const file of commit.files) {
         if (!chatOnly && !sessionFiles.has(file.path)) continue;
-        if (!fileTimeline.has(file.path)) fileTimeline.set(file.path, []);
-        fileTimeline.get(file.path).push({
+        // Key by repo + path: two repos can both have e.g. src/index.js, and
+        // merging their timelines would count cross-repo edits as churn.
+        const key = `${session.repoPath || ''}|${file.path}`;
+        if (!fileTimeline.has(key)) fileTimeline.set(key, []);
+        fileTimeline.get(key).push({
           timestampMs: commit.timestampMs,
           added: file.added,
           deleted: file.deleted,
@@ -500,13 +505,13 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
       candidates.push({
         priority: 1,
         type: 'warning',
-        text: `${pct}% of sessions (${orphanedCount}/${correlatedSessions.length}) produced zero commits — likely wasted effort.`,
+        text: `${pct}% of sessions (${orphanedCount}/${correlatedSessions.length}) ran 10+ messages without producing a commit — likely wasted effort.`,
       });
     } else if (pct > 0) {
       candidates.push({
         priority: 3,
         type: 'info',
-        text: `${pct}% of sessions (${orphanedCount}/${correlatedSessions.length}) produced zero commits.`,
+        text: `${pct}% of sessions (${orphanedCount}/${correlatedSessions.length}) ran 10+ messages without producing a commit.`,
       });
     }
   }
@@ -742,7 +747,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   const modelBreakdown = {};
   const ensureFamily = (family) => {
     if (!modelBreakdown[family]) {
-      modelBreakdown[family] = { cost: 0, tokens: 0, sessions: 0, commits: 0, avgCostPerCommit: null, subModels: {} };
+      modelBreakdown[family] = { cost: 0, tokens: 0, sessions: 0, commits: 0, dominantCost: 0, avgCostPerCommit: null, subModels: {} };
     }
     return modelBreakdown[family];
   };
@@ -775,10 +780,17 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
         fam.subModels[model].tokens += md.tokens;
       }
     }
-    if (domFamily) ensureFamily(domFamily).commits += session.commitCount;
+    if (domFamily) {
+      const fam = ensureFamily(domFamily);
+      fam.commits += session.commitCount;
+      // Cost of the sessions where this family was dominant — the matching
+      // population for its commits, so avgCostPerCommit divides like with like
+      // (family-wide cost includes sessions whose commits went to other families).
+      fam.dominantCost += session.cost.totalCost;
+    }
   }
   for (const data of Object.values(modelBreakdown)) {
-    data.avgCostPerCommit = data.commits > 0 ? data.cost / data.commits : null;
+    data.avgCostPerCommit = data.commits > 0 ? data.dominantCost / data.commits : null;
     data.tokensPerCommit = data.commits > 0 ? Math.round(data.tokens / data.commits) : null;
     data.subModels = Object.fromEntries(
       Object.entries(data.subModels).sort(([, a], [, b]) => b.cost - a.cost)

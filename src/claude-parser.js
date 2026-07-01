@@ -589,11 +589,14 @@ async function parseSessionFile(filePath) {
   }
 
   // Normalize filesWritten to relative paths (for file-based commit correlation)
-  // Resolve the actual git root from repoPath (which may be a worktree path)
+  // Resolve the actual git root from repoPath (which may be a worktree path or a
+  // subdirectory of the repo — sessions launched from repo/subdir must still
+  // resolve to the repo root or git analysis finds no .git and correlation fails)
   let gitRoot = session.repoPath;
   if (gitRoot) {
     const wtRootMatch = gitRoot.match(/^(.+?)\/\.claude\/worktrees\/[^/]+$/);
     if (wtRootMatch) gitRoot = wtRootMatch[1];
+    gitRoot = findGitRoot(gitRoot) || gitRoot;
   }
   if (gitRoot) {
     session.filesWritten = session.filesWritten
@@ -716,9 +719,21 @@ function mergeSubagentIntoSession(parent, sub) {
   }
 }
 
+// Walk up from a session's cwd to the enclosing git repo root, so sessions
+// launched from a subdirectory still correlate (file paths and git analysis
+// must both be relative to the repo root, not the cwd).
+function findGitRoot(startPath) {
+  let dir = startPath;
+  while (dir && dir !== path.dirname(dir)) {
+    if (existsSync(path.join(dir, '.git'))) return dir;
+    dir = path.dirname(dir);
+  }
+  return null;
+}
+
 export async function parseAllProjects(claudeDir, days, projectFilter) {
   if (!existsSync(claudeDir)) {
-    return [];
+    return { sessions: [], fileIndex: {} };
   }
 
   const cutoffDate = new Date();

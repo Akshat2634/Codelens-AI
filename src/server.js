@@ -75,11 +75,17 @@ export function createServer(initialPayload, rebuildFn) {
       });
     }
 
-    // Sort
+    // Sort. Map compound/derived keys to sortable scalars — sorting the raw
+    // property would silently no-op for 'cost' (an object) and 'msgCount'.
+    const sortValue = (s) => {
+      if (sortBy === 'cost' || sortBy === 'cost.totalCost') return s.cost?.totalCost ?? 0;
+      if (sortBy === 'msgCount') return (s.userMessageCount || 0) + (s.assistantMessageCount || 0);
+      return s[sortBy] ?? 0;
+    };
     sessions = [...sessions].sort((a, b) => {
-      const av = a[sortBy] ?? 0;
-      const bv = b[sortBy] ?? 0;
-      if (typeof av === 'string') return order * av.localeCompare(bv);
+      const av = sortValue(a);
+      const bv = sortValue(b);
+      if (typeof av === 'string') return order * av.localeCompare(String(bv));
       return order * (av - bv);
     });
 
