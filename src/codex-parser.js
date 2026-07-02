@@ -98,29 +98,38 @@ const PER_MIL = 1_000_000;
 // OpenAI web search is $10 per 1,000 calls; search content tokens are already
 // included in normal token_count events when they are billed.
 const WEB_SEARCH_COST_PER_REQUEST = 10 / 1000;
+// GPT-5.5/GPT-5.4 charge long-context rates once a SINGLE request's input
+// exceeds this many tokens (OpenAI bills per request, not per session). All
+// current long-context tiers share the 200K boundary.
 const LONG_CONTEXT_INPUT_TOKENS = 200_000;
-const LONG_CONTEXT_WINDOW_TOKENS = 400_000;
+// Sentinel day-bucket for usage with no resolvable timestamp; resolved to the
+// session's earliest real day after parsing (mirrors claude-parser).
+const UNBUCKETED_DAY = '__unbucketed__';
 
 function normalizeCodexModelId(modelName) {
-  // Strip billing markers, API date suffixes ('gpt-5.2-2025-12-11' →
-  // 'gpt-5.2'), and '-latest'.
+  // Strip our '[long]' billing marker, API date suffixes
+  // ('gpt-5.2-2025-12-11' → 'gpt-5.2'), and '-latest'. ('[fast]'/'[us]' are
+  // Claude-only markers and never appear on a Codex id, so they aren't stripped
+  // here — getCodexPricing is only ever fed Codex ids plus our '[long]'.)
   return modelName.toLowerCase()
-    .replace(/\[(?:long|fast|us)\]/g, '')
+    .replace(/\[long\]/g, '')
     .replace(/-\d{4}-\d{2}-\d{2}$/, '')
     .replace(/-latest$/, '');
 }
 
-function useLongContextPricing(modelName, price, contextWindow = 0, requestInputTokens = 0) {
+// Long context is a property of the actual request size, NOT the model's static
+// context-window capacity (which token_count reports identically on every event
+// as `model_context_window`). Keying on capacity billed every request on a
+// large-window model at long-context rates; only per-request input counts.
+function useLongContextPricing(modelName, price, requestInputTokens = 0) {
   if (!price?.longContext) return false;
-  const lower = String(modelName || '').toLowerCase();
-  return lower.includes('[long]')
-    || contextWindow >= LONG_CONTEXT_WINDOW_TOKENS
+  return String(modelName || '').toLowerCase().includes('[long]')
     || requestInputTokens >= LONG_CONTEXT_INPUT_TOKENS;
 }
 
-function billingModelName(modelName, contextWindow = 0, requestInputTokens = 0) {
+function billingModelName(modelName, requestInputTokens = 0) {
   const p = getCodexPricing(modelName);
-  return useLongContextPricing(modelName, p, contextWindow, requestInputTokens)
+  return useLongContextPricing(modelName, p, requestInputTokens)
     ? `${modelName}[long]`
     : modelName;
 }
@@ -139,7 +148,10 @@ export function getCodexPricing(modelName, usageDateMs = Date.now()) {
   const id = normalizeCodexModelId(modelName);
   if (!/^(gpt-|o\d|codex)/.test(id)) return null;
   for (const [key, price] of CODEX_PRICING) {
-    if (id === key || id.startsWith(key + '-')) {
+    // '-' is the version separator; ':' is Ollama's tag separator, so
+    // codex --oss ids like 'gpt-oss:20b' resolve to the free 'gpt-oss' entry
+    // instead of the paid fallback.
+    if (id === key || id.startsWith(key + '-') || id.startsWith(key + ':')) {
       if (key === 'o3' && usageDateMs < O3_PRICE_CUT_MS) return O3_EARLY;
       return useLongContextPricing(modelName, price) ? price.longContext : price;
     }
@@ -206,8 +218,6 @@ async function* rolloutLines(filePath) {
   const rl = createInterface({ input: createReadStream(filePath), crlfDelay: Infinity });
   yield* rl;
 }
-
-const UNBUCKETED_DAY = '__unbucketed__';
 
 function localDayStr(dateLike) {
   const dt = new Date(dateLike);
@@ -306,6 +316,7 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
   let itemAssistantMessages = 0;
   let tokenCountResponses = 0;
   const seenUsage = new Set(); // exact-duplicate token events (replays) are skipped
+  const seenWebSearch = new Set(); // web_search_call ids already billed (replays)
   // Subagent rollouts (thread_spawn) REPLAY the parent's entire history,
   // re-timestamped into the spawn second — counting those events inflates
   // usage massively (ccusage saw 91x). Skip token events until the timestamp
@@ -332,7 +343,10 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
     if (!spawnReplay) return false;
     const second = ts ? ts.slice(0, 19) : null;
     if (replaySecond === null) replaySecond = second;
-    if (second === replaySecond) return true;
+    // A missing/unparseable timestamp can't prove the burst is over — stay in
+    // the burst rather than risk counting the rest of the replayed parent
+    // history (the multi-x inflation this gate exists to prevent).
+    if (second === null || second === replaySecond) return true;
     spawnReplay = false;
     return false;
   };
@@ -340,10 +354,10 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
   // The cached-tokens field name drifted across Codex versions.
   const cachedOf = (u) => u.cached_input_tokens ?? u.cache_read_input_tokens ?? u.cached_tokens ?? 0;
 
-  const accumulateUsage = (delta, ts, model, contextWindow = 0) => {
+  const accumulateUsage = (delta, ts, model) => {
     const cached = cachedOf(delta);
     const rawInput = delta.input_tokens || 0;
-    const billingModel = billingModelName(model, contextWindow, rawInput);
+    const billingModel = billingModelName(model, rawInput);
     const freshInput = Math.max(0, rawInput - cached);
     const output = delta.output_tokens || 0;
     const reasoning = delta.reasoning_output_tokens || 0;
@@ -371,7 +385,10 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
 
   const accumulateWebSearch = (ts, model) => {
     if (cutoffMs && ts && Date.parse(ts) < cutoffMs) return;
-    const billingModel = model || 'unknown';
+    // Bucket the fee under the same base billing name token usage resolves to
+    // (a search call has no input size, so never the '[long]' variant) — not a
+    // raw model string that could diverge from the token buckets.
+    const billingModel = billingModelName(model || 'unknown');
     session.webSearchRequests++;
 
     if (!modelTokens[billingModel]) modelTokens[billingModel] = { input: 0, output: 0, cacheRead: 0, webSearch: 0 };
@@ -495,7 +512,7 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
             if (!ts || !seenUsage.has(dupKey)) {
               seenUsage.add(dupKey);
               tokenCountResponses++;
-              accumulateUsage(delta, ts, model, info.model_context_window || 0);
+              accumulateUsage(delta, ts, model);
             }
           }
         }
@@ -569,9 +586,19 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
         touchTimestamp(ts);
         trackShellCommand(session, commandFromArgs(payload.action));
       } else if (it === 'web_search_call') {
-        session.toolCalls.web_search = (session.toolCalls.web_search || 0) + 1;
         touchTimestamp(ts);
-        accumulateWebSearch(ts, currentModel || 'unknown');
+        // Web searches carry real per-call fees, so — like token_count events —
+        // they need the same guards: only bill completed calls, and count each
+        // call_id once so replayed/resumed history doesn't double-charge.
+        const status = payload.status;
+        const searchId = payload.call_id || payload.id;
+        const billable = (!status || status === 'completed')
+          && (!searchId || !seenWebSearch.has(searchId));
+        if (searchId) seenWebSearch.add(searchId);
+        if (billable) {
+          session.toolCalls.web_search = (session.toolCalls.web_search || 0) + 1;
+          accumulateWebSearch(ts, currentModel || 'unknown');
+        }
       }
     }
     // compacted / world_state / inter_agent_* / unknown types: ignore

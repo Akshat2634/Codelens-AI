@@ -3294,7 +3294,7 @@ function renderSessionsTable(sessions) {
           <tr>
             <th onclick="sortTable('startTime')" class="${sortCol === 'startTime' ? 'sorted' : ''}">Date${thArrow('startTime')} <i class="info-tip" data-tip="Session start time in your local timezone. Multi-day sessions show an arrow (↳) with the end date below.">i</i></th>
             <th onclick="sortTable('projectName')" class="${sortCol === 'projectName' ? 'sorted' : ''}">Project${thArrow('projectName')}</th>
-            <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')} <i class="info-tip" data-tip="Primary model used in the session. Models marked (sub) are subagents spawned for background tasks like code search and exploration.">i</i></th>
+            <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')} <i class="info-tip" data-tip="Primary model used in the session, then any additional models. For Claude Code these '(sub)' models are subagents spawned for background tasks; for OpenAI Codex they are mid-session model switches.">i</i></th>
             <th onclick="sortTable('msgCount')" class="${sortCol === 'msgCount' ? 'sorted' : ''}">Msgs${thArrow('msgCount')} <i class="info-tip" data-tip="Total messages in the session (your messages + agent responses).">i</i></th>
             <th onclick="sortTable('autopilotRatio')" class="${sortCol === 'autopilotRatio' ? 'sorted' : ''}">Autopilot${thArrow('autopilotRatio')} <i class="info-tip" data-tip="Agent responses per user message. Higher = more autonomous. 5x is excellent.">i</i></th>
             <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')} <i class="info-tip" data-tip="Estimated cost from token usage at the provider's published API pricing (Anthropic for Claude, OpenAI for Codex). Includes input, output, and cache tokens at provider/model-specific rates, plus web search fees and premium billing markers where applicable. For sessions that started before the analyzed window, only in-window usage is counted.">i</i></th>
@@ -3320,8 +3320,11 @@ function renderSessionsTable(sessions) {
               .filter(m => m !== s.model)
               .map(formatModelName)
               .filter(Boolean);
+            // For Claude, extra models are subagents; for Codex they're
+            // mid-session model switches (the TUI picker) — don't mislabel them.
+            const extraTag = (s.source || 'claude') === 'codex' ? '' : ' <span style="opacity:0.6;">(sub)</span>';
             const modelDisplay = subModels.length > 0
-              ? primaryName + ' <span style="color:var(--text-muted);font-size:0.75rem;">+ ' + subModels.join(', ') + ' <span style="opacity:0.6;">(sub)</span></span>'
+              ? primaryName + ' <span style="color:var(--text-muted);font-size:0.75rem;">+ ' + subModels.join(', ') + extraTag + '</span>'
               : primaryName;
             const rowClass = s.isOrphaned ? 'orphaned' : '';
             return `
