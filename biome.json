@@ -6,7 +6,8 @@
       "tests/**/*.js",
       "!**/dashboard.html",
       "!**/node_modules/**",
-      "!**/fixtures/**"
+      "!**/fixtures/**",
+      "!**/vendor/**"
     ]
   },
   "formatter": {

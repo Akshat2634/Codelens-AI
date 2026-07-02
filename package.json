@@ -1,6 +1,6 @@
 {
   "name": "codelens-ai",
-  "version": "0.8.20",
+  "version": "0.8.21",
   "description": "Correlate AI coding agent token usage with git output to measure ROI",
   "type": "module",
   "bin": {
@@ -14,9 +14,12 @@
     "lint": "biome check --error-on-warnings src/ tests/",
     "lint:fix": "biome check --write src/ tests/",
     "test:unit": "node --test tests/unit/*.test.js",
+    "test:package": "node scripts/smoke-package.mjs",
     "test:e2e": "playwright test",
     "test:e2e:local": "E2E_DIR=./tests/local playwright test",
-    "test": "npm run lint && npm run test:unit && CI=1 npm run test:e2e"
+    "test": "npm run lint && npm run test:unit && CI=1 npm run test:e2e",
+    "vendor:chart": "node scripts/vendor-chart.mjs",
+    "prepublishOnly": "npm run vendor:chart"
   },
   "keywords": [
     "codelens",
@@ -45,7 +48,6 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "chart.js": "^4.5.1",
     "commander": "^13.0.0",
     "express": "^5.0.0",
     "open": "^10.0.0"
@@ -53,6 +55,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.13",
     "@playwright/test": "^1.59.1",
+    "chart.js": "^4.5.1",
     "playwright": "^1.59.1"
   },
   "overrides": {
