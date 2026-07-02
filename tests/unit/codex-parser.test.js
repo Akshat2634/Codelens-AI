@@ -175,6 +175,101 @@ test('long-context GPT-5.x Codex usage is priced at long-context rates', async (
   }
 });
 
+test('long-context is decided by REQUEST size, not the model context-window capacity', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-lc-capacity-'));
+  try {
+    // A tiny 5K-token request that merely reports a huge model_context_window
+    // must be billed at BASE rates, not long-context (the capacity-trigger bug).
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-small.jsonl', [
+      meta('small-req', iso(2)),
+      turnContext(iso(2), 'gpt-5.5'),
+      { timestamp: iso(1.9), type: 'event_msg', payload: { type: 'token_count', info: { model_context_window: 1_000_000, total_token_usage: usage(5000, 0, 100), last_token_usage: usage(5000, 0, 100) } } },
+    ]);
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    const base = (5000 * 5 + 100 * 30) / 1e6;
+    assert.ok(Math.abs(s.cost.totalCost - base) < 1e-9, `expected base ${base}, got ${s.cost.totalCost}`);
+    assert.ok(s.modelBreakdown['gpt-5.5'], 'small request stays in the base bucket');
+    assert.ok(!s.modelBreakdown['gpt-5.5[long]'], 'huge context window alone must NOT trigger long-context billing');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('web search: duplicate call_ids and failed searches are not billed', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-ws-guard-'));
+  try {
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-ws.jsonl', [
+      meta('ws-guard', iso(2)),
+      turnContext(iso(2), 'gpt-5.5'),
+      { timestamp: iso(1.99), type: 'response_item', payload: { type: 'web_search_call', call_id: 'ws-1', status: 'completed' } },
+      // exact replay of the same call — resumed/branched history
+      { timestamp: iso(1.99), type: 'response_item', payload: { type: 'web_search_call', call_id: 'ws-1', status: 'completed' } },
+      // a failed search — never billed
+      { timestamp: iso(1.98), type: 'response_item', payload: { type: 'web_search_call', call_id: 'ws-2', status: 'failed' } },
+      tokenCount(iso(1.9), usage(1000, 0, 100), usage(1000, 0, 100)),
+    ]);
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    assert.equal(s.webSearchRequests, 1, 'only the one completed, non-duplicate search is billed');
+    assert.equal(s.toolCalls.web_search, 1);
+    assert.ok(Math.abs(s.cost.serverToolCost - 0.01) < 1e-9, `expected $0.01, got ${s.cost.serverToolCost}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('web-search fee lands in the same bucket as the model’s base tokens (no phantom row)', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-ws-bucket-'));
+  try {
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-wsb.jsonl', [
+      meta('ws-bucket', iso(2)),
+      turnContext(iso(2), 'gpt-5.5'),
+      { timestamp: iso(1.99), type: 'response_item', payload: { type: 'web_search_call', call_id: 'ws-1', status: 'completed' } },
+      tokenCount(iso(1.9), usage(1000, 0, 100), usage(1000, 0, 100)),
+    ]);
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    // Tokens and the fee share the single 'gpt-5.5' bucket — no zero-token twin.
+    assert.deepEqual(Object.keys(s.modelBreakdown), ['gpt-5.5']);
+    assert.equal(s.modelBreakdown['gpt-5.5'].tokens, 1100);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('codex --oss models resolve to the free tier in dash and colon (Ollama) forms', () => {
+  for (const id of ['gpt-oss', 'gpt-oss-20b', 'gpt-oss:20b', 'gpt-oss:120b']) {
+    const p = getCodexPricing(id);
+    assert.equal(p.input, 0, `${id} should be free`);
+    assert.equal(p.output, 0, `${id} should be free`);
+    assert.ok(!p.estimate, `${id} is an exact free rate, not an estimate`);
+  }
+});
+
+test('a missing timestamp inside a spawn replay keeps the burst gated', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-replay-nots-'));
+  try {
+    const burstTs = iso(5).slice(0, 19) + '.100Z';
+    const later = new Date(Date.parse(iso(5)) + 5000).toISOString();
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-spawn.jsonl', [
+      meta('spawn', burstTs, { source: { subagent: { thread_spawn: { parent: 'p' } } } }),
+      turnContext(burstTs, 'gpt-5.5'),
+      tokenCount(burstTs, usage(50000, 0, 5000), usage(50000, 0, 5000)),
+      // replayed parent event with NO timestamp — must not end the burst
+      { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: usage(60000, 0, 6000), last_token_usage: usage(10000, 0, 1000) } } },
+      // real post-burst usage
+      tokenCount(later, usage(2000, 0, 200), usage(62000, 0, 6200)),
+    ]);
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    assert.equal(s.totalInputTokens, 2000, 'only post-burst usage counts; the untimestamped replay line stays gated');
+    assert.equal(s.totalOutputTokens, 200);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // ── rollout parsing ──
 
 test('parses a modern envelope rollout: tokens, cost, files, commands, plan type', async () => {

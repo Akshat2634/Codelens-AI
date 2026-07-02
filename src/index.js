@@ -133,28 +133,54 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
     claude: correlatedSessions.filter(s => (s.source || 'claude') === 'claude').length,
     codex: correlatedSessions.filter(s => s.source === 'codex').length,
   };
-  const mkView = (subset, planConfig, sourceName) => {
-    const p = computeMetrics(subset, organicCommits, commitsByRepo, days, planConfig);
+  // organicCommits passed to a view must be "every in-window commit this view's
+  // sessions did NOT claim", so reconciliation.commits.aiMatched + organic
+  // always equals the window's commit count (the audit the attribution panel
+  // promises). For the combined view that's the joint organic set; for a
+  // per-agent view it also includes commits the OTHER agent claimed — from this
+  // agent's ROI perspective those are code it didn't write.
+  const mkView = (subset, planConfig, sourceName, viewOrganic) => {
+    const p = computeMetrics(subset, viewOrganic, commitsByRepo, days, planConfig);
     p.meta.source = sourceName;
     p.meta.sources = sourceCounts;
     p.meta.gitUser = gitUser;
     return p;
   };
 
-  // The combined view's plan is the sum of whichever flat fees were supplied —
-  // its API-equivalent spend spans both agents. Under --source, the view holds
-  // a single agent's sessions, so only that agent's plan applies.
-  const activePlans = [planConfigs.claude, planConfigs.codex].filter(Boolean);
+  // Distinct commits claimed by sessions matching a predicate (dedup by hash —
+  // correlation assigns each commit to one session, but guard anyway).
+  const commitsClaimedBy = (pred) => {
+    const seen = new Set();
+    const out = [];
+    for (const s of correlatedSessions) {
+      if (!pred(s)) continue;
+      for (const commit of (s.commits || [])) {
+        if (!seen.has(commit.hash)) { seen.add(commit.hash); out.push(commit); }
+      }
+    }
+    return out;
+  };
+
+  // The combined view's plan is the sum of the flat fees for the agents that
+  // actually have sessions. If any active agent lacks a plan, a combined
+  // utilization would divide multi-agent spend by a fee covering only part of
+  // it — so omit the plan on the combined view (each per-agent tab still shows
+  // its own). Under --source the view holds one agent, so only its plan applies.
+  const activeAgents = ['claude', 'codex'].filter(a => sourceCounts[a] > 0);
+  const activePlans = activeAgents.map(a => planConfigs[a]);
   const combinedPlan = sourceFilter
     ? planConfigs[sourceFilter] || null
-    : activePlans.length === 0 ? null
+    : activePlans.length === 0 || activePlans.some(p => !p) ? null
     : activePlans.length === 1 ? activePlans[0]
     : { name: 'combined', monthlyCost: activePlans.reduce((s, p) => s + p.monthlyCost, 0) };
 
-  const payloads = { all: mkView(correlatedSessions, combinedPlan, sourceFilter || 'all') };
+  const payloads = { all: mkView(correlatedSessions, combinedPlan, sourceFilter || 'all', organicCommits) };
   if (sourceCounts.claude > 0 && sourceCounts.codex > 0) {
-    payloads.claude = mkView(correlatedSessions.filter(s => (s.source || 'claude') === 'claude'), planConfigs.claude, 'claude');
-    payloads.codex = mkView(correlatedSessions.filter(s => s.source === 'codex'), planConfigs.codex, 'codex');
+    const isClaude = s => (s.source || 'claude') === 'claude';
+    const codexClaimed = commitsClaimedBy(s => s.source === 'codex');
+    const claudeClaimed = commitsClaimedBy(isClaude);
+    payloads.claude = mkView(correlatedSessions.filter(isClaude), planConfigs.claude, 'claude', [...organicCommits, ...codexClaimed]);
+    payloads.codex = mkView(correlatedSessions.filter(s => s.source === 'codex'), planConfigs.codex, 'codex', [...organicCommits, ...claudeClaimed]);
   }
 
   return payloads;
