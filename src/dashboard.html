@@ -2377,6 +2377,16 @@ function familyLabel(f) {
   const special = { gpt: 'GPT', codex: 'Codex', 'o-series': 'o-series', unknown: 'Unknown' };
   return special[f] || f.charAt(0).toUpperCase() + f.slice(1);
 }
+// A family label ('GPT') is only useful when it's grouping more than one
+// real model. subModels keys can differ only by a billing-tier suffix
+// ('gpt-5.5' vs 'gpt-5.5[long]' for long-context requests) — those are the
+// same model, so compare base ids. With exactly one distinct base model,
+// show its real name instead of the generic family bucket it happens to be in.
+function modelDisplayLabel(breakdown, family) {
+  const subs = Object.keys(breakdown[family]?.subModels || {});
+  const bases = [...new Set(subs.map(id => id.replace(/\[fast\]|\[us\]|\[long\]/g, '')))];
+  return bases.length === 1 ? formatModelName(bases[0]) : familyLabel(family);
+}
 let DATA = null;
 let initialRenderDone = false;
 
@@ -3644,7 +3654,7 @@ function initCharts() {
     data: {
       labels: (() => {
         const pcts = pctTo100(modelLabels.map(m => models[m].cost));
-        return modelLabels.map((m, i) => familyLabel(m) + ' (' + pcts[i] + '%)');
+        return modelLabels.map((m, i) => modelDisplayLabel(models, m) + ' (' + pcts[i] + '%)');
       })(),
       datasets: [{
         data: modelLabels.map(m => models[m].cost),
@@ -3670,7 +3680,7 @@ function initCharts() {
                 ` $${d.cost.toFixed(2)} | ${formatTokens(d.tokens)} tokens | ${d.sessions} sessions | ${Math.round(d.commits)} commits | ${tpc}`,
               ];
               const subEntries = Object.entries(d.subModels || {});
-              if (subEntries.length >= 1) {
+              if (subEntries.length > 1) {
                 for (const [modelId, sub] of subEntries) {
                   const pct = d.cost > 0 ? Math.round((sub.cost / d.cost) * 100) : 0;
                   lines.push(`  ${formatModelName(modelId)}: $${sub.cost.toFixed(2)} | ${formatTokens(sub.tokens)} tokens (${pct}%)`);
@@ -3730,7 +3740,7 @@ function initCharts() {
     type: 'bar',
     data: {
       labels: modelEffLabels.map(m => [
-        familyLabel(m),
+        modelDisplayLabel(modelEff, m),
         Math.round(modelEff[m].commits) + ' commits',
       ]),
       datasets: [{
