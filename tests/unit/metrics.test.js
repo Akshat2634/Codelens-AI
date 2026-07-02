@@ -167,7 +167,12 @@ test('line survival: lines added in the last 24h are right-censored from the rat
   const m = computeMetrics([session], [], cbr, 30);
   assert.equal(m.lineSurvival.totalAdded, 40);
   assert.equal(m.lineSurvival.maturing, 40);
-  assert.equal(m.lineSurvival.survivalRate, 100); // nothing matured yet → optimistic default
+  // Nothing has matured yet → the rate is unmeasurable, reported as null. A
+  // fabricated 100% here would bank full survival marks into the efficiency
+  // score and grade with zero evidence.
+  assert.equal(m.lineSurvival.survivalRate, null);
+  // …and null survival is neutral (not a free 50/50) in the efficiency score.
+  assert.ok(m.summary.efficiencyScore.explanation.includes('survival pending'));
 });
 
 test('model breakdown attributes whole commits to the dominant family', () => {
