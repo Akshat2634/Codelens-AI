@@ -61,12 +61,22 @@ const CODEX_PRICING = [
   ['gpt-5.1',             { input: 1.25, cachedInput: 0.125, output: 10 }],
   ['gpt-5-nano',          { input: 0.05, cachedInput: 0.005, output: 0.40 }],
   ['gpt-5-mini',          { input: 0.25, cachedInput: 0.025, output: 2 }],
+  ['gpt-5-pro',           { input: 15,   cachedInput: 1.50,  output: 120 }],
   ['gpt-5',               { input: 1.25, cachedInput: 0.125, output: 10 }],
+  ['gpt-4.1-mini',        { input: 0.40, cachedInput: 0.10,  output: 1.60 }],
+  ['gpt-4.1-nano',        { input: 0.10, cachedInput: 0.025, output: 0.40 }],
   ['gpt-4.1',             { input: 2,    cachedInput: 0.50,  output: 8 }],
-  // Early Codex CLI models (2025 logs)
+  // Local open-weight models (codex --oss) run on the user's machine — free
+  ['gpt-oss',             { input: 0,    cachedInput: 0,     output: 0 }],
+  // Early Codex CLI models (2025 logs) + o-series siblings that would
+  // otherwise be swallowed by a shorter prefix at the wrong rate
   ['o4-mini',             { input: 1.10, cachedInput: 0.275, output: 4.40 }],
+  ['o3-pro',              { input: 20,   cachedInput: 5,     output: 80 }],
   ['o3-mini',             { input: 1.10, cachedInput: 0.55,  output: 4.40 }],
   ['o3',                  { input: 2,    cachedInput: 0.50,  output: 8 }], // post-2025-06-10 (80% cut); earlier dates tiered below
+  ['o1-pro',              { input: 150,  cachedInput: 37.50, output: 600 }],
+  ['o1-mini',             { input: 1.10, cachedInput: 0.55,  output: 4.40 }],
+  ['o1',                  { input: 15,   cachedInput: 7.50,  output: 60 }],
 ];
 
 // o3 launched 2025-04-16 at $10/$2.50/$40 and was cut 80% on 2025-06-10.
@@ -272,10 +282,28 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
   let spawnReplay = false;
   let replaySecond = null;
 
+  // Compare timestamps numerically — one rollout can mix precisions (legacy
+  // meta lines lack milliseconds), where lexicographic order is wrong.
   const touchTimestamp = (ts) => {
     if (!ts) return;
-    if (!session.startTime || ts < session.startTime) session.startTime = ts;
-    if (!session.endTime || ts > session.endTime) session.endTime = ts;
+    const ms = Date.parse(ts);
+    if (Number.isNaN(ms)) return;
+    if (!session.startTime || ms < Date.parse(session.startTime)) session.startTime = ts;
+    if (!session.endTime || ms > Date.parse(session.endTime)) session.endTime = ts;
+  };
+
+  // Replay-burst gate for spawned subagent threads: everything re-stamped
+  // into the spawn second (the session_meta second) is parent history. The
+  // first line stamped in a later second ends the burst. Trade-off (shared
+  // with ccusage's fix for the same bug): a subagent whose real activity
+  // falls entirely inside the spawn second is skipped too.
+  const inReplayBurst = (ts) => {
+    if (!spawnReplay) return false;
+    const second = ts ? ts.slice(0, 19) : null;
+    if (replaySecond === null) replaySecond = second;
+    if (second === replaySecond) return true;
+    spawnReplay = false;
+    return false;
   };
 
   // The cached-tokens field name drifted across Codex versions.
@@ -352,9 +380,12 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
       if (payload.git?.branch) session.gitBranch = payload.git.branch;
       // A structured `source` (vs the plain "cli"/"vscode" string) marks a
       // subagent thread spawned from a parent session — its rollout begins
-      // with a replay of the parent history that must not be counted.
+      // with a replay of the parent history (usage, messages, tool calls all
+      // re-stamped to the spawn second) that must not be counted.
       if (payload.source && typeof payload.source === 'object') {
         spawnReplay = true;
+        const metaTs = ts || payload.timestamp;
+        if (metaTs) replaySecond = metaTs.slice(0, 19);
       }
       touchTimestamp(ts || payload.timestamp);
       continue;
@@ -377,17 +408,10 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
         if (info) {
           const model = info.model || currentModel || 'unknown';
 
-          // Replay-burst skip for subagent rollouts: everything stamped into
-          // the burst's first second is parent history, not this session's
-          // usage. Once the clock moves on, real usage begins.
-          const second = ts ? ts.slice(0, 19) : null;
-          if (spawnReplay) {
-            if (replaySecond === null) replaySecond = second;
-            if (second === replaySecond) {
-              if (info.total_token_usage) prevTotal = info.total_token_usage;
-              continue;
-            }
-            spawnReplay = false;
+          // Replay-burst skip: parent-history usage is not this session's.
+          if (inReplayBurst(ts)) {
+            if (info.total_token_usage) prevTotal = info.total_token_usage;
+            continue;
           }
 
           let delta = null;
@@ -396,21 +420,32 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
             if (info.total_token_usage) prevTotal = info.total_token_usage;
           } else if (info.total_token_usage) {
             // Older shape: cumulative totals only — accumulate the per-event
-            // delta. A field going DOWN means the counter reset (new context
+            // delta, normalizing the drifted cached-field aliases on BOTH
+            // sides. A field going DOWN means the counter reset (new context
             // window); treat the new value as a fresh baseline.
             const cur = info.total_token_usage;
+            const norm = (u) => ({
+              input_tokens: u?.input_tokens || 0,
+              cached_input_tokens: u ? cachedOf(u) : 0,
+              output_tokens: u?.output_tokens || 0,
+              reasoning_output_tokens: u?.reasoning_output_tokens || 0,
+            });
+            const curN = norm(cur);
+            const prevN = norm(prevTotal);
             delta = {};
-            for (const k of ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens']) {
-              const d = (cur[k] || 0) - (prevTotal?.[k] || 0);
-              delta[k] = d >= 0 ? d : (cur[k] || 0);
+            for (const k of Object.keys(curN)) {
+              const d = curN[k] - prevN[k];
+              delta[k] = d >= 0 ? d : curN[k];
             }
             prevTotal = cur;
           }
           if (delta) {
             // Exact-duplicate events appear when Codex replays history
-            // (branched threads, resumed sessions) — count each once.
+            // (branched threads, resumed sessions) — count each once. Only
+            // dedup timestamped events: without a timestamp, two identical
+            // deltas are more plausibly two real requests than a replay.
             const dupKey = `${ts}|${model}|${delta.input_tokens || 0}|${cachedOf(delta)}|${delta.output_tokens || 0}|${delta.reasoning_output_tokens || 0}`;
-            if (!seenUsage.has(dupKey)) {
+            if (!ts || !seenUsage.has(dupKey)) {
               seenUsage.add(dupKey);
               tokenCountResponses++;
               accumulateUsage(delta, ts, model);
@@ -420,19 +455,19 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
       } else if (et === 'user_message') {
         // Only real prompts — Codex also logs injected user_instructions /
         // environment_context blocks under the same event type.
-        if (!payload.kind || payload.kind === 'plain') {
+        if ((!payload.kind || payload.kind === 'plain') && !inReplayBurst(ts)) {
           eventUserMessages++;
           touchTimestamp(ts);
         }
       } else if (et === 'agent_message') {
-        agentMessages++;
+        if (!inReplayBurst(ts)) agentMessages++;
         touchTimestamp(ts);
       } else if (et === 'patch_apply_end') {
         // The structured record of file modifications: changes is a map of
         // absolute path -> {type: add|delete|update, move_path?}. Only count
-        // applied patches.
+        // applied patches (and not replayed parent history).
         touchTimestamp(ts);
-        if ((payload.success ?? true) && payload.status !== 'failed' && payload.status !== 'declined' && payload.changes) {
+        if ((payload.success ?? true) && payload.status !== 'failed' && payload.status !== 'declined' && payload.changes && !inReplayBurst(ts)) {
           for (const [file, change] of Object.entries(payload.changes)) {
             rawFiles.add(file);
             if (change?.move_path) rawFiles.add(String(change.move_path));
@@ -445,6 +480,9 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
     }
 
     if (kind === 'response_item') {
+      // Replayed parent history in spawned-thread rollouts also re-emits the
+      // conversation and tool calls — skip those alongside the token events.
+      if (inReplayBurst(ts)) continue;
       const it = payload.type;
       if (it === 'message') {
         const text = Array.isArray(payload.content)

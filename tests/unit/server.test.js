@@ -124,6 +124,17 @@ test('GET /api/all?source= selects the per-agent view and falls back to all', as
     // Unknown source → all view, not an error
     const bogus = await (await fetch(`http://127.0.0.1:${port}/api/all?source=cursor`)).json();
     assert.equal(bogus.meta.source, 'all');
+
+    // Prototype keys must not resolve through the payload map
+    for (const probe of ['constructor', '__proto__', 'hasOwnProperty']) {
+      const res = await fetch(`http://127.0.0.1:${port}/api/all?source=${probe}`);
+      assert.equal(res.status, 200, `?source=${probe} must not error`);
+      assert.equal((await res.json()).meta.source, 'all');
+    }
+
+    // Repeated params arrive as an array — must fall back, not crash
+    const arr = await (await fetch(`http://127.0.0.1:${port}/api/all?source=claude&source=codex`)).json();
+    assert.equal(arr.meta.source, 'all');
   });
 });
 

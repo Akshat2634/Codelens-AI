@@ -2425,7 +2425,10 @@ window.switchSource = async function(source) {
   if (bar) bar.querySelectorAll('button').forEach(b => { b.disabled = true; });
   try {
     const res = await fetch('/api/all?source=' + encodeURIComponent(source));
-    DATA = await res.json();
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const fresh = await res.json();
+    if (!fresh || !fresh.meta) throw new Error('malformed payload');
+    DATA = fresh;
     currentSource = DATA.meta.source || 'all';
     localStorage.setItem('codelens-source', currentSource);
     // Full re-render: re-arm the value animations and scroll-reveal observers
@@ -2433,6 +2436,7 @@ window.switchSource = async function(source) {
     initialRenderDone = false;
     render();
   } catch (err) {
+    // Keep the current view usable — just restore the tabs.
     if (bar) bar.querySelectorAll('button').forEach(b => { b.disabled = false; });
   }
 };
@@ -2653,10 +2657,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 function render() {
   const d = DATA;
   // Re-renders (source switch, refresh) replace every canvas — destroy the old
-  // Chart instances first so they don't accumulate in Chart.instances.
+  // Chart instances first so they don't accumulate in Chart.instances, and
+  // reset the chart-toggle state to match the freshly built (linear/stacked)
+  // charts so the toggle buttons aren't out of sync on their first click.
   if (typeof Chart !== 'undefined') {
     Object.values(Chart.instances || {}).forEach(chart => chart.destroy());
   }
+  timelineLogScale = false;
+  tokenBurnPercentMode = false;
   renderSourceTabs();
   const fmtDate = iso => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   const dateLabel = (d.meta.startDate && d.meta.endDate)
@@ -3370,9 +3378,10 @@ function formatModelName(modelId) {
   const lower = modelId.toLowerCase();
   // OpenAI models (Codex sessions): gpt-5.1-codex-max → GPT-5.1 Codex Max,
   // gpt-5-codex → GPT-5 Codex, codex-mini-latest → Codex Mini. o3 / o4-mini
-  // keep OpenAI's lowercase branding.
+  // keep OpenAI's lowercase branding. API date suffixes (gpt-5.2-2025-12-11)
+  // are dropped, same as the pricing path.
   if (/^(gpt-|o\d|codex)/.test(lower)) {
-    const parts = lower.replace(/-latest$/, '').split('-');
+    const parts = lower.replace(/-\d{4}-\d{2}-\d{2}$/, '').replace(/-latest$/, '').split('-');
     if (/^o\d+$/.test(parts[0])) return parts.join('-') + suffix;
     const cap = p => p.charAt(0).toUpperCase() + p.slice(1);
     if (parts[0] === 'gpt') {

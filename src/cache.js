@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +7,23 @@ import { listCodexSessionFiles } from './codex-parser.js';
 
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'agent-analytics');
 const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
+
+// Default session locations — shared with index.js so the "is this a custom
+// dir?" check below can't drift from the CLI's own defaults.
+export const DEFAULT_CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
+export const DEFAULT_CODEX_DIR = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
+
+// Runs against custom --claude-dir/--codex-dir (tests, CI, fixtures) get their
+// own cache file, so they never evict the cache built from the user's real
+// sessions — before this, one `npm run test:e2e` cost the next real run a full
+// re-parse.
+function cacheFileFor(options = {}) {
+  const claudeDir = options.claudeDir || DEFAULT_CLAUDE_DIR;
+  const codexDir = options.codexDir || DEFAULT_CODEX_DIR;
+  if (claudeDir === DEFAULT_CLAUDE_DIR && codexDir === DEFAULT_CODEX_DIR) return CACHE_FILE;
+  const hash = createHash('sha1').update(`${claudeDir}|${codexDir}`).digest('hex').slice(0, 8);
+  return path.join(CACHE_DIR, `parsed-sessions-${hash}.json`);
+}
 // Bump whenever parsing or pricing logic changes so cached sessions (which store
 // already-computed costs) are recomputed on upgrade instead of served stale.
 // 6: Sonnet 5 date-aware pricing (intro $2/$10 → standard $3/$15 on 2026-09-01).
@@ -21,12 +39,13 @@ const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
 const CACHE_VERSION = 10;
 
 export function loadCache(options = {}) {
-  if (!existsSync(CACHE_FILE)) {
+  const cacheFile = cacheFileFor(options);
+  if (!existsSync(cacheFile)) {
     return null;
   }
 
   try {
-    const raw = readFileSync(CACHE_FILE, 'utf-8');
+    const raw = readFileSync(cacheFile, 'utf-8');
     const data = JSON.parse(raw);
     if (data.version !== CACHE_VERSION) return null;
     // Sessions were parsed with the lookback window and project filter baked in
@@ -60,12 +79,13 @@ export function saveCache(sessions, fileIndex, codexFileIndex, options = {}) {
     codexFileIndex: codexFileIndex || {},
     sessions,
   };
-  writeFileSync(CACHE_FILE, JSON.stringify(data));
+  writeFileSync(cacheFileFor(options), JSON.stringify(data));
 }
 
-export function deleteCache() {
-  if (existsSync(CACHE_FILE)) {
-    unlinkSync(CACHE_FILE);
+export function deleteCache(options = {}) {
+  const cacheFile = cacheFileFor(options);
+  if (existsSync(cacheFile)) {
+    unlinkSync(cacheFile);
   }
 }
 

@@ -14,8 +14,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(__dirname, 'claude-projects', 'test-project');
 const CODEX_DIR = path.join(__dirname, 'codex-sessions');
 mkdirSync(OUT_DIR, { recursive: true });
-// The codex tree is dated (YYYY/MM/DD from "now") — wipe stale date dirs from
-// previous generations so old fixture sessions don't accumulate.
 rmSync(CODEX_DIR, { recursive: true, force: true });
 
 const FAKE_REPO = '/tmp/codelens-fixture-repo';
@@ -29,19 +27,16 @@ function session(sessionId, model, entries) {
   writeFileSync(path.join(OUT_DIR, sessionId + '.jsonl'), lines.join('\n') + '\n');
 }
 
-// Write a Codex rollout file into the dated tree Codex CLI uses.
-function codexSession(sessionId, minutesAgo, lines) {
-  const start = new Date(Date.now() - minutesAgo * 60_000);
-  const dir = path.join(
-    CODEX_DIR,
-    String(start.getFullYear()),
-    String(start.getMonth() + 1).padStart(2, '0'),
-    String(start.getDate()).padStart(2, '0')
-  );
+// Write a Codex rollout into a date tree like Codex CLI's. Directory and
+// filename are FIXED (only line timestamps are now-relative) so regeneration
+// rewrites the same committed paths instead of deleting them and creating
+// fresh names — like the Claude fixtures, whose <uuid>.jsonl names are stable.
+// The parser gates on file mtime, not the folder date, so a fixed tree is fine.
+function codexSession(sessionId, lines) {
+  const dir = path.join(CODEX_DIR, '2026', '01', '01');
   mkdirSync(dir, { recursive: true });
-  const stamp = start.toISOString().slice(0, 19).replace(/:/g, '-');
   writeFileSync(
-    path.join(dir, `rollout-${stamp}-${sessionId}.jsonl`),
+    path.join(dir, `rollout-2026-01-01T00-00-00-${sessionId}.jsonl`),
     lines.map(l => JSON.stringify(l)).join('\n') + '\n'
   );
 }
@@ -172,7 +167,7 @@ session(s5, 'claude-sonnet-5', [
 
 // ── Codex Session 1: Shipped work (gpt-5.3-codex, ~30h ago)
 const cx1 = '11111111-aaaa-bbbb-cccc-000000000001';
-codexSession(cx1, 30 * 60, [
+codexSession(cx1, [
   { timestamp: iso(30 * 60), type: 'session_meta', payload: { session_id: cx1, id: cx1, timestamp: iso(30 * 60), cwd: FAKE_REPO, originator: 'codex_cli_rs', cli_version: '0.142.5', source: 'cli', git: { branch: 'main' } } },
   { timestamp: iso(30 * 60), type: 'turn_context', payload: { cwd: FAKE_REPO, approval_policy: 'on-request', sandbox_policy: { mode: 'workspace-write' }, model: 'gpt-5.3-codex', effort: 'medium', summary: 'auto' } },
   { timestamp: iso(30 * 60), type: 'event_msg', payload: { type: 'user_message', message: 'Add rate limiting to the API.', kind: 'plain' } },
@@ -186,7 +181,7 @@ codexSession(cx1, 30 * 60, [
 
 // ── Codex Session 2: Prior-week work for narrative comparison (gpt-5.1-codex-max, 9 days ago)
 const cx2 = '11111111-aaaa-bbbb-cccc-000000000002';
-codexSession(cx2, 9 * 24 * 60, [
+codexSession(cx2, [
   { timestamp: iso(9 * 24 * 60), type: 'session_meta', payload: { session_id: cx2, id: cx2, timestamp: iso(9 * 24 * 60), cwd: FAKE_REPO, originator: 'codex_cli_rs', cli_version: '0.138.0', source: 'cli', git: { branch: 'feature/codex' } } },
   { timestamp: iso(9 * 24 * 60), type: 'turn_context', payload: { cwd: FAKE_REPO, approval_policy: 'on-request', sandbox_policy: { mode: 'workspace-write' }, model: 'gpt-5.1-codex-max', effort: 'high', summary: 'auto' } },
   { timestamp: iso(9 * 24 * 60), type: 'event_msg', payload: { type: 'user_message', message: 'Refactor the config loader.', kind: 'plain' } },
@@ -197,7 +192,7 @@ codexSession(cx2, 9 * 24 * 60, [
 
 // ── Codex Session 3: Chat-only exploration (gpt-5.5, ~5h ago)
 const cx3 = '11111111-aaaa-bbbb-cccc-000000000003';
-codexSession(cx3, 5 * 60, [
+codexSession(cx3, [
   { timestamp: iso(5 * 60), type: 'session_meta', payload: { session_id: cx3, id: cx3, timestamp: iso(5 * 60), cwd: FAKE_REPO, originator: 'codex_cli_rs', cli_version: '0.142.5', source: 'cli', git: { branch: 'main' } } },
   { timestamp: iso(5 * 60), type: 'turn_context', payload: { cwd: FAKE_REPO, approval_policy: 'on-request', sandbox_policy: { mode: 'read-only' }, model: 'gpt-5.5', effort: 'medium', summary: 'auto' } },
   { timestamp: iso(5 * 60), type: 'event_msg', payload: { type: 'user_message', message: 'How does the auth flow work?', kind: 'plain' } },

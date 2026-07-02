@@ -100,6 +100,23 @@ test('unknown OpenAI models fall back to estimated gpt-5.5 rates', () => {
   assert.equal(p.estimate, true);
 });
 
+test('sibling models are not swallowed by shorter prefixes at the wrong rate', () => {
+  // gpt-4.1-mini/nano must not bill at full gpt-4.1 rates
+  assert.equal(getCodexPricing('gpt-4.1-mini').input, 0.40);
+  assert.equal(getCodexPricing('gpt-4.1-nano').input, 0.10);
+  // gpt-5-pro must not bill at base gpt-5 rates
+  assert.equal(getCodexPricing('gpt-5-pro').input, 15);
+  // o3-pro / o1 family must not bill at o3 rates or fall to the gpt fallback
+  assert.equal(getCodexPricing('o3-pro').input, 20);
+  assert.equal(getCodexPricing('o1').input, 15);
+  assert.equal(getCodexPricing('o1-mini').input, 1.10);
+  // local open-weight models (codex --oss) are free, not fallback-priced
+  const oss = getCodexPricing('gpt-oss-20b');
+  assert.equal(oss.input, 0);
+  assert.equal(oss.output, 0);
+  assert.ok(!oss.estimate, 'free local models are exact, not estimated');
+});
+
 test('calculateCodexCost: cached input billed at the cached rate, reasoning not double-billed', () => {
   // 1M fresh input + 1M output + 1M cached on gpt-5-codex: $1.25 + $10 + $0.125
   const cost = calculateCodexCost(1_000_000, 1_000_000, 1_000_000, 'gpt-5-codex');
@@ -166,7 +183,8 @@ test('cumulative-only token counts (no last_token_usage) are diffed, with reset 
       meta('sess-2', iso(10)),
       turnContext(iso(10), 'gpt-5'),
       noLast(iso(9.9), usage(1000, 0, 100)),
-      noLast(iso(9.8), usage(3000, 1000, 300)),
+      // drifted cached-field alias must be diffed, not dropped
+      noLast(iso(9.8), { input_tokens: 3000, cache_read_input_tokens: 1000, output_tokens: 300, total_tokens: 3300 }),
       // counter reset (context compaction): totals drop — new baseline, not negative
       noLast(iso(9.7), usage(500, 0, 50)),
     ]);
@@ -175,7 +193,7 @@ test('cumulative-only token counts (no last_token_usage) are diffed, with reset 
     const s = sessions[0];
     // deltas: (1000,0,100) + (2000,1000,200) + reset-baseline (500,0,50)
     assert.equal(s.totalInputTokens, 1000 + 1000 + 500); // fresh = input - cached
-    assert.equal(s.cacheReadTokens, 1000);
+    assert.equal(s.cacheReadTokens, 1000, 'cache_read_input_tokens alias must be diffed');
     assert.equal(s.totalOutputTokens, 350);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -185,20 +203,30 @@ test('cumulative-only token counts (no last_token_usage) are diffed, with reset 
 test('subagent (thread_spawn) replay burst and exact duplicates are not counted', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'codex-spawn-'));
   try {
-    const burstTs = iso(5).slice(0, 19) + '.100Z';
-    const burstTs2 = iso(5).slice(0, 19) + '.200Z';
-    const laterTs = new Date(Date.parse(iso(5)) + 5000).toISOString();
+    // One time base for all derived timestamps — independent iso() calls could
+    // straddle a wall-clock second boundary and flake the same-second checks.
+    const base = iso(5);
+    const burstTs = base.slice(0, 19) + '.100Z';
+    const burstTs2 = base.slice(0, 19) + '.200Z';
+    const laterTs = new Date(Date.parse(base) + 5000).toISOString();
+    const laterTs2 = new Date(Date.parse(base) + 6000).toISOString();
     writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-sess-3.jsonl', [
       // structured source object marks a spawned subagent thread
-      meta('sess-3', iso(5), { source: { subagent: { thread_spawn: { parent: 'sess-1' } } } }),
-      turnContext(iso(5), 'gpt-5.5'),
-      // replayed parent history: all in the same second — must be skipped
+      meta('sess-3', burstTs, { source: { subagent: { thread_spawn: { parent: 'sess-1' } } } }),
+      turnContext(burstTs, 'gpt-5.5'),
+      // replayed parent history: all in the spawn second — usage, messages,
+      // tool calls, and patches must ALL be skipped
+      { timestamp: burstTs, type: 'event_msg', payload: { type: 'user_message', message: 'replayed parent prompt', kind: 'plain' } },
+      { timestamp: burstTs, type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: JSON.stringify({ cmd: 'npm test' }), call_id: 'replay-1' } },
+      { timestamp: burstTs, type: 'event_msg', payload: { type: 'patch_apply_end', call_id: 'replay-2', success: true, status: 'completed', stdout: '', stderr: '', changes: { '/tmp/codex-fixture-repo/src/replayed.js': { type: 'update', unified_diff: '@@' } } } },
       tokenCount(burstTs, usage(50000, 40000, 5000), usage(50000, 40000, 5000)),
       tokenCount(burstTs2, usage(60000, 50000, 6000), usage(110000, 90000, 11000)),
       // real usage after the burst second
+      { timestamp: laterTs, type: 'event_msg', payload: { type: 'user_message', message: 'real subagent prompt', kind: 'plain' } },
       tokenCount(laterTs, usage(2000, 1000, 200), usage(112000, 91000, 11200)),
       // exact duplicate of the real event — replayed histories repeat lines
       tokenCount(laterTs, usage(2000, 1000, 200), usage(112000, 91000, 11200)),
+      { timestamp: laterTs2, type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: JSON.stringify({ cmd: 'npm run lint' }), call_id: 'real-1' } },
     ]);
 
     const { sessions } = await parseCodexSessions(root, 30);
@@ -206,6 +234,9 @@ test('subagent (thread_spawn) replay burst and exact duplicates are not counted'
     assert.equal(s.totalInputTokens, 1000, 'only the post-burst event counts, once');
     assert.equal(s.cacheReadTokens, 1000);
     assert.equal(s.totalOutputTokens, 200);
+    assert.equal(s.userMessageCount, 1, 'replayed parent prompt must not count');
+    assert.equal(s.totalBashCalls, 1, 'replayed parent tool call must not count');
+    assert.deepEqual(s.filesWritten, [], 'replayed parent patch must not count');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
