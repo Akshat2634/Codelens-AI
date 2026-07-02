@@ -1,17 +1,22 @@
-// Generates synthetic Claude Code session JSONL files for CI smoke tests.
-// Output: tests/fixtures/claude-projects/test-project/*.jsonl
+// Generates synthetic agent session files for CI smoke tests.
+// Output: tests/fixtures/claude-projects/test-project/*.jsonl (Claude Code)
+//         tests/fixtures/codex-sessions/YYYY/MM/DD/rollout-*.jsonl (OpenAI Codex)
 //
-// Shape mirrors what ~/.claude/projects/ contains in practice — user / assistant
-// messages with usage tokens, tool calls, and a sessionId. The parser will pick
-// these up and the dashboard will render with non-empty data.
+// Shapes mirror what ~/.claude/projects/ and ~/.codex/sessions/ contain in
+// practice. The parsers pick these up and the dashboard renders with non-empty
+// data for both agent sources (which also makes the source tabs appear).
 
 import { fileURLToPath } from 'node:url';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(__dirname, 'claude-projects', 'test-project');
+const CODEX_DIR = path.join(__dirname, 'codex-sessions');
 mkdirSync(OUT_DIR, { recursive: true });
+// The codex tree is dated (YYYY/MM/DD from "now") — wipe stale date dirs from
+// previous generations so old fixture sessions don't accumulate.
+rmSync(CODEX_DIR, { recursive: true, force: true });
 
 const FAKE_REPO = '/tmp/codelens-fixture-repo';
 
@@ -22,6 +27,23 @@ function iso(minutesAgo) {
 function session(sessionId, model, entries) {
   const lines = entries.map(e => JSON.stringify(e));
   writeFileSync(path.join(OUT_DIR, sessionId + '.jsonl'), lines.join('\n') + '\n');
+}
+
+// Write a Codex rollout file into the dated tree Codex CLI uses.
+function codexSession(sessionId, minutesAgo, lines) {
+  const start = new Date(Date.now() - minutesAgo * 60_000);
+  const dir = path.join(
+    CODEX_DIR,
+    String(start.getFullYear()),
+    String(start.getMonth() + 1).padStart(2, '0'),
+    String(start.getDate()).padStart(2, '0')
+  );
+  mkdirSync(dir, { recursive: true });
+  const stamp = start.toISOString().slice(0, 19).replace(/:/g, '-');
+  writeFileSync(
+    path.join(dir, `rollout-${stamp}-${sessionId}.jsonl`),
+    lines.map(l => JSON.stringify(l)).join('\n') + '\n'
+  );
 }
 
 // ── Session 1: Shipped work (Sonnet, 3 days ago)
@@ -148,4 +170,41 @@ session(s5, 'claude-sonnet-5', [
   },
 ]);
 
-console.log('Wrote 5 synthetic sessions to ' + OUT_DIR);
+// ── Codex Session 1: Shipped work (gpt-5.3-codex, ~30h ago)
+const cx1 = '11111111-aaaa-bbbb-cccc-000000000001';
+codexSession(cx1, 30 * 60, [
+  { timestamp: iso(30 * 60), type: 'session_meta', payload: { session_id: cx1, id: cx1, timestamp: iso(30 * 60), cwd: FAKE_REPO, originator: 'codex_cli_rs', cli_version: '0.142.5', source: 'cli', git: { branch: 'main' } } },
+  { timestamp: iso(30 * 60), type: 'turn_context', payload: { cwd: FAKE_REPO, approval_policy: 'on-request', sandbox_policy: { mode: 'workspace-write' }, model: 'gpt-5.3-codex', effort: 'medium', summary: 'auto' } },
+  { timestamp: iso(30 * 60), type: 'event_msg', payload: { type: 'user_message', message: 'Add rate limiting to the API.', kind: 'plain' } },
+  { timestamp: iso(30 * 60 - 1), type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: JSON.stringify({ cmd: 'npm test', workdir: FAKE_REPO }), call_id: 'cx1-c1' } },
+  { timestamp: iso(30 * 60 - 1), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 18000, cached_input_tokens: 15000, output_tokens: 900, reasoning_output_tokens: 600, total_tokens: 18900 }, last_token_usage: { input_tokens: 18000, cached_input_tokens: 15000, output_tokens: 900, reasoning_output_tokens: 600, total_tokens: 18900 }, model_context_window: 272000 }, rate_limits: { plan_type: 'plus' } } },
+  { timestamp: iso(30 * 60 - 2), type: 'response_item', payload: { type: 'custom_tool_call', name: 'apply_patch', call_id: 'cx1-c2', input: '*** Begin Patch\n*** Update File: src/limiter.js\n@@\n-old\n+new\n*** End Patch' } },
+  { timestamp: iso(30 * 60 - 2), type: 'event_msg', payload: { type: 'patch_apply_end', call_id: 'cx1-c2', success: true, status: 'completed', stdout: 'ok', stderr: '', changes: { [FAKE_REPO + '/src/limiter.js']: { type: 'update', unified_diff: '@@', move_path: null } } } },
+  { timestamp: iso(30 * 60 - 3), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 41000, cached_input_tokens: 34000, output_tokens: 2400, reasoning_output_tokens: 1500, total_tokens: 43400 }, last_token_usage: { input_tokens: 23000, cached_input_tokens: 19000, output_tokens: 1500, reasoning_output_tokens: 900, total_tokens: 24500 } } } },
+  { timestamp: iso(30 * 60 - 4), type: 'event_msg', payload: { type: 'agent_message', message: 'Rate limiting added with tests.' } },
+]);
+
+// ── Codex Session 2: Prior-week work for narrative comparison (gpt-5.1-codex-max, 9 days ago)
+const cx2 = '11111111-aaaa-bbbb-cccc-000000000002';
+codexSession(cx2, 9 * 24 * 60, [
+  { timestamp: iso(9 * 24 * 60), type: 'session_meta', payload: { session_id: cx2, id: cx2, timestamp: iso(9 * 24 * 60), cwd: FAKE_REPO, originator: 'codex_cli_rs', cli_version: '0.138.0', source: 'cli', git: { branch: 'feature/codex' } } },
+  { timestamp: iso(9 * 24 * 60), type: 'turn_context', payload: { cwd: FAKE_REPO, approval_policy: 'on-request', sandbox_policy: { mode: 'workspace-write' }, model: 'gpt-5.1-codex-max', effort: 'high', summary: 'auto' } },
+  { timestamp: iso(9 * 24 * 60), type: 'event_msg', payload: { type: 'user_message', message: 'Refactor the config loader.', kind: 'plain' } },
+  { timestamp: iso(9 * 24 * 60 - 1), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 52000, cached_input_tokens: 45000, output_tokens: 3100, reasoning_output_tokens: 2000, total_tokens: 55100 }, last_token_usage: { input_tokens: 52000, cached_input_tokens: 45000, output_tokens: 3100, reasoning_output_tokens: 2000, total_tokens: 55100 } } } },
+  { timestamp: iso(9 * 24 * 60 - 2), type: 'event_msg', payload: { type: 'patch_apply_end', call_id: 'cx2-c1', success: true, status: 'completed', stdout: 'ok', stderr: '', changes: { [FAKE_REPO + '/src/config.js']: { type: 'update', unified_diff: '@@', move_path: null } } } },
+  { timestamp: iso(9 * 24 * 60 - 3), type: 'event_msg', payload: { type: 'agent_message', message: 'Config loader refactored.' } },
+]);
+
+// ── Codex Session 3: Chat-only exploration (gpt-5.5, ~5h ago)
+const cx3 = '11111111-aaaa-bbbb-cccc-000000000003';
+codexSession(cx3, 5 * 60, [
+  { timestamp: iso(5 * 60), type: 'session_meta', payload: { session_id: cx3, id: cx3, timestamp: iso(5 * 60), cwd: FAKE_REPO, originator: 'codex_cli_rs', cli_version: '0.142.5', source: 'cli', git: { branch: 'main' } } },
+  { timestamp: iso(5 * 60), type: 'turn_context', payload: { cwd: FAKE_REPO, approval_policy: 'on-request', sandbox_policy: { mode: 'read-only' }, model: 'gpt-5.5', effort: 'medium', summary: 'auto' } },
+  { timestamp: iso(5 * 60), type: 'event_msg', payload: { type: 'user_message', message: 'How does the auth flow work?', kind: 'plain' } },
+  { timestamp: iso(5 * 60 - 1), type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: JSON.stringify({ cmd: 'grep -r authenticate src/', workdir: FAKE_REPO }), call_id: 'cx3-c1' } },
+  { timestamp: iso(5 * 60 - 1), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 9000, cached_input_tokens: 7500, output_tokens: 700, reasoning_output_tokens: 300, total_tokens: 9700 }, last_token_usage: { input_tokens: 9000, cached_input_tokens: 7500, output_tokens: 700, reasoning_output_tokens: 300, total_tokens: 9700 } } } },
+  { timestamp: iso(5 * 60 - 2), type: 'event_msg', payload: { type: 'agent_message', message: 'The auth flow uses middleware chaining…' } },
+]);
+
+console.log('Wrote 5 synthetic Claude sessions to ' + OUT_DIR);
+console.log('Wrote 3 synthetic Codex sessions to ' + CODEX_DIR);

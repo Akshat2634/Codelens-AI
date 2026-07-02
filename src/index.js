@@ -4,8 +4,9 @@ import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Command } from 'commander';
-import { deleteCache, getStaleFiles, loadCache, saveCache } from './cache.js';
+import { deleteCache, getCodexStaleFiles, getStaleFiles, loadCache, saveCache } from './cache.js';
 import { parseAllProjects } from './claude-parser.js';
+import { parseCodexSessions } from './codex-parser.js';
 import { correlateSessions } from './correlator.js';
 import { analyzeGitRepo, getGitUser } from './git-analyzer.js';
 import { computeMetrics } from './metrics.js';
@@ -29,20 +30,18 @@ const icon = {
 };
 const fmt = (ms) => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 
-async function buildPayload(claudeDir, days, project, forceRefresh = false, planConfig = null) {
-  // Step 1: Parse sessions (with caching)
-  let sessions;
-  let fileIndex;
+async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null) {
+  // Step 1: Parse sessions from every agent source (with caching)
   const startParse = Date.now();
-  // Same cutoff computation as parseAllProjects, so the cache staleness scan and
-  // the parser agree on which files are inside the lookback window.
+  // Same cutoff computation as the parsers, so the cache staleness scan and
+  // the parsers agree on which files are inside the lookback window.
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
   const cutoffMs = cutoffDate.getTime();
   // cutoffDay keys the cache to the day it was built: sessions are clipped to
   // the rolling window at parse time, so yesterday's cache would serve
   // yesterday's clipping. Costs one full re-parse per day.
-  const cacheOptions = { days, project: project || null, claudeDir, cutoffDay: cutoffDate.toDateString() };
+  const cacheOptions = { days, project: project || null, claudeDir, codexDir, cutoffDay: cutoffDate.toDateString() };
 
   if (forceRefresh) {
     deleteCache();
@@ -50,33 +49,60 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false, plan
   }
 
   const cached = forceRefresh ? null : loadCache(cacheOptions);
+  const inWindow = (s) => new Date(s.endTime || s.startTime).getTime() >= cutoffMs;
+
+  // Each source keeps its own file index and staleness scan, so a fresh Codex
+  // rollout doesn't force a full Claude re-parse (and vice versa) — the
+  // unchanged side is served straight from the cache.
+  let claudeSessions = null;
+  let claudeIndex = null;
+  let codexSessions = null;
+  let codexIndex = null;
+  const parseNotes = [];
 
   if (cached) {
     const stale = getStaleFiles(claudeDir, cached.fileIndex, cutoffMs, project);
-    const newCount = stale.newFiles.length;
-    const modifiedCount = stale.modifiedFiles.length;
-    const deletedCount = stale.deletedFiles.length;
-    const cachedCount = Object.keys(cached.fileIndex).length - modifiedCount - deletedCount;
-
-    if (newCount === 0 && modifiedCount === 0 && deletedCount === 0) {
+    if (stale.newFiles.length === 0 && stale.modifiedFiles.length === 0 && stale.deletedFiles.length === 0) {
       // Re-apply the window filter (same rule as the parser: keep sessions with
       // any activity in the window). The cutoffDay cache key means this cache
       // was built today, so per-session clipping is already current.
-      sessions = cached.sessions.filter(s => new Date(s.endTime || s.startTime).getTime() >= cutoffMs);
-      fileIndex = cached.fileIndex;
-      console.log(`  ${icon.ok} Parsing sessions ${c.dim}── ${sessions.length} cached (${fmt(Date.now() - startParse)})${c.reset}`);
+      claudeSessions = cached.sessions.filter(s => (s.source || 'claude') === 'claude' && inWindow(s));
+      claudeIndex = cached.fileIndex;
+      parseNotes.push(`claude: ${claudeSessions.length} cached`);
     } else {
-      const { sessions: freshSessions, fileIndex: freshIndex } = await parseAllProjects(claudeDir, days, project);
-      sessions = freshSessions;
-      fileIndex = freshIndex;
-      console.log(`  ${icon.ok} Parsing sessions ${c.dim}── ${newCount} new, ${modifiedCount} updated, ${Math.max(0, cachedCount)} cached (${fmt(Date.now() - startParse)})${c.reset}`);
+      parseNotes.push(`claude: ${stale.newFiles.length} new, ${stale.modifiedFiles.length} updated`);
     }
-  } else {
-    const result = await parseAllProjects(claudeDir, days, project);
-    sessions = result.sessions;
-    fileIndex = result.fileIndex;
-    console.log(`  ${icon.ok} Parsing sessions ${c.dim}── ${sessions.length} parsed (${fmt(Date.now() - startParse)})${c.reset}`);
+    const staleCodex = getCodexStaleFiles(codexDir, cached.codexFileIndex || {}, cutoffMs);
+    if (staleCodex.newFiles.length === 0 && staleCodex.modifiedFiles.length === 0 && staleCodex.deletedFiles.length === 0) {
+      codexSessions = cached.sessions.filter(s => s.source === 'codex' && inWindow(s));
+      codexIndex = cached.codexFileIndex || {};
+      parseNotes.push(`codex: ${codexSessions.length} cached`);
+    } else {
+      parseNotes.push(`codex: ${staleCodex.newFiles.length} new, ${staleCodex.modifiedFiles.length} updated`);
+    }
   }
+
+  if (!claudeSessions) {
+    const result = await parseAllProjects(claudeDir, days, project);
+    claudeSessions = result.sessions;
+    claudeIndex = result.fileIndex;
+    if (!cached) parseNotes.push(`claude: ${claudeSessions.length} parsed`);
+  }
+  if (!codexSessions) {
+    const result = await parseCodexSessions(codexDir, days, project);
+    codexSessions = result.sessions;
+    codexIndex = result.fileIndex;
+    if (!cached) parseNotes.push(`codex: ${codexSessions.length} parsed`);
+  }
+
+  const allParsed = [...claudeSessions, ...codexSessions];
+  console.log(`  ${icon.ok} Parsing sessions ${c.dim}── ${parseNotes.join(' · ')} (${fmt(Date.now() - startParse)})${c.reset}`);
+
+  // Optional --source filter: analyze a single agent's sessions only. The cache
+  // still stores everything parsed, so switching sources doesn't re-parse.
+  const sessions = sourceFilter
+    ? allParsed.filter(s => (s.source || 'claude') === sourceFilter)
+    : allParsed;
 
   if (sessions.length === 0) {
     return null;
@@ -91,18 +117,44 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false, plan
   }
   console.log(`  ${icon.ok} Analyzing git repos ${c.dim}── ${repoPathsSet.size} repos (${fmt(Date.now() - startGit)})${c.reset}`);
 
-  // Step 3: Correlate sessions with commits
+  // Step 3: Correlate sessions with commits. All sources correlate together so
+  // a commit is claimed by at most ONE session across agents — per-source views
+  // then filter the correlated set, never re-attribute.
   const { correlatedSessions, organicCommits } = correlateSessions(sessions, commitsByRepo, cutoffMs);
   console.log(`  ${icon.ok} Correlating sessions ${c.dim}── done${c.reset}`);
 
-  // Step 4: Compute metrics
-  const payload = computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days, planConfig);
-  payload.meta.gitUser = getGitUser();
+  // Step 4: Compute metrics — one payload over everything, plus a per-agent
+  // view when more than one agent has sessions (drives the dashboard tabs).
+  const gitUser = getGitUser();
+  const sourceCounts = {
+    claude: correlatedSessions.filter(s => (s.source || 'claude') === 'claude').length,
+    codex: correlatedSessions.filter(s => s.source === 'codex').length,
+  };
+  const mkView = (subset, planConfig, sourceName) => {
+    const p = computeMetrics(subset, organicCommits, commitsByRepo, days, planConfig);
+    p.meta.source = sourceName;
+    p.meta.sources = sourceCounts;
+    p.meta.gitUser = gitUser;
+    return p;
+  };
 
-  // Save cache for next run
-  saveCache(sessions, fileIndex, cacheOptions);
+  // The combined view's plan is the sum of whichever flat fees were supplied —
+  // its API-equivalent spend spans both agents.
+  const activePlans = [planConfigs.claude, planConfigs.codex].filter(Boolean);
+  const combinedPlan = activePlans.length === 0 ? null
+    : activePlans.length === 1 ? activePlans[0]
+    : { name: 'combined', monthlyCost: activePlans.reduce((s, p) => s + p.monthlyCost, 0) };
 
-  return payload;
+  const payloads = { all: mkView(correlatedSessions, combinedPlan, 'all') };
+  if (sourceCounts.claude > 0 && sourceCounts.codex > 0) {
+    payloads.claude = mkView(correlatedSessions.filter(s => (s.source || 'claude') === 'claude'), planConfigs.claude, 'claude');
+    payloads.codex = mkView(correlatedSessions.filter(s => s.source === 'codex'), planConfigs.codex, 'codex');
+  }
+
+  // Save cache for next run (everything parsed, regardless of --source)
+  saveCache(allParsed, claudeIndex, codexIndex, cacheOptions);
+
+  return payloads;
 }
 
 async function main() {
@@ -119,33 +171,49 @@ async function main() {
     .option('--refresh', 'force full re-parse, ignore cache')
     .option('--autonomy', 'print autonomy metrics table to stdout and exit')
     .option('--claude-dir <path>', 'override path to Claude Code projects directory (for testing/CI)')
-    .option('--plan <tier>', 'subscription mode — effective $/commit vs your flat plan: pro | max5 | max20')
-    .option('--plan-cost <amount>', 'custom monthly subscription cost in USD (overrides --plan)');
+    .option('--codex-dir <path>', 'override path to OpenAI Codex sessions directory (for testing/CI)')
+    .option('--source <agent>', 'analyze a single agent only: claude | codex')
+    .option('--plan <tier>', 'Claude subscription mode — effective $/commit vs your flat plan: pro | max5 | max20')
+    .option('--plan-cost <amount>', 'custom Claude monthly subscription cost in USD (overrides --plan)')
+    .option('--codex-plan <tier>', 'Codex/ChatGPT subscription mode: plus | pro100 | pro | business')
+    .option('--codex-plan-cost <amount>', 'custom Codex monthly subscription cost in USD (overrides --codex-plan)');
 
   program.parse();
   const opts = program.opts();
   const port = parseInt(opts.port, 10);
   const days = parseInt(opts.days, 10);
 
-  // Optional subscription "effective cost" mode. Monthly USD by Anthropic plan.
-  const PLAN_COSTS = { pro: 20, max5: 100, max20: 200 };
-  let planConfig = null;
-  if (opts.planCost !== undefined) {
-    const custom = parseFloat(opts.planCost);
-    if (Number.isFinite(custom) && custom > 0) {
-      planConfig = { name: 'custom', monthlyCost: custom };
-    } else {
-      console.error(`  ${icon.err} ${c.red}--plan-cost must be a positive number.${c.reset}`);
+  // Optional subscription "effective cost" mode, per agent.
+  // Monthly USD: Anthropic plans / OpenAI ChatGPT plans (Codex is included in
+  // ChatGPT Plus, Pro, Business, Enterprise and Edu — no Codex-only tier).
+  const parsePlan = (planOpt, planCostOpt, tiers, flagName, namePrefix) => {
+    if (planCostOpt !== undefined) {
+      const custom = parseFloat(planCostOpt);
+      if (Number.isFinite(custom) && custom > 0) {
+        return { name: 'custom', monthlyCost: custom };
+      }
+      console.error(`  ${icon.err} ${c.red}${flagName}-cost must be a positive number.${c.reset}`);
       process.exit(1);
     }
-  } else if (opts.plan) {
-    const key = String(opts.plan).toLowerCase();
-    if (PLAN_COSTS[key]) {
-      planConfig = { name: key, monthlyCost: PLAN_COSTS[key] };
-    } else {
-      console.error(`  ${icon.err} ${c.red}Unknown --plan "${opts.plan}".${c.reset} Use pro, max5, max20, or --plan-cost <amount>.`);
-      process.exit(1);
+    if (!planOpt) return null;
+    const key = String(planOpt).toLowerCase();
+    if (tiers[key]) {
+      return { name: namePrefix + key, monthlyCost: tiers[key] };
     }
+    console.error(`  ${icon.err} ${c.red}Unknown ${flagName} "${planOpt}".${c.reset} Use ${Object.keys(tiers).join(', ')}, or ${flagName}-cost <amount>.`);
+    process.exit(1);
+  };
+  // ChatGPT tiers (Codex is included in the plan): Plus $20, Pro $100 (the
+  // "5x" tier launched Apr 2026), Pro $200 ("20x"), Business ~$25/seat/mo.
+  const planConfigs = {
+    claude: parsePlan(opts.plan, opts.planCost, { pro: 20, max5: 100, max20: 200 }, '--plan', ''),
+    codex: parsePlan(opts.codexPlan, opts.codexPlanCost, { plus: 20, pro100: 100, pro: 200, business: 25 }, '--codex-plan', 'codex-'),
+  };
+
+  const sourceFilter = opts.source ? String(opts.source).toLowerCase() : null;
+  if (sourceFilter && sourceFilter !== 'claude' && sourceFilter !== 'codex') {
+    console.error(`  ${icon.err} ${c.red}Unknown --source "${opts.source}".${c.reset} Use claude or codex.`);
+    process.exit(1);
   }
 
   const invokedAs = path.basename(process.argv[1]);
@@ -158,15 +226,24 @@ async function main() {
   const claudeDir = opts.claudeDir
     ? path.resolve(opts.claudeDir)
     : path.join(os.homedir(), '.claude', 'projects');
+  // Codex CLI stores rollout files under $CODEX_HOME/sessions (~/.codex by default)
+  const codexDir = opts.codexDir
+    ? path.resolve(opts.codexDir)
+    : path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
 
-  const payload = await buildPayload(claudeDir, days, opts.project, opts.refresh, planConfig);
-  if (payload) payload.meta.invokedAs = invokedAs.includes('claude-roi') ? 'claude-roi' : 'codelens-ai';
+  const payloads = await buildPayload(claudeDir, codexDir, days, opts.project, opts.refresh, planConfigs, sourceFilter);
+  if (payloads) {
+    for (const p of Object.values(payloads)) {
+      p.meta.invokedAs = invokedAs.includes('claude-roi') ? 'claude-roi' : 'codelens-ai';
+    }
+  }
 
-  if (!payload) {
-    console.log(`  ${icon.warn} ${c.yellow}No Claude Code sessions found.${c.reset}`);
-    console.log(`    Make sure you have used Claude Code and session files exist in ~/.claude/projects/`);
+  if (!payloads) {
+    console.log(`  ${icon.warn} ${c.yellow}No AI coding agent sessions found.${c.reset}`);
+    console.log(`    Claude Code sessions are read from ~/.claude/projects/ and OpenAI Codex sessions from ~/.codex/sessions/`);
     process.exit(0);
   }
+  const payload = payloads.all;
 
   // Output
   if (opts.json) {
@@ -197,8 +274,14 @@ async function main() {
   }
 
   // Start server — pass a rebuild function so /api/refresh can re-run the pipeline
-  const rebuild = () => buildPayload(claudeDir, days, opts.project, true, planConfig);
-  const app = createServer(payload, rebuild);
+  const rebuild = async () => {
+    const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter);
+    if (fresh) {
+      for (const p of Object.values(fresh)) p.meta.invokedAs = payload.meta.invokedAs;
+    }
+    return fresh;
+  };
+  const app = createServer(payloads, rebuild);
   const server = app.listen(port, () => {
     const url = `http://localhost:${port}`;
     console.log(`\n  ${icon.ok} ${c.green}Dashboard:${c.reset} ${c.bold}${url}${c.reset}`);
