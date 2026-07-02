@@ -1,5 +1,12 @@
-import { getModelFamily } from './claude-parser.js';
+import { getModelFamily as getClaudeModelFamily } from './claude-parser.js';
+import { getCodexModelFamily } from './codex-parser.js';
 import { commitLinesForSession } from './correlator.js';
+
+// Family resolution across agent sources: Claude names first (opus/sonnet/
+// haiku/fable), then OpenAI Codex names (gpt-5-codex/gpt-5/o-series/...).
+function getModelFamily(modelName) {
+  return getClaudeModelFamily(modelName) || getCodexModelFamily(modelName);
+}
 
 const CHURN_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -531,7 +538,7 @@ function computeEfficiencyScore(costPerCommit, survivalRate, orphanedRate, total
     return {
       score: 0, tier: 'Getting Started', letter: 'F',
       explanation: 'No commits matched to sessions yet — this is normal for exploratory work.',
-      tip: 'Commits are matched by file overlap with Claude-edited files.',
+      tip: 'Commits are matched by file overlap with agent-edited files.',
     };
   }
 
@@ -736,7 +743,10 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
 }
 
 function capitalise(s) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
+  // Display form of a model family. Codex families need casing that naive
+  // capitalization can't produce ('gpt' → 'GPT', 'o-series' → 'o-series').
+  const special = { gpt: 'GPT', codex: 'Codex', 'o-series': 'o-series' };
+  return special[s] || s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days, planConfig = null) {

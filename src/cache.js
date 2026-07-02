@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync,
 import os from 'node:os';
 import path from 'node:path';
 import { listSubagentTranscripts } from './claude-parser.js';
+import { listCodexSessionFiles } from './codex-parser.js';
 
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'agent-analytics');
 const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
@@ -15,7 +16,9 @@ const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
 // 9: per-day-priced cache savings, per-model daily splits (dailyUsage.byModel),
 //    subagent transcripts extend session span, untimestamped usage day-bucketed,
 //    cache keyed on claudeDir.
-const CACHE_VERSION = 9;
+// 10: OpenAI Codex sessions (source field on every session, codexFileIndex,
+//     cache keyed on codexDir).
+const CACHE_VERSION = 10;
 
 export function loadCache(options = {}) {
   if (!existsSync(CACHE_FILE)) {
@@ -31,8 +34,9 @@ export function loadCache(options = {}) {
     // different options would display the wrong data — treat as a miss.
     if (data.days !== options.days) return null;
     if ((data.project || null) !== (options.project || null)) return null;
-    // A cache built from one --claude-dir must not serve another.
+    // A cache built from one --claude-dir / --codex-dir must not serve another.
     if ((data.claudeDir || null) !== (options.claudeDir || null)) return null;
+    if ((data.codexDir || null) !== (options.codexDir || null)) return null;
     // The rolling window moves daily and sessions are clipped to it at parse
     // time, so a cache built on an earlier day would serve stale clipping.
     if (options.cutoffDay && data.cutoffDay !== options.cutoffDay) return null;
@@ -42,7 +46,7 @@ export function loadCache(options = {}) {
   }
 }
 
-export function saveCache(sessions, fileIndex, options = {}) {
+export function saveCache(sessions, fileIndex, codexFileIndex, options = {}) {
   mkdirSync(CACHE_DIR, { recursive: true });
   const data = {
     version: CACHE_VERSION,
@@ -50,8 +54,10 @@ export function saveCache(sessions, fileIndex, options = {}) {
     days: options.days,
     project: options.project || null,
     claudeDir: options.claudeDir || null,
+    codexDir: options.codexDir || null,
     cutoffDay: options.cutoffDay || null,
     fileIndex,
+    codexFileIndex: codexFileIndex || {},
     sessions,
   };
   writeFileSync(CACHE_FILE, JSON.stringify(data));
@@ -130,6 +136,43 @@ export function getStaleFiles(claudeDir, cachedFileIndex, cutoffMs = 0, projectF
   }
 
   // Find deleted files
+  for (const filePath of Object.keys(cachedFileIndex)) {
+    if (!currentFiles[filePath]) {
+      deletedFiles.push(filePath);
+    }
+  }
+
+  return { currentFiles, newFiles, modifiedFiles, deletedFiles };
+}
+
+// Codex counterpart of getStaleFiles. Codex rollout files live in a date tree
+// (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl) with no per-project folders,
+// so there is no folder-level project filter — the parser filters by each
+// session's cwd after parsing, and the cache is keyed on (project) anyway.
+export function getCodexStaleFiles(codexDir, cachedFileIndex, cutoffMs = 0) {
+  const currentFiles = {};
+  const newFiles = [];
+  const modifiedFiles = [];
+  const deletedFiles = [];
+
+  for (const filePath of listCodexSessionFiles(codexDir)) {
+    let mtime;
+    try {
+      mtime = statSync(filePath).mtimeMs;
+    } catch {
+      continue;
+    }
+    // Same gate as the parser: files untouched since the cutoff are never
+    // parsed, so they must not register as "new".
+    if (mtime < cutoffMs) continue;
+    currentFiles[filePath] = mtime;
+    if (!cachedFileIndex[filePath]) {
+      newFiles.push(filePath);
+    } else if (mtime > cachedFileIndex[filePath]) {
+      modifiedFiles.push(filePath);
+    }
+  }
+
   for (const filePath of Object.keys(cachedFileIndex)) {
     if (!currentFiles[filePath]) {
       deletedFiles.push(filePath);

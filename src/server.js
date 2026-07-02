@@ -29,9 +29,20 @@ function findChartJs() {
   return null;
 }
 
+// The server holds one payload per agent source: `all` (every session), and —
+// when more than one agent has sessions — `claude` and `codex` views computed
+// over just that agent's sessions. Routes select the view via ?source=; an
+// unknown or absent source falls back to `all`. A bare payload (no `.all`) is
+// accepted for backward compatibility and treated as the `all` view.
+function normalizePayloads(payloadOrMap) {
+  if (payloadOrMap?.all) return payloadOrMap;
+  return { all: payloadOrMap };
+}
+
 export function createServer(initialPayload, rebuildFn, opts = {}) {
   const app = express();
-  let payload = initialPayload;
+  let payloads = normalizePayloads(initialPayload);
+  const pick = (req) => payloads[req.query.source] || payloads.all;
 
   // Serve dashboard HTML
   const dashboardHtml = readFileSync(path.join(__dirname, 'dashboard.html'), 'utf-8');
@@ -69,8 +80,8 @@ export function createServer(initialPayload, rebuildFn, opts = {}) {
   });
 
   // Full payload (single fetch for dashboard)
-  app.get('/api/all', (_req, res) => {
-    res.json(payload);
+  app.get('/api/all', (req, res) => {
+    res.json(pick(req));
   });
 
   // Re-run the full pipeline: clear cache, re-parse sessions, re-analyze git, recompute metrics
@@ -80,7 +91,7 @@ export function createServer(initialPayload, rebuildFn, opts = {}) {
       console.log('  \x1b[36m▸\x1b[0m \x1b[36m[refresh]\x1b[0m Re-parsing sessions and recomputing metrics...');
       const newPayload = await rebuildFn();
       if (!newPayload) return res.status(404).json({ error: 'No sessions found after refresh' });
-      payload = newPayload;
+      payloads = normalizePayloads(newPayload);
       console.log('  \x1b[32m✔\x1b[0m \x1b[32m[refresh]\x1b[0m Done');
       res.json({ ok: true });
     } catch (err) {
@@ -90,7 +101,8 @@ export function createServer(initialPayload, rebuildFn, opts = {}) {
   });
 
   // Hero stats + insights
-  app.get('/api/summary', (_req, res) => {
+  app.get('/api/summary', (req, res) => {
+    const payload = pick(req);
     res.json({
       ...payload.meta,
       ...payload.summary,
@@ -99,8 +111,8 @@ export function createServer(initialPayload, rebuildFn, opts = {}) {
   });
 
   // Daily timeline data for charts
-  app.get('/api/timeline', (_req, res) => {
-    res.json(payload.daily);
+  app.get('/api/timeline', (req, res) => {
+    res.json(pick(req).daily);
   });
 
   // All sessions with pagination
@@ -111,7 +123,7 @@ export function createServer(initialPayload, rebuildFn, opts = {}) {
     const order = req.query.order === 'asc' ? 1 : -1;
     const mainOnly = req.query.mainOnly === 'true';
 
-    let sessions = payload.sessions;
+    let sessions = pick(req).sessions;
 
     // Filter to main branch commits only if requested. Line counts keep the
     // same AI-attribution rule as the unfiltered view (session-file overlap via
@@ -167,55 +179,55 @@ export function createServer(initialPayload, rebuildFn, opts = {}) {
   });
 
   // Model comparison data
-  app.get('/api/models', (_req, res) => {
-    res.json(payload.modelBreakdown);
+  app.get('/api/models', (req, res) => {
+    res.json(pick(req).modelBreakdown);
   });
 
   // Hour x day heatmap
-  app.get('/api/heatmap', (_req, res) => {
-    res.json(payload.heatmap);
+  app.get('/api/heatmap', (req, res) => {
+    res.json(pick(req).heatmap);
   });
 
   // Single session detail
   app.get('/api/session/:id', (req, res) => {
-    const session = payload.sessions.find(s => s.sessionId === req.params.id);
+    const session = pick(req).sessions.find(s => s.sessionId === req.params.id);
     if (!session) return res.status(404).json({ error: 'Session not found' });
     res.json(session);
   });
 
   // Projects breakdown
-  app.get('/api/projects', (_req, res) => {
-    res.json(payload.projects);
+  app.get('/api/projects', (req, res) => {
+    res.json(pick(req).projects);
   });
 
   // Session buckets
-  app.get('/api/buckets', (_req, res) => {
-    res.json(payload.sessionBuckets);
+  app.get('/api/buckets', (req, res) => {
+    res.json(pick(req).sessionBuckets);
   });
 
   // Tool usage
-  app.get('/api/tools', (_req, res) => {
-    res.json(payload.toolBreakdown);
+  app.get('/api/tools', (req, res) => {
+    res.json(pick(req).toolBreakdown);
   });
 
   // Line survival
-  app.get('/api/survival', (_req, res) => {
-    res.json(payload.lineSurvival);
+  app.get('/api/survival', (req, res) => {
+    res.json(pick(req).lineSurvival);
   });
 
   // Token analytics
-  app.get('/api/tokens', (_req, res) => {
-    res.json(payload.tokenAnalytics);
+  app.get('/api/tokens', (req, res) => {
+    res.json(pick(req).tokenAnalytics);
   });
 
   // Autonomy metrics
-  app.get('/api/autonomy', (_req, res) => {
-    res.json(payload.autonomyMetrics);
+  app.get('/api/autonomy', (req, res) => {
+    res.json(pick(req).autonomyMetrics);
   });
 
   // Weekly narrative report (this week vs prior)
-  app.get('/api/narrative', (_req, res) => {
-    res.json(payload.weeklyNarrative || null);
+  app.get('/api/narrative', (req, res) => {
+    res.json(pick(req).weeklyNarrative || null);
   });
 
   return app;

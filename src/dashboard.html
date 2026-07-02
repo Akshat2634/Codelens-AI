@@ -283,6 +283,58 @@
       background: var(--grade-a-bg);
     }
 
+    /* Agent source tabs — shown only when more than one agent has sessions.
+       Same drafting-sheet language as the badges/theme switcher: mono type,
+       uppercase, hairline borders; the active tab wears the agent's hue. */
+    .source-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 20px;
+    }
+    .source-tab {
+      font-family: var(--font-display);
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 7px;
+      border: 1px solid var(--border-subtle);
+      background: var(--overlay-light);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s, background 0.2s;
+    }
+    .source-tab:hover {
+      border-color: var(--glass-border-hover);
+      color: var(--text-primary);
+    }
+    .source-tab.active {
+      color: var(--text-primary);
+      border-color: var(--tab-accent, var(--accent-orange));
+      background: var(--tab-accent-bg, var(--glow-orange));
+    }
+    .source-tab .tab-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--tab-accent, var(--text-muted));
+      flex-shrink: 0;
+      opacity: 0.45;
+      transition: opacity 0.2s;
+    }
+    .source-tab.active .tab-dot { opacity: 1; }
+    .source-tab .tab-count {
+      color: var(--text-muted);
+      font-weight: 500;
+      font-size: 0.64rem;
+    }
+    .source-tab:disabled { opacity: 0.6; cursor: wait; }
+
     /* Shared section heading style — numbered drafting-sheet kickers */
     #app { counter-reset: section; }
     .stats-section {
@@ -2058,6 +2110,7 @@
         <span class="badge">All data stays local</span>
         <span class="badge">No tracking, no telemetry</span>
       </div>
+      <div class="source-tabs" id="source-tabs" style="display:none;" role="tablist" aria-label="Agent source"></div>
     </header>
 
     <style>
@@ -2268,7 +2321,7 @@
       <div class="footer-stamp">Designed &amp; built in the Bay Area &middot; California <span class="footer-stamp-mark">◆</span></div>
       Made by <a href="https://www.linkedin.com/in/akshat2634/">Akshat</a> &middot; Powered by <a href="https://code.claude.com/docs/en/overview">Claude Code</a> &middot; <a href="https://github.com/Akshat2634/Codelens-AI">GitHub</a> &middot; <a href="https://codelensai-dev.vercel.app/">Website</a>
       <div style="margin-top:6px;font-size:0.75rem;opacity:0.7;">Open source — contributions, ideas, and feedback welcome! <a href="https://github.com/Akshat2634/Codelens-AI" style="color:var(--accent-blue);">Star the repo</a> if you find it useful.</div>
-      <div style="margin-top:6px;font-size:0.7rem;opacity:0.4;">Cost estimates are approximate — based on Anthropic's published per-token pricing and may vary from actual billing. Currently supports Claude Code only. Support for Cursor, Codex, Gemini CLI, and more coming soon.</div>
+      <div style="margin-top:6px;font-size:0.7rem;opacity:0.4;">Cost estimates are approximate — based on Anthropic's and OpenAI's published per-token API pricing and may vary from actual billing (subscription plans pay a flat fee). Supports Claude Code and OpenAI Codex. Cursor, Gemini CLI, and more coming soon.</div>
     </footer>
 
     <!-- Share Report Card Modal -->
@@ -2317,8 +2370,72 @@ function scoreColor(score) {
 }
 const INSIGHT_ICONS = { warning: '!', success: '+', info: 'i', tip: '*' };
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Display names for model families (chart labels/tooltips). Codex families
+// need casing that naive capitalization can't produce ('gpt' → 'GPT').
+function familyLabel(f) {
+  const special = { gpt: 'GPT', codex: 'Codex', 'o-series': 'o-series', unknown: 'Unknown' };
+  return special[f] || f.charAt(0).toUpperCase() + f.slice(1);
+}
 let DATA = null;
 let initialRenderDone = false;
+
+/* ── Agent source tabs ──
+   The server holds one payload per agent source (all / claude / codex) and
+   /api/all?source= selects the view. Tabs render only when meta.sources shows
+   more than one agent with sessions; the choice persists across reloads. */
+const SOURCE_META = {
+  all: { label: 'All Agents', accent: '--accent-purple' },
+  claude: { label: 'Claude Code', accent: '--accent-orange' },
+  codex: { label: 'OpenAI Codex', accent: '--accent-cyan' },
+};
+let currentSource = localStorage.getItem('codelens-source') || 'all';
+
+function hasMultipleSources() {
+  const s = DATA && DATA.meta && DATA.meta.sources;
+  return !!s && Object.values(s).filter(n => n > 0).length > 1;
+}
+
+function renderSourceTabs() {
+  const bar = document.getElementById('source-tabs');
+  if (!bar) return;
+  if (!hasMultipleSources()) {
+    bar.style.display = 'none';
+    bar.innerHTML = '';
+    return;
+  }
+  const counts = DATA.meta.sources;
+  const tabs = ['all', 'claude', 'codex'].filter(k => k === 'all' || counts[k] > 0);
+  bar.style.display = 'flex';
+  bar.innerHTML = tabs.map(k => {
+    const m = SOURCE_META[k];
+    const count = k === 'all'
+      ? Object.values(counts).reduce((a, b) => a + b, 0)
+      : counts[k];
+    const active = (DATA.meta.source || 'all') === k;
+    return `<button class="source-tab ${active ? 'active' : ''}" role="tab" aria-selected="${active}"
+      style="--tab-accent: var(${m.accent}); --tab-accent-bg: color-mix(in srgb, var(${m.accent}) 12%, transparent);"
+      onclick="switchSource('${k}')"><span class="tab-dot"></span>${m.label}<span class="tab-count">${plural(count, 'session')}</span></button>`;
+  }).join('');
+}
+
+window.switchSource = async function(source) {
+  if (source === (DATA && DATA.meta && DATA.meta.source)) return;
+  const bar = document.getElementById('source-tabs');
+  if (bar) bar.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  try {
+    const res = await fetch('/api/all?source=' + encodeURIComponent(source));
+    DATA = await res.json();
+    currentSource = DATA.meta.source || 'all';
+    localStorage.setItem('codelens-source', currentSource);
+    // Full re-render: re-arm the value animations and scroll-reveal observers
+    // (same as refresh), or sections below the fold would stay hidden.
+    initialRenderDone = false;
+    render();
+  } catch (err) {
+    if (bar) bar.querySelectorAll('button').forEach(b => { b.disabled = false; });
+  }
+};
 
 function getThemePref() {
   return localStorage.getItem('codelens-theme') || 'system';
@@ -2419,9 +2536,10 @@ async function refreshData() {
       const err = await refreshRes.json().catch(() => ({}));
       throw new Error(err.error || 'Refresh failed');
     }
-    // Fetch the newly computed payload
-    const res = await fetch('/api/all');
+    // Fetch the newly computed payload (keeping the selected agent source)
+    const res = await fetch('/api/all?source=' + encodeURIComponent(currentSource));
     DATA = await res.json();
+    currentSource = DATA.meta.source || 'all';
     initialRenderDone = false;
     render();
   } catch (err) {
@@ -2498,8 +2616,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const refreshBtn = document.getElementById('refresh-btn');
   if (refreshBtn) refreshBtn.addEventListener('click', refreshData);
   try {
-    const res = await fetch('/api/all');
+    // A remembered source may no longer exist (e.g. Codex sessions aged out of
+    // the window) — the server falls back to the `all` view and meta.source
+    // tells us what we actually got.
+    const res = await fetch('/api/all?source=' + encodeURIComponent(currentSource));
     DATA = await res.json();
+    currentSource = DATA.meta?.source || 'all';
     if (DATA.meta?.invokedAs === 'claude-roi') {
       const banner = document.getElementById('deprecation-banner');
       banner.style.display = 'block';
@@ -2530,6 +2652,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function render() {
   const d = DATA;
+  // Re-renders (source switch, refresh) replace every canvas — destroy the old
+  // Chart instances first so they don't accumulate in Chart.instances.
+  if (typeof Chart !== 'undefined') {
+    Object.values(Chart.instances || {}).forEach(chart => chart.destroy());
+  }
+  renderSourceTabs();
   const fmtDate = iso => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   const dateLabel = (d.meta.startDate && d.meta.endDate)
     ? `${fmtDate(d.meta.startDate)} – ${fmtDate(d.meta.endDate)}`
@@ -2569,12 +2697,12 @@ function render() {
         <div class="chart-container"><canvas id="chart-timeline"></canvas></div>
       </div>
       <div class="chart-card">
-        <h3>Model Cost Breakdown <i class="info-tip" data-tip="How your spending splits across different Claude models (Opus, Sonnet, Haiku). Opus is the most expensive but may be more capable.">i</i></h3>
+        <h3>Model Cost Breakdown <i class="info-tip" data-tip="How your spending splits across model families — Claude (Opus, Sonnet, Haiku) and OpenAI Codex (GPT-5 Codex, GPT, o-series).">i</i></h3>
         <div class="chart-container"><canvas id="chart-models"></canvas></div>
         <div id="model-note" style="display:none;font-size:0.72rem;color:var(--text-muted);margin-top:8px;line-height:1.45;"></div>
       </div>
       <div class="chart-card">
-        <h3>Tool Usage Distribution <i class="info-tip" data-tip="Which tools Claude used most during your sessions. Read = reading files, Bash = running commands, Edit = modifying files, Write = creating new files.">i</i></h3>
+        <h3>Tool Usage Distribution <i class="info-tip" data-tip="Which tools your agent used most. Claude Code: Read, Bash, Edit, Write… OpenAI Codex: shell, apply_patch, web_search…">i</i></h3>
         <div class="chart-container"><canvas id="chart-tools"></canvas></div>
       </div>
       <div class="chart-card">
@@ -2661,7 +2789,7 @@ function renderHeroStats(s) {
         <div class="stat-card glow cost-card">
           <span class="legend-dot" style="background: var(--accent-orange);"></span>
           <div class="stat-info">
-            <div class="label">AI Agent Spend <i class="info-tip" data-tip="Estimated cost based on Anthropic's per-token pricing.">i</i></div>
+            <div class="label">AI Agent Spend <i class="info-tip" data-tip="Estimated cost at published API per-token pricing (Anthropic for Claude, OpenAI for Codex).">i</i></div>
             <div class="sub">${plural(s.totalSessions, 'session')}</div>
           </div>
           <div class="stat-value-wrap">
@@ -2673,7 +2801,7 @@ function renderHeroStats(s) {
         <div class="stat-card glow commits-card">
           <span class="legend-dot" style="background: var(--accent-green);"></span>
           <div class="stat-info">
-            <div class="label">Commits Shipped <i class="info-tip" data-tip="Git commits matched by file overlap with Claude-edited files.">i</i></div>
+            <div class="label">Commits Shipped <i class="info-tip" data-tip="Git commits matched by file overlap with agent-edited files.">i</i></div>
             <div class="sub">${s.totalLinesAdded.toLocaleString()} lines added</div>
           </div>
           <div class="stat-value-wrap">
@@ -2800,7 +2928,12 @@ function renderAttribution(s) {
 function renderPlan(s) {
   const p = s.plan;
   if (!p) return '';
-  const planLabel = { pro: 'Pro ($20/mo)', max5: 'Max 5× ($100/mo)', max20: 'Max 20× ($200/mo)', custom: '$' + p.monthlyCost + '/mo' }[p.name] || ('$' + p.monthlyCost + '/mo');
+  const planLabel = {
+    pro: 'Claude Pro ($20/mo)', max5: 'Claude Max 5× ($100/mo)', max20: 'Claude Max 20× ($200/mo)',
+    'codex-plus': 'ChatGPT Plus ($20/mo)', 'codex-pro100': 'ChatGPT Pro ($100/mo)', 'codex-pro': 'ChatGPT Pro ($200/mo)', 'codex-business': 'ChatGPT Business ($' + p.monthlyCost + '/mo)',
+    combined: 'Combined plans ($' + p.monthlyCost + '/mo)',
+    custom: '$' + p.monthlyCost + '/mo',
+  }[p.name] || ('$' + p.monthlyCost + '/mo');
   const util = p.utilizationRatio;
   const utilColor = util === null ? 'var(--text-muted)' : util >= 1 ? 'var(--accent-green)' : 'var(--accent-orange)';
   return `<div class="stats-section">
@@ -3151,10 +3284,10 @@ function renderSessionsTable(sessions) {
             <th onclick="sortTable('startTime')" class="${sortCol === 'startTime' ? 'sorted' : ''}">Date${thArrow('startTime')} <i class="info-tip" data-tip="Session start time in your local timezone. Multi-day sessions show an arrow (↳) with the end date below.">i</i></th>
             <th onclick="sortTable('projectName')" class="${sortCol === 'projectName' ? 'sorted' : ''}">Project${thArrow('projectName')}</th>
             <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')} <i class="info-tip" data-tip="Primary model used in the session. Models marked (sub) are subagents spawned for background tasks like code search and exploration.">i</i></th>
-            <th onclick="sortTable('msgCount')" class="${sortCol === 'msgCount' ? 'sorted' : ''}">Msgs${thArrow('msgCount')} <i class="info-tip" data-tip="Total messages in the session (your messages + Claude's responses).">i</i></th>
+            <th onclick="sortTable('msgCount')" class="${sortCol === 'msgCount' ? 'sorted' : ''}">Msgs${thArrow('msgCount')} <i class="info-tip" data-tip="Total messages in the session (your messages + agent responses).">i</i></th>
             <th onclick="sortTable('autopilotRatio')" class="${sortCol === 'autopilotRatio' ? 'sorted' : ''}">Autopilot${thArrow('autopilotRatio')} <i class="info-tip" data-tip="Agent responses per user message. Higher = more autonomous. 5x is excellent.">i</i></th>
-            <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')} <i class="info-tip" data-tip="Estimated cost based on token usage and Anthropic's pricing. Calculated from input, output, cache read (90% discount), and cache write (25% premium for 5-min TTL, 100% for 1-hour TTL) tokens, plus web search fees. Fast-mode and US data-residency usage is billed at its premium rates. For sessions that started before the analyzed window, only in-window usage is counted.">i</i></th>
-            <th onclick="sortTable('commitCount')" class="${sortCol === 'commitCount' ? 'sorted' : ''}">Commits${thArrow('commitCount')} <i class="info-tip" data-tip="Git commits that touch files Claude edited in this session. Falls back to time-window for chat-only sessions. The colored dot shows attribution confidence: green = high, amber = medium, red = low (e.g. time-only match).">i</i></th>
+            <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')} <i class="info-tip" data-tip="Estimated cost from token usage at the provider's published API pricing (Anthropic for Claude, OpenAI for Codex). Includes input, output, and cache tokens (reads ~90% discount; Claude cache writes at their premium), plus web search fees and premium billing markers where applicable. For sessions that started before the analyzed window, only in-window usage is counted.">i</i></th>
+            <th onclick="sortTable('commitCount')" class="${sortCol === 'commitCount' ? 'sorted' : ''}">Commits${thArrow('commitCount')} <i class="info-tip" data-tip="Git commits that touch files the agent edited in this session. Falls back to time-window for chat-only sessions. The colored dot shows attribution confidence: green = high, amber = medium, red = low (e.g. time-only match).">i</i></th>
             <th onclick="sortTable('linesAdded')" class="${sortCol === 'linesAdded' ? 'sorted' : ''}">Lines${thArrow('linesAdded')} <i class="info-tip" data-tip="Lines added / lines deleted in matched commits.">i</i></th>
             <th>Grade <i class="info-tip" data-tip="Session efficiency: A = great ROI, B = good, C = average, D = poor, F = no commits or very high cost.">i</i></th>
           </tr>
@@ -3164,6 +3297,13 @@ function renderSessionsTable(sessions) {
             const idx = (page - 1) * pageSize + i;
             const gradeColor = GRADE_VAR[s.grade] || GRADE_VAR.F;
             const gradeBg = GRADE_BG_VAR[s.grade] || GRADE_BG_VAR.F;
+            // In the mixed "All Agents" view, mark each row's agent with a dot
+            // in the source accent (orange = Claude, cyan = Codex).
+            const src = s.source || 'claude';
+            const srcMeta = SOURCE_META[src] || SOURCE_META.claude;
+            const sourceDot = (DATA.meta.source || 'all') === 'all' && hasMultipleSources()
+              ? `<span title="${srcMeta.label}" style="display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;vertical-align:middle;background:var(${srcMeta.accent});opacity:0.75;"></span>`
+              : '';
             const primaryName = formatModelName(s.model || 'unknown');
             const subModels = Object.keys(s.modelBreakdown || {})
               .filter(m => m !== s.model)
@@ -3177,7 +3317,7 @@ function renderSessionsTable(sessions) {
               <tr class="${rowClass}" style="cursor:pointer;" onclick="toggleExpand(${idx}, this)">
                 <td><span class="expand-chevron">&#9654;</span>${formatDateRange(s.startTime, s.endTime)}</td>
                 <td>${s.projectName || '—'}</td>
-                <td>${modelDisplay}</td>
+                <td>${sourceDot}${modelDisplay}</td>
                 <td>${s.userMessageCount + s.assistantMessageCount}</td>
                 <td><span class="autopilot-badge">${s.autopilotRatio > 0 ? s.autopilotRatio + 'x' : '—'}</span></td>
                 <td>${fmtMoney(s.cost.totalCost)}</td>
@@ -3227,9 +3367,22 @@ function formatModelName(modelId) {
   if (modelId.includes('[fast]')) suffix += ' (fast)';
   if (modelId.includes('[us]')) suffix += ' (us)';
   if (suffix) modelId = modelId.replace(/\[fast\]|\[us\]/g, '');
+  const lower = modelId.toLowerCase();
+  // OpenAI models (Codex sessions): gpt-5.1-codex-max → GPT-5.1 Codex Max,
+  // gpt-5-codex → GPT-5 Codex, codex-mini-latest → Codex Mini. o3 / o4-mini
+  // keep OpenAI's lowercase branding.
+  if (/^(gpt-|o\d|codex)/.test(lower)) {
+    const parts = lower.replace(/-latest$/, '').split('-');
+    if (/^o\d+$/.test(parts[0])) return parts.join('-') + suffix;
+    const cap = p => p.charAt(0).toUpperCase() + p.slice(1);
+    if (parts[0] === 'gpt') {
+      return ['GPT-' + parts[1], ...parts.slice(2).map(cap)].join(' ') + suffix;
+    }
+    return parts.map(cap).join(' ') + suffix;
+  }
   // claude-opus-4-6 → Opus 4.6, claude-sonnet-4-5-20250929 → Sonnet 4.5,
   // claude-sonnet-5 → Sonnet 5, claude-fable-5 → Fable 5, claude-haiku-4-5-20251001 → Haiku 4.5
-  const m = modelId.toLowerCase().replace('claude-', '');
+  const m = lower.replace('claude-', '');
   // Match a family followed by a version that's either major-minor (4-6) or a single major (5).
   // The minor is 1-2 digits not followed by another digit, so an 8-digit date suffix
   // (e.g. claude-sonnet-5-20260615) isn't mistaken for a minor version.
@@ -3460,16 +3613,22 @@ function initCharts() {
     },
   });
 
-  // Model doughnut — thin ring, 2px card-colored spacers between segments
+  // Model doughnut — thin ring, 2px card-colored spacers between segments.
+  // Families span both agents: Claude (opus/sonnet/haiku/fable) and OpenAI
+  // Codex (codex/gpt/o-series) each keep a stable hue across views.
   const models = DATA.modelBreakdown;
   const modelLabels = Object.keys(models).filter(k => models[k].cost > 0);
-  const modelColors = { opus: T.purple, sonnet: T.blue, haiku: T.green, fable: T.pink, unknown: T.muted };
+  const modelColors = {
+    opus: T.purple, sonnet: T.blue, haiku: T.green, fable: T.pink,
+    codex: T.cyan, gpt: T.orange, 'o-series': T.red,
+    unknown: T.muted,
+  };
   new Chart(document.getElementById('chart-models'), {
     type: 'doughnut',
     data: {
       labels: (() => {
         const pcts = pctTo100(modelLabels.map(m => models[m].cost));
-        return modelLabels.map((m, i) => m.charAt(0).toUpperCase() + m.slice(1) + ' (' + pcts[i] + '%)');
+        return modelLabels.map((m, i) => familyLabel(m) + ' (' + pcts[i] + '%)');
       })(),
       datasets: [{
         data: modelLabels.map(m => models[m].cost),
@@ -3555,7 +3714,7 @@ function initCharts() {
     type: 'bar',
     data: {
       labels: modelEffLabels.map(m => [
-        m.charAt(0).toUpperCase() + m.slice(1),
+        familyLabel(m),
         Math.round(modelEff[m].commits) + ' commits',
       ]),
       datasets: [{

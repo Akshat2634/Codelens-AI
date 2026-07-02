@@ -75,4 +75,42 @@ test.describe('Dashboard smoke (fixtures)', () => {
     await page.waitForTimeout(500);
     expect(errors, 'chart JS errors: ' + errors.join(' | ')).toEqual([]);
   });
+
+  test('per-source API views: claude and codex sessions are split', async ({ request }) => {
+    const all = await (await request.get('/api/all')).json();
+    expect(all.meta.source).toBe('all');
+    expect(all.meta.sources.claude).toBeGreaterThan(0);
+    expect(all.meta.sources.codex).toBeGreaterThan(0);
+
+    const codex = await (await request.get('/api/all?source=codex')).json();
+    expect(codex.meta.source).toBe('codex');
+    expect(codex.sessions.length).toBe(all.meta.sources.codex);
+    expect(codex.sessions.every(s => s.source === 'codex')).toBe(true);
+
+    const claude = await (await request.get('/api/all?source=claude')).json();
+    expect(claude.meta.source).toBe('claude');
+    expect(claude.sessions.every(s => (s.source || 'claude') === 'claude')).toBe(true);
+  });
+
+  test('source tabs render and switching to Codex re-renders the dashboard', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+    // Fixtures contain both Claude and Codex sessions, so tabs must show
+    await page.goto('/');
+    await page.waitForSelector('.source-tabs .source-tab');
+    const tabs = page.locator('.source-tab');
+    await expect(tabs).toHaveCount(3);
+    await expect(page.locator('.source-tab.active')).toContainText(/All Agents/i);
+
+    await page.locator('.source-tab', { hasText: 'OpenAI Codex' }).click();
+    await expect(page.locator('.source-tab.active')).toContainText(/OpenAI Codex/i, { timeout: 10_000 });
+    // Sessions table now shows only Codex sessions (GPT models)
+    await page.waitForSelector('.sessions-section tbody tr');
+    const modelCells = await page.locator('.sessions-section tbody tr:not(.expand-row) td:nth-child(3)').allTextContents();
+    expect(modelCells.length).toBeGreaterThan(0);
+    for (const cell of modelCells) {
+      expect(cell).toMatch(/GPT|Codex|o\d/i);
+    }
+    expect(errors, 'JS errors during source switch: ' + errors.join(' | ')).toEqual([]);
+  });
 });

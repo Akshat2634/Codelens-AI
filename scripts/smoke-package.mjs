@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
 const fixtures = path.join(repoRoot, 'tests', 'fixtures', 'claude-projects');
+const codexFixtures = path.join(repoRoot, 'tests', 'fixtures', 'codex-sessions');
 const PORT = 39217;
 
 const run = (cmd, args, opts = {}) =>
@@ -56,7 +57,7 @@ try {
   //    actually starts.
   server = spawn(
     'node',
-    [path.join(installed, 'src', 'index.js'), '--no-open', '--port', String(PORT), '--days', '3650', '--claude-dir', fixtures],
+    [path.join(installed, 'src', 'index.js'), '--no-open', '--port', String(PORT), '--days', '3650', '--claude-dir', fixtures, '--codex-dir', codexFixtures],
     { stdio: ['ignore', 'pipe', 'pipe'] }
   );
   let serverLog = '';
