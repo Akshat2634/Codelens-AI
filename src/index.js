@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 
 import { readFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { Command } from 'commander';
-import { deleteCache, getCodexStaleFiles, getStaleFiles, loadCache, saveCache } from './cache.js';
+import { DEFAULT_CLAUDE_DIR, DEFAULT_CODEX_DIR, deleteCache, getCodexStaleFiles, getStaleFiles, loadCache, saveCache } from './cache.js';
 import { parseAllProjects } from './claude-parser.js';
 import { parseCodexSessions } from './codex-parser.js';
 import { correlateSessions } from './correlator.js';
@@ -44,7 +43,7 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   const cacheOptions = { days, project: project || null, claudeDir, codexDir, cutoffDay: cutoffDate.toDateString() };
 
   if (forceRefresh) {
-    deleteCache();
+    deleteCache(cacheOptions);
     console.log(`  ${icon.arrow} Cache cleared, performing full parse...`);
   }
 
@@ -98,6 +97,10 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   const allParsed = [...claudeSessions, ...codexSessions];
   console.log(`  ${icon.ok} Parsing sessions ${c.dim}── ${parseNotes.join(' · ')} (${fmt(Date.now() - startParse)})${c.reset}`);
 
+  // Save the cache as soon as parsing is done — even if the run then bails
+  // (e.g. a --source filter that matches nothing), the parse work is kept.
+  saveCache(allParsed, claudeIndex, codexIndex, cacheOptions);
+
   // Optional --source filter: analyze a single agent's sessions only. The cache
   // still stores everything parsed, so switching sources doesn't re-parse.
   const sessions = sourceFilter
@@ -139,9 +142,12 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   };
 
   // The combined view's plan is the sum of whichever flat fees were supplied —
-  // its API-equivalent spend spans both agents.
+  // its API-equivalent spend spans both agents. Under --source, the view holds
+  // a single agent's sessions, so only that agent's plan applies.
   const activePlans = [planConfigs.claude, planConfigs.codex].filter(Boolean);
-  const combinedPlan = activePlans.length === 0 ? null
+  const combinedPlan = sourceFilter
+    ? planConfigs[sourceFilter] || null
+    : activePlans.length === 0 ? null
     : activePlans.length === 1 ? activePlans[0]
     : { name: 'combined', monthlyCost: activePlans.reduce((s, p) => s + p.monthlyCost, 0) };
 
@@ -150,9 +156,6 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
     payloads.claude = mkView(correlatedSessions.filter(s => (s.source || 'claude') === 'claude'), planConfigs.claude, 'claude');
     payloads.codex = mkView(correlatedSessions.filter(s => s.source === 'codex'), planConfigs.codex, 'codex');
   }
-
-  // Save cache for next run (everything parsed, regardless of --source)
-  saveCache(allParsed, claudeIndex, codexIndex, cacheOptions);
 
   return payloads;
 }
@@ -223,13 +226,10 @@ async function main() {
   }
   console.log(`${icon.dot} ${c.bold}${c.cyan}codelens-ai${c.reset} v${VERSION}\n`);
 
-  const claudeDir = opts.claudeDir
-    ? path.resolve(opts.claudeDir)
-    : path.join(os.homedir(), '.claude', 'projects');
-  // Codex CLI stores rollout files under $CODEX_HOME/sessions (~/.codex by default)
-  const codexDir = opts.codexDir
-    ? path.resolve(opts.codexDir)
-    : path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
+  // Defaults live in cache.js so custom-dir runs get their own cache file.
+  // Codex CLI stores rollout files under $CODEX_HOME/sessions (~/.codex by default).
+  const claudeDir = opts.claudeDir ? path.resolve(opts.claudeDir) : DEFAULT_CLAUDE_DIR;
+  const codexDir = opts.codexDir ? path.resolve(opts.codexDir) : DEFAULT_CODEX_DIR;
 
   const payloads = await buildPayload(claudeDir, codexDir, days, opts.project, opts.refresh, planConfigs, sourceFilter);
   if (payloads) {
@@ -239,8 +239,13 @@ async function main() {
   }
 
   if (!payloads) {
-    console.log(`  ${icon.warn} ${c.yellow}No AI coding agent sessions found.${c.reset}`);
-    console.log(`    Claude Code sessions are read from ~/.claude/projects/ and OpenAI Codex sessions from ~/.codex/sessions/`);
+    if (sourceFilter) {
+      console.log(`  ${icon.warn} ${c.yellow}No ${sourceFilter} sessions found in the last ${days} days.${c.reset}`);
+      console.log(`    Drop --source to analyze every agent, or check the session directory for ${sourceFilter}.`);
+    } else {
+      console.log(`  ${icon.warn} ${c.yellow}No AI coding agent sessions found.${c.reset}`);
+      console.log(`    Claude Code sessions are read from ~/.claude/projects/ and OpenAI Codex sessions from ~/.codex/sessions/`);
+    }
     process.exit(0);
   }
   const payload = payloads.all;

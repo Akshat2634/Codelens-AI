@@ -127,7 +127,7 @@ Use these skills when working on this project:
 ## Important Notes
 
 - The dashboard is a single 4000+ line HTML file — changes should maintain the inline architecture
-- Cache is stored at `~/.cache/agent-analytics/parsed-sessions.json`
+- Cache is stored at `~/.cache/agent-analytics/parsed-sessions.json`; runs with custom `--claude-dir`/`--codex-dir` write to a separate `parsed-sessions-<hash>.json` so tests/CI never evict the real cache
 - Claude session JSONL files are at `~/.claude/projects/`; Codex rollouts at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (zstd-compressed `.jsonl.zst` after ~7 days — readable on Node >= 22.15)
 - Token pricing is hardcoded in `claude-parser.js` (Anthropic) and `codex-parser.js` (OpenAI) — update when providers change pricing
 - Codex gotchas already handled in `codex-parser.js`: `token_count` totals are cumulative (use `last_token_usage` deltas), `cached_input_tokens ⊂ input_tokens`, `reasoning_output_tokens ⊂ output_tokens`, subagent `thread_spawn` rollouts replay parent history (skipped), legacy pre-envelope 2025 format

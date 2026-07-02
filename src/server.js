@@ -42,7 +42,16 @@ function normalizePayloads(payloadOrMap) {
 export function createServer(initialPayload, rebuildFn, opts = {}) {
   const app = express();
   let payloads = normalizePayloads(initialPayload);
-  const pick = (req) => payloads[req.query.source] || payloads.all;
+  // Whitelist the source names: a raw payloads[req.query.source] lookup would
+  // resolve prototype keys (?source=constructor) to functions instead of
+  // falling back to `all`.
+  const pick = (req) => {
+    const source = req.query.source;
+    if ((source === 'claude' || source === 'codex' || source === 'all') && payloads[source]) {
+      return payloads[source];
+    }
+    return payloads.all;
+  };
 
   // Serve dashboard HTML
   const dashboardHtml = readFileSync(path.join(__dirname, 'dashboard.html'), 'utf-8');

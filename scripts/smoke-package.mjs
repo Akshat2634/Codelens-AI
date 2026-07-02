@@ -83,6 +83,16 @@ try {
   const dash = await fetch(`${base}/`);
   if (dash.status !== 200) fail(`GET / returned ${dash.status}`);
 
+  // The packed parsers must actually load the fixture sessions — both agents.
+  const payload = await (await fetch(`${base}/api/all`)).json();
+  if (!Array.isArray(payload.sessions) || payload.sessions.length === 0) {
+    fail('packed CLI served an empty payload — no sessions parsed from fixtures');
+  }
+  const sources = payload.meta?.sources || {};
+  if (!(sources.claude > 0)) fail('packed CLI parsed no Claude fixture sessions');
+  if (!(sources.codex > 0)) fail('packed CLI parsed no Codex fixture sessions');
+  console.log(`  • packed parsers loaded ${sources.claude} claude + ${sources.codex} codex fixture sessions`);
+
   const chart = await fetch(`${base}/vendor/chart.umd.min.js`);
   if (chart.status !== 200) fail(`GET /vendor/chart.umd.min.js returned ${chart.status} — this is the blank-dashboard bug`);
   const ct = chart.headers.get('content-type') || '';
