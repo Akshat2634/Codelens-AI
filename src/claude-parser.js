@@ -326,6 +326,15 @@ function createEmptySession(sessionId) {
   };
 }
 
+// Sentinel day-bucket for usage rows with no resolvable timestamp; resolved to
+// the session's earliest real day (clamped to the window) after parsing.
+const UNBUCKETED_DAY = '__unbucketed__';
+
+function localDayStr(dateLike) {
+  const dt = new Date(dateLike);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
 // cutoffMs clips usage accumulation to the lookback window: a session started
 // before the window but resumed inside it (--resume appends to the same JSONL)
 // keeps only its in-window tokens/cost, so totals and the daily timeline agree
@@ -455,22 +464,22 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
         modelTokens[model].cacheCreate1h += cacheCreate1h;
         modelTokens[model].webSearch += webSearch;
 
-        // Track per-day per-model tokens for daily usage attribution
-        const msgTs = obj.timestamp || lastSeenTimestamp;
-        if (msgTs) {
-          const dt = new Date(msgTs);
-          const dateStr = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-          if (!dailyModelTokens[dateStr]) dailyModelTokens[dateStr] = {};
-          if (!dailyModelTokens[dateStr][model]) {
-            dailyModelTokens[dateStr][model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, cacheCreate1h: 0, webSearch: 0 };
-          }
-          dailyModelTokens[dateStr][model].input += input;
-          dailyModelTokens[dateStr][model].output += output;
-          dailyModelTokens[dateStr][model].cacheRead += cacheRead;
-          dailyModelTokens[dateStr][model].cacheCreate += cacheCreate;
-          dailyModelTokens[dateStr][model].cacheCreate1h += cacheCreate1h;
-          dailyModelTokens[dateStr][model].webSearch += webSearch;
+        // Track per-day per-model tokens for daily usage attribution. Usage
+        // kept without a resolvable timestamp buckets under a sentinel day,
+        // resolved after the parse — left day-less it would appear in session
+        // totals but in no day, so the daily timeline and period cards (which
+        // read only dailyUsage) would stop reconciling with the hero numbers.
+        const dateStr = usageTs ? localDayStr(usageTs) : UNBUCKETED_DAY;
+        if (!dailyModelTokens[dateStr]) dailyModelTokens[dateStr] = {};
+        if (!dailyModelTokens[dateStr][model]) {
+          dailyModelTokens[dateStr][model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, cacheCreate1h: 0, webSearch: 0 };
         }
+        dailyModelTokens[dateStr][model].input += input;
+        dailyModelTokens[dateStr][model].output += output;
+        dailyModelTokens[dateStr][model].cacheRead += cacheRead;
+        dailyModelTokens[dateStr][model].cacheCreate += cacheCreate;
+        dailyModelTokens[dateStr][model].cacheCreate1h += cacheCreate1h;
+        dailyModelTokens[dateStr][model].webSearch += webSearch;
       }
 
       session.assistantMessageCount++;
@@ -490,9 +499,11 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
   session.estimatedCost = 0;
 
   // Date used to pick time-sensitive rates (e.g. Sonnet 5's intro vs standard
-  // pricing). A session is short enough that its start time is the right rate for
-  // all of its usage; per-day costs below re-resolve the rate by each day's date.
-  const sessionDateMs = session.startTime ? Date.parse(session.startTime) : Date.now();
+  // pricing), clamped to the window cutoff: under clipping every accumulated
+  // token is in-window, so a straddling session must not price them at its
+  // pre-window start date. Per-day costs below re-resolve the rate per day.
+  const rawStartMs = session.startTime ? Date.parse(session.startTime) : Date.now();
+  const sessionDateMs = cutoffMs ? Math.max(rawStartMs, cutoffMs) : rawStartMs;
 
   for (const [model, tokens] of Object.entries(modelTokens)) {
     const cost = calculateCost(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h, sessionDateMs, tokens.webSearch);
@@ -547,18 +558,39 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
     session.cost = { inputCost, outputCost, cacheReadCost, cacheCreationCost, serverToolCost, totalCost };
   }
 
+  // Resolve usage that couldn't be day-bucketed (rows before the first
+  // timestamp in the file) to the session's earliest known day, clamped to the
+  // window cutoff so it lands inside the window everything else was clipped to.
+  if (dailyModelTokens[UNBUCKETED_DAY]) {
+    const realDays = Object.keys(dailyModelTokens).filter(d => d !== UNBUCKETED_DAY).sort();
+    let targetMs = realDays.length > 0
+      ? Date.parse(realDays[0] + 'T12:00:00')
+      : rawStartMs;
+    if (cutoffMs) targetMs = Math.max(targetMs, cutoffMs);
+    const target = localDayStr(targetMs);
+    const day = dailyModelTokens[target] || (dailyModelTokens[target] = {});
+    for (const [model, tk] of Object.entries(dailyModelTokens[UNBUCKETED_DAY])) {
+      if (!day[model]) day[model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, cacheCreate1h: 0, webSearch: 0 };
+      for (const k of Object.keys(tk)) day[model][k] += tk[k];
+    }
+    delete dailyModelTokens[UNBUCKETED_DAY];
+  }
+
   // Compute per-day usage with accurate per-model cost. Each day is priced at the
   // rate in effect on it (not the session's start-day rate), so a session that
   // straddles a pricing change — e.g. Sonnet 5's 2026-09-01 intro→standard cutover —
-  // is costed correctly on each side. We also accumulate the session-level breakdown
-  // and per-model cost here so they reconcile exactly with the daily timeline.
+  // is costed correctly on each side. We also accumulate the session-level breakdown,
+  // per-model cost, and cache savings here so they reconcile exactly with the
+  // daily timeline.
   session.dailyUsage = {};
   const dailyModelCost = {};
   const dailyTotal = { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, serverToolCost: 0, totalCost: 0 };
   let dailyCoveredTokens = 0;
+  let dailySavings = 0;
   for (const [dateStr, models] of Object.entries(dailyModelTokens)) {
     let dayCost = 0;
     let dayInput = 0, dayOutput = 0, dayCacheRead = 0, dayCacheCreate = 0;
+    const dayByModel = {};
     // Price this day at the rate in effect on it (noon UTC avoids boundary TZ skew).
     const dayMs = Date.parse(dateStr + 'T12:00:00Z');
     for (const [model, tokens] of Object.entries(models)) {
@@ -571,11 +603,21 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
       dailyTotal.cacheCreationCost += bd.cacheCreationCost;
       dailyTotal.serverToolCost += bd.serverToolCost;
       dailyTotal.totalCost += bd.totalCost;
+      // Avoided cost of this day's cache reads, at the rate in effect on it
+      const dayTier = getPricingTier(model, dayMs);
+      if (dayTier) {
+        const p = PRICING[dayTier];
+        dailySavings += geoMultiplier(model) * tokens.cacheRead * (p.input - p.cacheRead) / PER_MIL;
+      }
       dailyCoveredTokens += tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
       dayInput += tokens.input;
       dayOutput += tokens.output;
       dayCacheRead += tokens.cacheRead;
       dayCacheCreate += tokens.cacheCreate;
+      dayByModel[model] = {
+        tokens: tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate,
+        cost: bd.totalCost,
+      };
     }
     session.dailyUsage[dateStr] = {
       inputTokens: dayInput,
@@ -583,17 +625,22 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
       cacheReadTokens: dayCacheRead,
       cacheCreationTokens: dayCacheCreate,
       cost: dayCost,
+      // Per-model split so windowed views (e.g. the weekly narrative) can
+      // divide spend and lines by what was actually used inside the window.
+      byModel: dayByModel,
     };
   }
 
   // When every usage row carried a timestamp (the common case), the per-day buckets
   // cover the whole session — adopt their per-day-priced totals as authoritative so
-  // session.cost and per-model cost reconcile with the daily timeline even across a
-  // mid-session pricing cutover. If some usage lacked a timestamp (couldn't be
-  // bucketed by day), keep the start-day-priced totals above so no tokens are dropped.
+  // session.cost, per-model cost, and cache savings reconcile with the daily
+  // timeline even across a mid-session pricing cutover. If some usage lacked a
+  // timestamp (couldn't be bucketed by day), keep the start-day-priced totals
+  // above so no tokens are dropped.
   const sessionTotalTokens = session.totalInputTokens + session.totalOutputTokens + session.cacheReadTokens + session.cacheCreationTokens;
   if (sessionTotalTokens > 0 && dailyCoveredTokens === sessionTotalTokens) {
     session.cost = dailyTotal;
+    session.cacheSavingsDollars = dailySavings;
     for (const [model, cost] of Object.entries(dailyModelCost)) {
       if (session.modelBreakdown[model]) session.modelBreakdown[model].cost = cost;
     }
@@ -670,12 +717,29 @@ async function parseSessionWithSubagents(projectDir, sessionId, cutoffMs = 0) {
         // Skip unreadable/corrupt subagent files
       }
     }
+    // Subagents can extend the session span (background agents run past the
+    // last main-transcript message) — refresh the derived duration.
+    if (session.startTime && session.endTime) {
+      const start = new Date(session.startTime).getTime();
+      const end = new Date(session.endTime).getTime();
+      session.durationMinutes = Math.round((end - start) / 60000 * 10) / 10;
+    }
   }
 
   return session;
 }
 
 function mergeSubagentIntoSession(parent, sub) {
+  // Extend the session's time span: a background subagent that ran past the
+  // main conversation is still session activity, and the span drives window
+  // keeping, the correlation window, and duration.
+  if (sub.startTime && (!parent.startTime || sub.startTime < parent.startTime)) {
+    parent.startTime = sub.startTime;
+  }
+  if (sub.endTime && (!parent.endTime || sub.endTime > parent.endTime)) {
+    parent.endTime = sub.endTime;
+  }
+
   parent.totalInputTokens += sub.totalInputTokens;
   parent.totalOutputTokens += sub.totalOutputTokens;
   parent.cacheCreationTokens += sub.cacheCreationTokens;
@@ -726,6 +790,15 @@ function mergeSubagentIntoSession(parent, sub) {
       parent.dailyUsage[dateStr].cacheReadTokens += dayData.cacheReadTokens;
       parent.dailyUsage[dateStr].cacheCreationTokens += dayData.cacheCreationTokens;
       parent.dailyUsage[dateStr].cost += dayData.cost;
+      if (dayData.byModel) {
+        const target = parent.dailyUsage[dateStr];
+        if (!target.byModel) target.byModel = {};
+        for (const [model, v] of Object.entries(dayData.byModel)) {
+          if (!target.byModel[model]) target.byModel[model] = { tokens: 0, cost: 0 };
+          target.byModel[model].tokens += v.tokens;
+          target.byModel[model].cost += v.cost;
+        }
+      }
     }
   }
 
@@ -786,25 +859,29 @@ export async function parseAllProjects(claudeDir, days, projectFilter) {
 
     for (const file of files) {
       const filePath = path.join(projectDir, file);
+      const sessionId = path.basename(file, '.jsonl');
 
-      // Quick filter by mtime
+      // Quick filter by mtime. A session counts as recent if EITHER the main
+      // transcript or any subagent transcript was touched inside the window —
+      // background subagents keep writing after the main conversation stops,
+      // and gating on the main file alone would drop their in-window usage.
+      let mainMtime;
       try {
-        const stat = statSync(filePath);
-        if (stat.mtimeMs < cutoffMs) continue;
-        fileIndex[filePath] = stat.mtimeMs;
+        mainMtime = statSync(filePath).mtimeMs;
       } catch {
         continue;
       }
-
-      const sessionId = path.basename(file, '.jsonl');
-
-      // Track subagent transcript mtimes too, so cache staleness detection
-      // catches sessions whose subagent files changed without the main file.
+      const subMtimes = [];
       for (const sf of listSubagentTranscripts(path.join(projectDir, sessionId, 'subagents'))) {
         try {
-          fileIndex[sf] = statSync(sf).mtimeMs;
+          subMtimes.push([sf, statSync(sf).mtimeMs]);
         } catch { }
       }
+      if (Math.max(mainMtime, ...subMtimes.map(x => x[1])) < cutoffMs) continue;
+      fileIndex[filePath] = mainMtime;
+      // Track subagent transcript mtimes too, so cache staleness detection
+      // catches sessions whose subagent files changed without the main file.
+      for (const [sf, m] of subMtimes) fileIndex[sf] = m;
 
       try {
         const session = await parseSessionWithSubagents(projectDir, sessionId, cutoffMs);

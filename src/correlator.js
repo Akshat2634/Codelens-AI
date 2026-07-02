@@ -62,8 +62,15 @@ function temporalDistance(commitMs, sessionStartMs, sessionEndMs) {
  *   Time constraint: commit is within [sessionStart, sessionEnd + 2 hours].
  * Fallback: for sessions with no filesWritten (chat-only), use time window
  *   [sessionStart, sessionEnd + 2 hours].
+ *
+ * cutoffMs (the lookback-window start) clamps the matching window of sessions
+ * that started before the window but were kept because they were resumed
+ * inside it: their raw [start, end] range spans the entire window, giving
+ * temporal distance 0 to EVERY commit and stealing attribution from the
+ * sessions that actually did the work. Their window starts at their first
+ * in-window activity day instead.
  */
-export function correlateSessions(sessions, commitsByRepo) {
+export function correlateSessions(sessions, commitsByRepo, cutoffMs = 0) {
   // Phase 1: Build candidate map — for each commit, find the best session
   // commitHash -> { session, hasFileOverlap }
   const commitAssignment = new Map();
@@ -72,7 +79,13 @@ export function correlateSessions(sessions, commitsByRepo) {
     const repoAnalysis = commitsByRepo[session.repoPath];
     const repoCommits = repoAnalysis?.commits || [];
 
-    const sessionStartMs = new Date(session.startTime).getTime();
+    let sessionStartMs = new Date(session.startTime).getTime();
+    if (cutoffMs && sessionStartMs < cutoffMs) {
+      const firstDay = Object.keys(session.dailyUsage || {}).sort()[0];
+      sessionStartMs = firstDay
+        ? Math.max(Date.parse(firstDay + 'T00:00:00'), cutoffMs)
+        : cutoffMs;
+    }
     const sessionEndMs = new Date(session.endTime).getTime();
     const sessionFiles = new Set(session.filesWritten || []);
     const windowEnd = sessionEndMs + FALLBACK_BUFFER_MS;
