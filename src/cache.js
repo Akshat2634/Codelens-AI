@@ -12,7 +12,10 @@ const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
 //    (days, project) so a cache built for one window/filter can't serve another.
 // 8: window-clipped usage for sessions spanning the cutoff, per-tier
 //    cacheSavingsDollars on each session.
-const CACHE_VERSION = 8;
+// 9: per-day-priced cache savings, per-model daily splits (dailyUsage.byModel),
+//    subagent transcripts extend session span, untimestamped usage day-bucketed,
+//    cache keyed on claudeDir.
+const CACHE_VERSION = 9;
 
 export function loadCache(options = {}) {
   if (!existsSync(CACHE_FILE)) {
@@ -28,6 +31,8 @@ export function loadCache(options = {}) {
     // different options would display the wrong data — treat as a miss.
     if (data.days !== options.days) return null;
     if ((data.project || null) !== (options.project || null)) return null;
+    // A cache built from one --claude-dir must not serve another.
+    if ((data.claudeDir || null) !== (options.claudeDir || null)) return null;
     // The rolling window moves daily and sessions are clipped to it at parse
     // time, so a cache built on an earlier day would serve stale clipping.
     if (options.cutoffDay && data.cutoffDay !== options.cutoffDay) return null;
@@ -44,6 +49,7 @@ export function saveCache(sessions, fileIndex, options = {}) {
     lastParsedAt: new Date().toISOString(),
     days: options.days,
     project: options.project || null,
+    claudeDir: options.claudeDir || null,
     cutoffDay: options.cutoffDay || null,
     fileIndex,
     sessions,
@@ -57,7 +63,7 @@ export function deleteCache() {
   }
 }
 
-export function getStaleFiles(claudeDir, cachedFileIndex, cutoffMs = 0) {
+export function getStaleFiles(claudeDir, cachedFileIndex, cutoffMs = 0, projectFilter = null) {
   const currentFiles = {};
   const newFiles = [];
   const modifiedFiles = [];
@@ -68,6 +74,10 @@ export function getStaleFiles(claudeDir, cachedFileIndex, cutoffMs = 0) {
 
   const projectFolders = readdirSync(claudeDir).filter(f => {
     if (f.startsWith('.')) return false;
+    // Apply the same project filter as the parser: the cached fileIndex only
+    // covers matching folders, so scanning the rest would flag every one of
+    // their files as "new" and force a full re-parse on every --project run.
+    if (projectFilter && !f.toLowerCase().includes(projectFilter.toLowerCase())) return false;
     const fullPath = path.join(claudeDir, f);
     try { return statSync(fullPath).isDirectory(); } catch { return false; }
   });
@@ -83,10 +93,22 @@ export function getStaleFiles(claudeDir, cachedFileIndex, cutoffMs = 0) {
       const filePath = path.join(projectDir, file);
       try {
         const mtime = statSync(filePath).mtimeMs;
-        // Files older than the lookback cutoff are never parsed (the parser
-        // applies the same mtime filter), so they must not count as "new" —
-        // otherwise any old session file forces a full re-parse on every run.
-        if (mtime < cutoffMs) continue;
+
+        // Subagent transcripts (including workflow-nested ones) are merged into
+        // their parent session, so their changes must also invalidate the cache.
+        const sessionId = file.slice(0, -'.jsonl'.length);
+        const subFiles = [];
+        for (const sf of listSubagentTranscripts(path.join(projectDir, sessionId, 'subagents'))) {
+          try {
+            subFiles.push([sf, statSync(sf).mtimeMs]);
+          } catch { }
+        }
+
+        // Sessions whose main AND subagent transcripts all predate the cutoff
+        // are never parsed (the parser applies the same gate), so they must not
+        // count as "new" — but a fresh subagent transcript alone must
+        // resurrect the whole session, matching the parser.
+        if (Math.max(mtime, ...subFiles.map(x => x[1])) < cutoffMs) continue;
         currentFiles[filePath] = mtime;
 
         if (!cachedFileIndex[filePath]) {
@@ -95,19 +117,13 @@ export function getStaleFiles(claudeDir, cachedFileIndex, cutoffMs = 0) {
           modifiedFiles.push(filePath);
         }
 
-        // Subagent transcripts (including workflow-nested ones) are merged into
-        // their parent session, so their changes must also invalidate the cache.
-        const sessionId = file.slice(0, -'.jsonl'.length);
-        for (const sf of listSubagentTranscripts(path.join(projectDir, sessionId, 'subagents'))) {
-          try {
-            const sm = statSync(sf).mtimeMs;
-            currentFiles[sf] = sm;
-            if (!cachedFileIndex[sf]) {
-              newFiles.push(sf);
-            } else if (sm > cachedFileIndex[sf]) {
-              modifiedFiles.push(sf);
-            }
-          } catch { }
+        for (const [sf, sm] of subFiles) {
+          currentFiles[sf] = sm;
+          if (!cachedFileIndex[sf]) {
+            newFiles.push(sf);
+          } else if (sm > cachedFileIndex[sf]) {
+            modifiedFiles.push(sf);
+          }
         }
       } catch { }
     }

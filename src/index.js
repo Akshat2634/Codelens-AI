@@ -42,7 +42,7 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false, plan
   // cutoffDay keys the cache to the day it was built: sessions are clipped to
   // the rolling window at parse time, so yesterday's cache would serve
   // yesterday's clipping. Costs one full re-parse per day.
-  const cacheOptions = { days, project: project || null, cutoffDay: cutoffDate.toDateString() };
+  const cacheOptions = { days, project: project || null, claudeDir, cutoffDay: cutoffDate.toDateString() };
 
   if (forceRefresh) {
     deleteCache();
@@ -52,7 +52,7 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false, plan
   const cached = forceRefresh ? null : loadCache(cacheOptions);
 
   if (cached) {
-    const stale = getStaleFiles(claudeDir, cached.fileIndex, cutoffMs);
+    const stale = getStaleFiles(claudeDir, cached.fileIndex, cutoffMs, project);
     const newCount = stale.newFiles.length;
     const modifiedCount = stale.modifiedFiles.length;
     const deletedCount = stale.deletedFiles.length;
@@ -92,7 +92,7 @@ async function buildPayload(claudeDir, days, project, forceRefresh = false, plan
   console.log(`  ${icon.ok} Analyzing git repos ${c.dim}── ${repoPathsSet.size} repos (${fmt(Date.now() - startGit)})${c.reset}`);
 
   // Step 3: Correlate sessions with commits
-  const { correlatedSessions, organicCommits } = correlateSessions(sessions, commitsByRepo);
+  const { correlatedSessions, organicCommits } = correlateSessions(sessions, commitsByRepo, cutoffMs);
   console.log(`  ${icon.ok} Correlating sessions ${c.dim}── done${c.reset}`);
 
   // Step 4: Compute metrics

@@ -1440,6 +1440,14 @@
       .period-card:nth-child(3), .period-card:nth-child(4) { border-top: 1px solid var(--glass-border); }
       .charts-grid { grid-template-columns: 1fr; }
     }
+    @media (max-width: 720px) {
+      .header-actions {
+        position: static;
+        justify-content: flex-end;
+        margin-bottom: 16px;
+      }
+      header { padding-top: 28px; }
+    }
     @media (max-width: 600px) {
       .hero-stats { grid-template-columns: 1fr; }
       .token-stats { grid-template-columns: 1fr; }
@@ -2410,10 +2418,22 @@ async function refreshData() {
 }
 
 function formatTokens(n) {
-  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + 'B';
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  // Thresholds sit at the display rollover (999.95 rounds to 1000.0), so a
+  // value like 999,960,000 reads 1.0B instead of 1000.0M.
+  if (n >= 999.95e6) return (n / 1e9).toFixed(1) + 'B';
+  if (n >= 999.95e3) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 999.5) return (n / 1e3).toFixed(1) + 'K';
   return n.toString();
+}
+
+// Sub-cent costs are real spend — showing them as $0.00 reads as free.
+function fmtMoney(v) {
+  if (v > 0 && v < 0.005) return '<$0.01';
+  return '$' + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function plural(n, word) {
+  return n.toLocaleString() + ' ' + word + (n === 1 ? '' : 's');
 }
 
 // Integer percentages of a set of values that are guaranteed to sum to exactly
@@ -2623,10 +2643,12 @@ function renderHeroStats(s) {
           <span class="legend-dot" style="background: var(--accent-orange);"></span>
           <div class="stat-info">
             <div class="label">AI Agent Spend <i class="info-tip" data-tip="Estimated cost based on Anthropic's per-token pricing.">i</i></div>
-            <div class="sub">${s.totalSessions} sessions</div>
+            <div class="sub">${plural(s.totalSessions, 'session')}</div>
           </div>
           <div class="stat-value-wrap">
-            <div class="value" style="color: var(--accent-orange);" data-animate-value="${s.totalCost.toFixed(2)}" data-animate-prefix="$">$0.00</div>
+            ${s.totalCost > 0 && s.totalCost < 0.005
+              ? '<div class="value" style="color: var(--accent-orange);">&lt;$0.01</div>'
+              : `<div class="value" style="color: var(--accent-orange);" data-animate-value="${s.totalCost.toFixed(2)}" data-animate-prefix="$">$0.00</div>`}
           </div>
         </div>
         <div class="stat-card glow commits-card">
@@ -2646,7 +2668,9 @@ function renderHeroStats(s) {
             <div class="sub">${s.totalFilesChanged} files changed</div>
           </div>
           <div class="stat-value-wrap">
-            <div class="value" style="color: var(--accent-blue);" ${s.avgCostPerCommit !== null ? `data-animate-value="${s.avgCostPerCommit.toFixed(2)}" data-animate-prefix="$"` : ''}>${s.avgCostPerCommit !== null ? '$0.00' : 'N/A'}</div>
+            ${s.avgCostPerCommit !== null && s.avgCostPerCommit > 0 && s.avgCostPerCommit < 0.005
+              ? '<div class="value" style="color: var(--accent-blue);">&lt;$0.01</div>'
+              : `<div class="value" style="color: var(--accent-blue);" ${s.avgCostPerCommit !== null ? `data-animate-value="${s.avgCostPerCommit.toFixed(2)}" data-animate-prefix="$"` : ''}>${s.avgCostPerCommit !== null ? '$0.00' : 'N/A'}</div>`}
           </div>
         </div>
       </div>
@@ -2677,26 +2701,26 @@ function renderCostByPeriod(p) {
     <div class="period-stats">
       <div class="period-card today">
         <div class="period-label">Today</div>
-        <div class="period-cost">$${p.today.cost.toFixed(2)}</div>
-        <div class="period-meta">${p.today.sessions} sessions &middot; ${p.today.commits} commits</div>
+        <div class="period-cost">${fmtMoney(p.today.cost)}</div>
+        <div class="period-meta">${plural(p.today.sessions, 'session')} &middot; ${plural(p.today.commits, 'commit')}</div>
         <div class="period-tokens">${formatTokens(p.today.tokens)} tokens</div>
       </div>
       <div class="period-card week">
         <div class="period-label">Last 7 Days</div>
-        <div class="period-cost">$${p.week.cost.toFixed(2)}</div>
-        <div class="period-meta">${p.week.sessions} sessions &middot; ${p.week.commits} commits</div>
+        <div class="period-cost">${fmtMoney(p.week.cost)}</div>
+        <div class="period-meta">${plural(p.week.sessions, 'session')} &middot; ${plural(p.week.commits, 'commit')}</div>
         <div class="period-tokens">${formatTokens(p.week.tokens)} tokens</div>
       </div>
       <div class="period-card month">
         <div class="period-label">This Month</div>
-        <div class="period-cost">$${p.month.cost.toFixed(2)}</div>
-        <div class="period-meta">${p.month.sessions} sessions &middot; ${p.month.commits} commits</div>
+        <div class="period-cost">${fmtMoney(p.month.cost)}</div>
+        <div class="period-meta">${plural(p.month.sessions, 'session')} &middot; ${plural(p.month.commits, 'commit')}</div>
         <div class="period-tokens">${formatTokens(p.month.tokens)} tokens</div>
       </div>
       <div class="period-card all-time">
         <div class="period-label">Last ${DATA.meta.daysAnalyzed} Days (full window)</div>
-        <div class="period-cost">$${p.allTime.cost.toFixed(2)}</div>
-        <div class="period-meta">${p.allTime.sessions} sessions &middot; ${p.allTime.commits} commits</div>
+        <div class="period-cost">${fmtMoney(p.allTime.cost)}</div>
+        <div class="period-meta">${plural(p.allTime.sessions, 'session')} &middot; ${plural(p.allTime.commits, 'commit')}</div>
         <div class="period-tokens">${formatTokens(p.allTime.tokens)} tokens</div>
       </div>
     </div>
@@ -2805,7 +2829,9 @@ function renderInsights(insights) {
 
 function renderSurvival(s) {
   const pct = s.survivalRate;
-  const accentColor = pct >= 80 ? 'var(--accent-purple)' : pct >= 50 ? 'var(--accent-orange)' : 'var(--accent-red)';
+  // null = no lines old enough to judge yet (all added <24h ago, or none at all)
+  const pending = pct === null || pct === undefined;
+  const accentColor = pending ? 'var(--text-muted)' : pct >= 80 ? 'var(--accent-purple)' : pct >= 50 ? 'var(--accent-orange)' : 'var(--accent-red)';
   const gradient = pct >= 80
     ? 'linear-gradient(90deg, var(--accent-purple), var(--accent-blue))'
     : pct >= 50
@@ -2817,12 +2843,14 @@ function renderSurvival(s) {
         Line Survival Rate
         <i class="info-tip" data-tip="Of the lines your AI agent added (in files it edited), how many weren't reworked within 24 hours. Approximate — based on churn detection, not exact git blame. Lines added in the last 24h are excluded from the rate since they haven't had a full window to be reworked.">i</i>
       </h3>
-      <div class="survival-bar"><div class="fill" style="width: ${pct}%; background: ${gradient};"></div></div>
+      <div class="survival-bar"><div class="fill" style="width: ${pending ? 0 : pct}%; background: ${gradient};"></div></div>
       <div class="survival-stats">
         <div><span>${s.totalAdded.toLocaleString()}</span> AI lines added</div>
         <div><span>${s.totalChurned.toLocaleString()}</span> reworked within 24h</div>
         ${s.maturing > 0 ? `<div><span>${s.maturing.toLocaleString()}</span> still maturing (&lt;24h)</div>` : ''}
-        <div><span style="color:${accentColor};">${pct}%</span> survival rate</div>
+        ${pending
+          ? `<div><span style="color:${accentColor};">—</span> survival rate (no lines matured yet)</div>`
+          : `<div><span style="color:${accentColor};">${pct}%</span> survival rate</div>`}
       </div>
     </div>
   </div>`;
@@ -2863,7 +2891,7 @@ function renderTokenHeroStats(t) {
       <div class="token-stat-card wasted">
         <div class="label">Tokens Wasted <i class="info-tip" data-tip="Tokens consumed in orphaned sessions — sessions with 10+ messages that produced zero commits.">i</i></div>
         <div class="value" style="color: var(--accent-red);">${formatTokens(t.tokensOrphaned)}</div>
-        <div class="sub">${wastePct}% of total — $${t.costOrphaned.toFixed(2)} burned</div>
+        <div class="sub">${wastePct}% of total — ${fmtMoney(t.costOrphaned)} burned</div>
         <div class="waste-bar"><div class="fill" style="width: ${wastePct}%;"></div></div>
         <div class="waste-bar-label"><span>0%</span><span>${wastePct}% wasted</span><span>100%</span></div>
       </div>
@@ -3106,7 +3134,7 @@ function renderSessionsTable(sessions) {
             <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')} <i class="info-tip" data-tip="Primary model used in the session. Models marked (sub) are subagents spawned for background tasks like code search and exploration.">i</i></th>
             <th onclick="sortTable('msgCount')" class="${sortCol === 'msgCount' ? 'sorted' : ''}">Msgs${thArrow('msgCount')} <i class="info-tip" data-tip="Total messages in the session (your messages + Claude's responses).">i</i></th>
             <th onclick="sortTable('autopilotRatio')" class="${sortCol === 'autopilotRatio' ? 'sorted' : ''}">Autopilot${thArrow('autopilotRatio')} <i class="info-tip" data-tip="Agent responses per user message. Higher = more autonomous. 5x is excellent.">i</i></th>
-            <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')} <i class="info-tip" data-tip="Estimated cost based on token usage and Anthropic's pricing. Calculated from input, output, cache read (90% discount), and cache write (25% premium for 5-min TTL, 100% for 1-hour TTL) tokens, plus web search fees. Fast-mode and US data-residency usage is billed at its premium rates.">i</i></th>
+            <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')} <i class="info-tip" data-tip="Estimated cost based on token usage and Anthropic's pricing. Calculated from input, output, cache read (90% discount), and cache write (25% premium for 5-min TTL, 100% for 1-hour TTL) tokens, plus web search fees. Fast-mode and US data-residency usage is billed at its premium rates. For sessions that started before the analyzed window, only in-window usage is counted.">i</i></th>
             <th onclick="sortTable('commitCount')" class="${sortCol === 'commitCount' ? 'sorted' : ''}">Commits${thArrow('commitCount')} <i class="info-tip" data-tip="Git commits that touch files Claude edited in this session. Falls back to time-window for chat-only sessions. The colored dot shows attribution confidence: green = high, amber = medium, red = low (e.g. time-only match).">i</i></th>
             <th onclick="sortTable('linesAdded')" class="${sortCol === 'linesAdded' ? 'sorted' : ''}">Lines${thArrow('linesAdded')} <i class="info-tip" data-tip="Lines added / lines deleted in matched commits.">i</i></th>
             <th>Grade <i class="info-tip" data-tip="Session efficiency: A = great ROI, B = good, C = average, D = poor, F = no commits or very high cost.">i</i></th>
@@ -3133,7 +3161,7 @@ function renderSessionsTable(sessions) {
                 <td>${modelDisplay}</td>
                 <td>${s.userMessageCount + s.assistantMessageCount}</td>
                 <td><span class="autopilot-badge">${s.autopilotRatio > 0 ? s.autopilotRatio + 'x' : '—'}</span></td>
-                <td>$${s.cost.totalCost.toFixed(2)}</td>
+                <td>${fmtMoney(s.cost.totalCost)}</td>
                 <td>${s.commitCount}${s.commitCount > 0 && s.attributionConfidence ? ` <span title="${({high:'High',medium:'Medium',low:'Low'})[s.attributionConfidence]} attribution confidence" style="display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:middle;margin-left:5px;background:${({high:'var(--accent-green)',medium:'var(--accent-orange)',low:'var(--accent-red)'})[s.attributionConfidence]};"></span>` : ''}</td>
                 <td><span style="color:var(--accent-green)">+${s.linesAdded.toLocaleString()}</span> / <span style="color:var(--accent-red)">-${s.linesDeleted.toLocaleString()}</span></td>
                 <td><span class="grade-badge" style="background:${gradeBg};color:${gradeColor};">${s.grade}</span></td>
@@ -3817,8 +3845,9 @@ function drawProgressBar(ctx, x, y, w, label, value, suffix, color, th) {
   drawRoundRect(ctx, bx, y + 3, barW, barH, 4);
   ctx.fillStyle = th.barTrack;
   ctx.fill();
-  // Bar fill
-  const fillW = Math.max(0, (value / 100) * barW);
+  // Bar fill (a null value — e.g. survival with no matured lines — draws an
+  // empty track with an em dash instead of a fake 0/100)
+  const fillW = value === null || value === undefined ? 0 : Math.max(0, (value / 100) * barW);
   if (fillW > 0) {
     drawRoundRect(ctx, bx, y + 3, fillW, barH, 4);
     ctx.fillStyle = color;
@@ -3828,7 +3857,7 @@ function drawProgressBar(ctx, x, y, w, label, value, suffix, color, th) {
   ctx.font = '600 12px "IBM Plex Mono", monospace';
   ctx.fillStyle = color;
   ctx.textAlign = 'right';
-  ctx.fillText(Math.round(value) + suffix, x + w, y + 11);
+  ctx.fillText(value === null || value === undefined ? '—' : Math.round(value) + suffix, x + w, y + 11);
   ctx.textAlign = 'left';
 }
 
@@ -4031,12 +4060,12 @@ function renderShareCard(canvas) {
   const boxH = 52;
   const boxGap = 12;
   const boxStartX = 160;
-  drawStatBox(ctx, boxStartX, y, boxW, boxH, '$' + s.totalCost.toFixed(2), 'Total Spend', cOrange, th);
+  drawStatBox(ctx, boxStartX, y, boxW, boxH, fmtMoney(s.totalCost), 'Total Spend', cOrange, th);
   drawStatBox(ctx, boxStartX + boxW + boxGap, y, boxW, boxH, String(s.totalCommits), 'Commits Shipped', cGreen, th);
   drawStatBox(ctx, boxStartX, y + boxH + boxGap, boxW, boxH,
-    s.avgCostPerCommit != null ? '$' + s.avgCostPerCommit.toFixed(2) : 'N/A', 'Avg $/Commit', cBlue, th);
+    s.avgCostPerCommit != null ? fmtMoney(s.avgCostPerCommit) : 'N/A', 'Avg $/Commit', cBlue, th);
   drawStatBox(ctx, boxStartX + boxW + boxGap, y + boxH + boxGap, boxW, boxH,
-    String(s.totalSessions), 'Sessions', cPurple, th);
+    String(s.totalSessions), s.totalSessions === 1 ? 'Session' : 'Sessions', cPurple, th);
 
   // Section label helper: amber tick + mono caps (echoes the numbered kickers)
   const sectionLabel = (text, ly) => {

@@ -4,9 +4,10 @@ import { commitLinesForSession } from './correlator.js';
 const CHURN_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function formatBigNumber(n) {
-  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + 'B';
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  // Thresholds at the display rollover so 999.96M reads 1.0B, not 1000.0M
+  if (n >= 999.95e6) return (n / 1e9).toFixed(1) + 'B';
+  if (n >= 999.95e3) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 999.5) return (n / 1e3).toFixed(1) + 'K';
   return n.toString();
 }
 
@@ -108,73 +109,116 @@ function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics) {
       : c.totalAdded;
   };
 
+  // Everything week-scoped shares one boundary rule: the calendar day (taken
+  // at noon to avoid TZ edge skew) must fall inside [startMs, endMs). Cost can
+  // only be bucketed by day (dailyUsage), so commits use the same day rule —
+  // exact commit timestamps against day-bucketed cost would count a boundary
+  // commit in a week that excludes its spend. This is also costByPeriod's
+  // rule, so "this week" is one population everywhere it's displayed.
+  const dayKey = (ms) => {
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const dayInRange = (dateStr, startMs, endMs) => {
+    const t = Date.parse(dateStr + 'T12:00:00');
+    return t >= startMs && t < endMs;
+  };
+  const commitInRange = (c, startMs, endMs) => dayInRange(dayKey(c.timestampMs), startMs, endMs);
+
+  // The live week's end extends to end-of-today: day buckets compare at noon,
+  // so an upper bound of `now` would silently drop all of today's usage and
+  // commits whenever the dashboard runs before noon. Interior boundaries
+  // (this week vs last week) stay exact.
+  const endOfToday = Date.parse(dayKey(now) + 'T23:59:59.999');
+
+  // Cost and tokens bucket by ACTUAL usage day (dailyUsage) — a whole-session
+  // bucket by start time would divide last week's spend by this week's commits
+  // when a session straddles the boundary. Sessions count as active if they
+  // had any usage day inside the window.
+  const windowUsage = (s, startMs, endMs) => {
+    const entries = Object.entries(s.dailyUsage || {});
+    if (entries.length === 0) {
+      // No per-day data — fall back to whole-session bucketing by start time
+      const t = new Date(s.startTime).getTime();
+      return t >= startMs && t < endMs
+        ? { cost: s.cost.totalCost, tokens: s.totalInputTokens + s.totalOutputTokens + s.cacheReadTokens + s.cacheCreationTokens, active: true }
+        : { cost: 0, tokens: 0, active: false };
+    }
+    let cost = 0;
+    let tokens = 0;
+    let active = false;
+    for (const [dateStr, day] of entries) {
+      if (!dayInRange(dateStr, startMs, endMs)) continue;
+      active = true;
+      cost += day.cost;
+      tokens += day.inputTokens + day.outputTokens + day.cacheReadTokens + (day.cacheCreationTokens || 0);
+    }
+    return { cost, tokens, active };
+  };
+
   const aggregate = (startMs, endMs) => {
-    // Cost and tokens bucket by ACTUAL usage day (dailyUsage), matching
-    // costByPeriod, so the same numerator feeds $/commit as the commits
-    // counted below — a whole-session bucket by start time would divide
-    // last week's spend by this week's commits when a session straddles
-    // the boundary. Sessions count if they had any activity in the window.
-    const dayInWindow = (dateStr) => {
-      const t = Date.parse(dateStr + 'T12:00:00');
-      return t >= startMs && t < endMs;
-    };
-    const windowUsage = (s) => {
-      const entries = Object.entries(s.dailyUsage || {});
-      if (entries.length === 0) {
-        // No per-day data — fall back to whole-session bucketing by start time
-        const t = new Date(s.startTime).getTime();
-        return t >= startMs && t < endMs
-          ? { cost: s.cost.totalCost, tokens: s.totalInputTokens + s.totalOutputTokens + s.cacheReadTokens + s.cacheCreationTokens, active: true }
-          : { cost: 0, tokens: 0, active: false };
-      }
-      let cost = 0;
-      let tokens = 0;
-      let active = false;
-      for (const [dateStr, day] of entries) {
-        if (!dayInWindow(dateStr)) continue;
-        active = true;
-        cost += day.cost;
-        tokens += day.inputTokens + day.outputTokens + day.cacheReadTokens + (day.cacheCreationTokens || 0);
-      }
-      return { cost, tokens, active };
-    };
-    const perSession = correlatedSessions.map(s => ({ s, w: windowUsage(s) }));
+    const perSession = correlatedSessions.map(s => ({ s, w: windowUsage(s, startMs, endMs) }));
     const ss = perSession.filter(x => x.w.active).map(x => x.s);
     const cost = perSession.reduce((a, x) => a + x.w.cost, 0);
     const tokens = perSession.reduce((a, x) => a + x.w.tokens, 0);
+    // Message counts are whole-session (never day-bucketed), so this ratio
+    // describes the sessions ACTIVE this week rather than strictly this
+    // week's messages — the bullet wording below says exactly that.
     const msgUser = ss.reduce((a, b) => a + b.userMessageCount, 0);
     const msgAssistant = ss.reduce((a, b) => a + b.assistantMessageCount, 0);
     const autopilot = msgUser > 0 ? msgAssistant / msgUser : 0;
 
-    // Per-family spend, scaled to each session's in-window share so it sums to
-    // the window cost above (whole-session family costs against a windowed
-    // total read as ">100% of spend" when a session straddles the boundary).
+    // Per-family spend and token share, from the in-window days' per-model
+    // splits (dailyUsage.byModel) — whole-session family numbers would credit
+    // this week's spend and lines to models used in other weeks when a session
+    // straddles the boundary. Sessions without per-day splits fall back to
+    // whole-session shares scaled to their in-window cost.
     const modelCost = {};
+    const famTokensBySession = new Map();
     for (const { s, w } of perSession) {
       if (!w.active) continue;
-      const scale = s.cost.totalCost > 0 ? w.cost / s.cost.totalCost : 0;
-      for (const [m, data] of Object.entries(s.modelBreakdown)) {
-        const fam = getModelFamily(m) || 'unknown';
-        modelCost[fam] = (modelCost[fam] || 0) + data.cost * scale;
+      const famCost = {};
+      const famTokens = {};
+      let covered = false;
+      for (const [dateStr, day] of Object.entries(s.dailyUsage || {})) {
+        if (!day.byModel || !dayInRange(dateStr, startMs, endMs)) continue;
+        covered = true;
+        for (const [m, v] of Object.entries(day.byModel)) {
+          const fam = getModelFamily(m) || 'unknown';
+          famCost[fam] = (famCost[fam] || 0) + v.cost;
+          famTokens[fam] = (famTokens[fam] || 0) + v.tokens;
+        }
       }
+      if (!covered) {
+        const scale = s.cost.totalCost > 0 ? w.cost / s.cost.totalCost : 0;
+        for (const [m, data] of Object.entries(s.modelBreakdown)) {
+          const fam = getModelFamily(m) || 'unknown';
+          famCost[fam] = (famCost[fam] || 0) + data.cost * scale;
+          famTokens[fam] = (famTokens[fam] || 0) + data.tokens;
+        }
+      }
+      for (const [fam, c] of Object.entries(famCost)) modelCost[fam] = (modelCost[fam] || 0) + c;
+      famTokensBySession.set(s, famTokens);
     }
     const dominantModel = Object.entries(modelCost).sort((a, b) => b[1] - a[1])[0] || null;
 
-    // Output metrics (commits, lines, lines-by-model) bucket by commit author time.
+    // Output metrics (commits, lines, lines-by-model) bucket by commit day.
+    // Lines split across families by each session's IN-WINDOW token share.
     let commits = 0;
     let linesAdded = 0;
     const modelLines = {};
-    for (const s of correlatedSessions) {
-      const sessionTokens = Object.values(s.modelBreakdown).reduce((sum, d) => sum + d.tokens, 0);
+    for (const { s } of perSession) {
+      const famTokens = famTokensBySession.get(s);
+      const famTotal = famTokens ? Object.values(famTokens).reduce((a, b) => a + b, 0) : 0;
       for (const c of (s.commits || [])) {
-        if (c.timestampMs < startMs || c.timestampMs >= endMs) continue;
+        if (!commitInRange(c, startMs, endMs)) continue;
         commits++;
         const cLines = commitLinesAdded(s, c);
         linesAdded += cLines;
-        for (const [m, data] of Object.entries(s.modelBreakdown)) {
-          const fam = getModelFamily(m) || 'unknown';
-          const share = sessionTokens > 0 ? data.tokens / sessionTokens : 0;
-          modelLines[fam] = (modelLines[fam] || 0) + cLines * share;
+        if (famTotal > 0) {
+          for (const [fam, tk] of Object.entries(famTokens)) {
+            modelLines[fam] = (modelLines[fam] || 0) + cLines * (tk / famTotal);
+          }
         }
       }
     }
@@ -184,7 +228,7 @@ function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics) {
     return { sessions: ss.length, cost, commits, linesAdded, tokens, autopilot, costPerCommit, dominantModel, modelCost, modelLines };
   };
 
-  const thisWeek = aggregate(thisStart, now);
+  const thisWeek = aggregate(thisStart, endOfToday);
   const lastWeek = aggregate(lastStart, thisStart);
 
   if (thisWeek.sessions === 0) return null;
@@ -232,19 +276,20 @@ function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics) {
     }
   }
   if (thisWeek.autopilot > 0) {
-    bullets.push(`Autopilot ratio: ${thisWeek.autopilot.toFixed(1)}x — your agent handled ${thisWeek.autopilot.toFixed(1)} actions per prompt.`);
+    bullets.push(`Autopilot ratio: ${thisWeek.autopilot.toFixed(1)}x across sessions active this week — ${thisWeek.autopilot.toFixed(1)} agent actions per prompt.`);
   }
 
-  // Best day inside the week — bucket by commit author time. Cost for the day
-  // is attributed proportionally: each commit inherits sessionCost / commitCount
-  // from its parent session so the dollar figure tracks the commits shown.
+  // Best day inside the week — same day rule as everything above. Cost is
+  // attributed proportionally from each session's IN-WEEK spend (not its
+  // whole-window cost, which could exceed the Weekly Spend shown right above):
+  // each in-week commit inherits weekCost / weekCommitCount from its session.
   const commitsByDay = {};
   for (const s of correlatedSessions) {
-    const perCommitCost = s.commitCount > 0 ? s.cost.totalCost / s.commitCount : 0;
-    for (const c of (s.commits || [])) {
-      if (c.timestampMs < thisStart || c.timestampMs >= now) continue;
-      const dt = new Date(c.timestampMs);
-      const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+    const weekCommits = (s.commits || []).filter(c => commitInRange(c, thisStart, endOfToday));
+    if (weekCommits.length === 0) continue;
+    const perCommitCost = windowUsage(s, thisStart, endOfToday).cost / weekCommits.length;
+    for (const c of weekCommits) {
+      const key = dayKey(c.timestampMs);
       if (!commitsByDay[key]) commitsByDay[key] = { commits: 0, cost: 0 };
       commitsByDay[key].commits++;
       commitsByDay[key].cost += perCommitCost;
@@ -347,9 +392,10 @@ function computeLineSurvival(correlatedSessions) {
   const surviving = totalAdded - totalChurned; // raw lines that survived the window
   const observed = totalAdded - maturing;      // lines old enough to judge
   const survived = surviving - maturing;       // matured lines that weren't churned
-  // Round to nearest 5% to avoid false precision
-  const rawRate = observed > 0 ? (survived / observed) * 100 : 100;
-  const survivalRate = Math.round(rawRate / 5) * 5;
+  // null when nothing is old enough to judge — a fabricated 100% would feed the
+  // efficiency score and grade with evidence that doesn't exist yet. Otherwise
+  // rounded to the nearest 5% to avoid false precision.
+  const survivalRate = observed > 0 ? Math.round((survived / observed) * 100 / 5) * 5 : null;
 
   return { totalAdded, totalChurned, surviving, maturing, survivalRate };
 }
@@ -369,7 +415,7 @@ function computeAutonomyGrade(score) {
   return 'F';
 }
 
-function computeAutonomyMetrics(correlatedSessions) {
+function computeAutonomyMetrics(correlatedSessions, cutoffMs = 0) {
   const perSession = correlatedSessions.map(s => {
     const autopilotRatio = s.userMessageCount > 0
       ? Math.round((s.assistantMessageCount / s.userMessageCount) * 100) / 100
@@ -385,7 +431,12 @@ function computeAutonomyMetrics(correlatedSessions) {
     const toolbeltCoverage = Math.min(100, Math.round((uniqueTools / TOTAL_AVAILABLE_TOOLS) * 100));
 
     const totalToolCalls = Object.values(s.toolCalls).reduce((sum, c) => sum + c, 0);
-    const commitVelocity = s.commitCount > 0 ? Math.round(totalToolCalls / s.commitCount) : null;
+    // Tool calls are whole-session while commitCount is window-clipped — for a
+    // session that started before the window the ratio would divide steps it
+    // took weeks ago by only its in-window commits, so velocity is reported
+    // only for sessions that started inside the window.
+    const straddlesWindow = cutoffMs > 0 && s.startTime && new Date(s.startTime).getTime() < cutoffMs;
+    const commitVelocity = !straddlesWindow && s.commitCount > 0 ? Math.round(totalToolCalls / s.commitCount) : null;
 
     return { sessionId: s.sessionId, autopilotRatio, selfHealScore, toolbeltCoverage, commitVelocity };
   });
@@ -464,11 +515,14 @@ function computeAutonomyMetrics(correlatedSessions) {
 }
 
 function computeEfficiencyGrade(costPerCommit, survivalRate) {
-  // Grade based on cost per commit (more meaningful than raw token count)
-  if (costPerCommit <= 2 && survivalRate >= 90) return 'A';
-  if (costPerCommit <= 5 && survivalRate >= 75) return 'B';
-  if (costPerCommit <= 15 && survivalRate >= 50) return 'C';
-  if (costPerCommit <= 40 && survivalRate >= 25) return 'D';
+  // Grade based on cost per commit (more meaningful than raw token count).
+  // survivalRate is null when no lines are old enough to judge — grade on
+  // cost alone rather than treating missing evidence as perfect survival.
+  const survivalOk = (min) => survivalRate === null || survivalRate >= min;
+  if (costPerCommit <= 2 && survivalOk(90)) return 'A';
+  if (costPerCommit <= 5 && survivalOk(75)) return 'B';
+  if (costPerCommit <= 15 && survivalOk(50)) return 'C';
+  if (costPerCommit <= 40 && survivalOk(25)) return 'D';
   return 'F';
 }
 
@@ -481,12 +535,14 @@ function computeEfficiencyScore(costPerCommit, survivalRate, orphanedRate, total
     };
   }
 
-  // Score: 50 pts from cost efficiency (log scale) + 50 pts from survival rate
+  // Score: 50 pts from cost efficiency (log scale) + 50 pts from survival rate.
+  // Survival is neutral (half marks) while no lines are old enough to judge —
+  // a fabricated 100% would bank 50 points on zero evidence.
   let costScore;
   if (costPerCommit <= 2) costScore = 50;
   else if (costPerCommit >= 50) costScore = 0;
   else costScore = Math.max(0, 50 * (1 - Math.log(costPerCommit / 2) / Math.log(25)));
-  const survivalScore = Math.min(survivalRate, 100) / 100 * 50;
+  const survivalScore = survivalRate === null ? 25 : Math.min(survivalRate, 100) / 100 * 50;
   const score = Math.round(costScore + survivalScore);
 
   const tier = score >= 80 ? 'Excellent' : score >= 60 ? 'Solid' : score >= 40 ? 'Developing' : score >= 20 ? 'Early' : 'Getting Started';
@@ -494,13 +550,14 @@ function computeEfficiencyScore(costPerCommit, survivalRate, orphanedRate, total
 
   // Build explanation from actual metrics
   const costAdj = costPerCommit <= 2 ? 'excellent' : costPerCommit <= 5 ? 'good' : costPerCommit <= 15 ? 'moderate' : 'high';
-  const explanation = `$${costPerCommit.toFixed(2)}/commit (${costAdj}) · ${Math.round(survivalRate)}% code survival`;
+  const explanation = `$${costPerCommit.toFixed(2)}/commit (${costAdj})` +
+    (survivalRate === null ? ' · survival pending (code <24h old)' : ` · ${Math.round(survivalRate)}% code survival`);
 
   // Actionable tip based on weakest metric
   let tip;
   if (costScore < survivalScore) {
     tip = 'Try shorter, focused sessions to reduce cost per commit.';
-  } else if (survivalRate < 50) {
+  } else if (survivalRate !== null && survivalRate < 50) {
     tip = 'Review AI-generated code before committing to improve survival rate.';
   } else if (orphanedRate > 40) {
     tip = `${orphanedRate}% of sessions had no commits — some may be exploratory, which is fine.`;
@@ -683,6 +740,13 @@ function capitalise(s) {
 }
 
 export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days, planConfig = null) {
+  // Same calendar cutoff as the parser and git-analyzer — used to clamp
+  // whole-session fields (startTime) that precede the window when a session
+  // was resumed inside it.
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+  const cutoffMs = cutoffDate.getTime();
+
   // ---- Summary ----
   const totalCost = correlatedSessions.reduce((s, c) => s + c.cost.totalCost, 0);
   const totalSessions = correlatedSessions.length;
@@ -729,7 +793,9 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
   for (const session of correlatedSessions) {
-    const startDate = toDateStr(session.startTime);
+    // Fallback day for sessions with no per-day data, clamped so a straddling
+    // session can't create timeline days before the analyzed window.
+    const startDate = toDateStr(Math.max(new Date(session.startTime).getTime(), cutoffMs));
 
     // Distribute cost and tokens across actual usage days via dailyUsage
     const usage = session.dailyUsage && Object.keys(session.dailyUsage).length > 0
@@ -853,8 +919,13 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   }
 
   // ---- Session length buckets ----
+  // Sessions that started before the window are excluded: their message counts
+  // are whole-session while their cost/commits are window-clipped, so bucketing
+  // them would pair a long-session label with a sliver of its real cost and
+  // skew the "sweet spot" insight.
   const buckets = { '1-50': [], '51-100': [], '101-200': [], '200+': [] };
   for (const session of correlatedSessions) {
+    if (new Date(session.startTime).getTime() < cutoffMs) continue;
     const msgCount = session.userMessageCount + session.assistantMessageCount;
     if (msgCount <= 50) buckets['1-50'].push(session);
     else if (msgCount <= 100) buckets['51-100'].push(session);
@@ -917,7 +988,8 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   const mkPeriod = () => ({ cost: 0, sessions: 0, commits: 0, tokens: 0 });
   const costByPeriod = { today: mkPeriod(), week: mkPeriod(), month: mkPeriod(), allTime: mkPeriod() };
   for (const session of correlatedSessions) {
-    const startDateStr = toDateStr(session.startTime);
+    // Same window clamp as the daily timeline's fallback day
+    const startDateStr = toDateStr(Math.max(new Date(session.startTime).getTime(), cutoffMs));
 
     // Distribute cost and tokens across actual usage days
     const usage = session.dailyUsage && Object.keys(session.dailyUsage).length > 0
@@ -1023,7 +1095,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   const tokenAnalytics = computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, totalLinesAdded, modelBreakdown);
 
   // ---- Autonomy metrics ----
-  const autonomyMetrics = computeAutonomyMetrics(correlatedSessions);
+  const autonomyMetrics = computeAutonomyMetrics(correlatedSessions, cutoffMs);
 
   // Add grades + autonomy to sessions
   const autonomyBySession = new Map(autonomyMetrics.perSession.map(a => [a.sessionId, a]));
@@ -1047,8 +1119,11 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     meta: {
       generatedAt: new Date().toISOString(),
       daysAnalyzed: days,
+      // Clamped to the window cutoff — a session resumed inside the window
+      // carries a pre-window startTime, but every number displayed under this
+      // date range excludes that period (mirror of the endTime-based endDate).
       startDate: correlatedSessions.length > 0
-        ? new Date(Math.min(...correlatedSessions.map(s => new Date(s.startTime).getTime()))).toISOString()
+        ? new Date(Math.max(cutoffMs, Math.min(...correlatedSessions.map(s => new Date(s.startTime).getTime())))).toISOString()
         : null,
       endDate: correlatedSessions.length > 0
         ? new Date(Math.max(...correlatedSessions.map(s => new Date(s.endTime || s.startTime).getTime()))).toISOString()
