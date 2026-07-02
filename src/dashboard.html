@@ -960,6 +960,22 @@
     }
     footer a { color: var(--accent-blue); text-decoration: none; transition: color 0.2s; }
     footer a:hover { color: var(--accent-cyan); text-decoration: underline; }
+    /* Bay Area signature — echoes the masthead kicker (mono caps, amber tick). */
+    .footer-stamp {
+      font-family: var(--font-display);
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent-orange);
+      margin-bottom: 12px;
+      opacity: 0.9;
+    }
+    .footer-stamp-mark {
+      color: var(--accent-orange);
+      opacity: 0.7;
+      margin-left: 2px;
+    }
 
     /* Loading */
     .loading {
@@ -2249,6 +2265,7 @@
     </div>
 
     <footer>
+      <div class="footer-stamp">Designed &amp; built in the Bay Area &middot; California <span class="footer-stamp-mark">◆</span></div>
       Made by <a href="https://www.linkedin.com/in/akshat2634/">Akshat</a> &middot; Powered by <a href="https://code.claude.com/docs/en/overview">Claude Code</a> &middot; <a href="https://github.com/Akshat2634/Codelens-AI">GitHub</a> &middot; <a href="https://codelensai-dev.vercel.app/">Website</a>
       <div style="margin-top:6px;font-size:0.75rem;opacity:0.7;">Open source — contributions, ideas, and feedback welcome! <a href="https://github.com/Akshat2634/Codelens-AI" style="color:var(--accent-blue);">Star the repo</a> if you find it useful.</div>
       <div style="margin-top:6px;font-size:0.7rem;opacity:0.4;">Cost estimates are approximate — based on Anthropic's published per-token pricing and may vary from actual billing. Currently supports Claude Code only. Support for Cursor, Codex, Gemini CLI, and more coming soon.</div>
