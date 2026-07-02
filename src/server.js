@@ -41,17 +41,29 @@ export function createServer(initialPayload, rebuildFn) {
   });
 
   // Serve the vendored Chart.js bundle instead of a CDN, so the dashboard works
-  // offline and on networks that block third-party CDNs. Resolved once at
-  // startup; sent with an explicit error if the asset is genuinely missing so
-  // the failure is a clear message rather than an unhandled 404 stack trace.
+  // offline and on networks that block third-party CDNs. Read into memory once
+  // at startup (like dashboard.html above) rather than sendFile'd per request:
+  // this removes any runtime filesystem dependency and the ENOENT race seen with
+  // partially-extracted npx caches, where the file passes existsSync at boot but
+  // is gone when send() re-stats it — throwing an unhandled 404 stack trace. If
+  // the buffer loaded at boot, it is guaranteed to serve; if it genuinely could
+  // not be read, we send an explicit, actionable error instead.
   const chartJsFile = findChartJs();
+  let chartJsBundle = null;
+  if (chartJsFile) {
+    try {
+      chartJsBundle = readFileSync(chartJsFile);
+    } catch {
+      chartJsBundle = null;
+    }
+  }
   app.get('/vendor/chart.umd.min.js', (_req, res) => {
-    if (!chartJsFile) {
+    if (!chartJsBundle) {
       res.status(500).type('text/plain')
         .send('Chart.js bundle is missing from this installation. Try reinstalling: npm cache clean --force && npx codelens-ai@latest');
       return;
     }
-    res.type('application/javascript').sendFile(chartJsFile);
+    res.type('application/javascript').send(chartJsBundle);
   });
 
   // Full payload (single fetch for dashboard)
