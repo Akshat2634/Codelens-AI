@@ -3264,18 +3264,23 @@ function formatDateRange(startIso, endIso) {
 
 function initCharts() {
   const T = chartTokens();
-  const monoFont = { family: "'IBM Plex Mono', monospace", size: 10 };
-  const bodyFont = { family: "'Instrument Sans', sans-serif", size: 11 };
+  // Chart chrome type: bumped for legibility (ticks 12 / legend 13 / titles 11).
+  // Text always wears text-ink tokens, never a series hue.
+  const monoFont = { family: "'IBM Plex Mono', monospace", size: 12 };
+  const bodyFont = { family: "'Instrument Sans', sans-serif", size: 13 };
 
-  Chart.defaults.color = T.muted;
+  // Tick/legend ink is --text-secondary, not --text-muted: on the card surface
+  // muted reads at 3.6:1 (below WCAG AA), secondary at ~7.3:1 — legible without
+  // competing with the data marks.
+  Chart.defaults.color = T.secondary;
   Chart.defaults.borderColor = T.grid;
   Chart.defaults.font.family = "'Instrument Sans', sans-serif";
   Chart.defaults.plugins.tooltip.backgroundColor = cssVar('--tooltip-bg');
   Chart.defaults.plugins.tooltip.borderColor = cssVar('--tooltip-border');
   Chart.defaults.plugins.tooltip.borderWidth = 1;
   Chart.defaults.plugins.tooltip.cornerRadius = 8;
-  Chart.defaults.plugins.tooltip.titleFont = { ...monoFont, size: 11, weight: '600' };
-  Chart.defaults.plugins.tooltip.bodyFont = { ...bodyFont, size: 12 };
+  Chart.defaults.plugins.tooltip.titleFont = { ...monoFont, size: 13, weight: '600' };
+  Chart.defaults.plugins.tooltip.bodyFont = { ...bodyFont, size: 13 };
   Chart.defaults.plugins.tooltip.padding = { top: 10, right: 14, bottom: 10, left: 14 };
   Chart.defaults.plugins.legend.labels.usePointStyle = true;
   Chart.defaults.plugins.legend.labels.pointStyle = 'rectRounded';
@@ -3285,7 +3290,7 @@ function initCharts() {
   Chart.defaults.plugins.legend.labels.font = bodyFont;
 
   const dateLabel = d => new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  const axisTitle = text => ({ display: true, text, color: T.muted, font: { ...monoFont, size: 9 } });
+  const axisTitle = text => ({ display: true, text, color: T.secondary, font: { ...monoFont, size: 11, weight: '600' } });
 
   // Token Burn Rate — stacked daily bars, one axis. (Cumulative overlay was a
   // second-axis anti-pattern; the "Split view" toggle covers per-type reading.)
@@ -3537,7 +3542,7 @@ function initCharts() {
       plugins: { legend: { display: false } },
       scales: {
         x: { grid: { color: T.grid }, border: { display: false }, ticks: { font: monoFont, maxTicksLimit: 6 } },
-        y: { grid: { display: false }, border: { color: T.grid }, ticks: { font: { ...monoFont, size: 10.5 } } },
+        y: { grid: { display: false }, border: { color: T.grid }, ticks: { font: monoFont } },
       },
     },
   });
