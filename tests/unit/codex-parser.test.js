@@ -73,6 +73,11 @@ test('getCodexPricing resolves most-specific id first', () => {
   // gpt-5.5 must not fall into the gpt-5 bucket
   assert.equal(getCodexPricing('gpt-5.5').input, 5);
   assert.equal(getCodexPricing('gpt-5').input, 1.25);
+  assert.equal(getCodexPricing('gpt-5.4-pro').output, 180);
+  assert.equal(getCodexPricing('gpt-5.4-pro').cachedInput, 30, 'pro models have no cached-input discount');
+  assert.equal(getCodexPricing('gpt-5.4-nano').input, 0.20);
+  assert.equal(getCodexPricing('gpt-5.5[long]').input, 10, 'long-context marker uses long-context rates');
+  assert.equal(getCodexPricing('gpt-5.4-pro[long]').output, 270);
   // codex variants
   assert.equal(getCodexPricing('gpt-5.1-codex-max').input, 1.25);
   assert.equal(getCodexPricing('gpt-5.1-codex-mini').input, 0.25);
@@ -121,6 +126,53 @@ test('calculateCodexCost: cached input billed at the cached rate, reasoning not 
   // 1M fresh input + 1M output + 1M cached on gpt-5-codex: $1.25 + $10 + $0.125
   const cost = calculateCodexCost(1_000_000, 1_000_000, 1_000_000, 'gpt-5-codex');
   assert.ok(Math.abs(cost - 11.375) < 1e-9, `expected 11.375, got ${cost}`);
+});
+
+test('Codex web search calls add OpenAI server-tool cost', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-web-search-'));
+  try {
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-web-search.jsonl', [
+      meta('web-search', iso(2)),
+      turnContext(iso(2), 'gpt-5.5'),
+      { timestamp: iso(2), type: 'response_item', payload: { type: 'web_search_call', id: 'ws-1', status: 'completed' } },
+      tokenCount(iso(1.9), usage(1000, 0, 100), usage(1000, 0, 100)),
+    ]);
+
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    const expectedTokenCost = (1000 * 5 + 100 * 30) / 1e6;
+    const expected = expectedTokenCost + 0.01;
+    assert.equal(s.toolCalls.web_search, 1);
+    assert.equal(s.webSearchRequests, 1);
+    assert.equal(s.cost.serverToolCost, 0.01);
+    assert.ok(Math.abs(s.cost.totalCost - expected) < 1e-9, `expected ${expected}, got ${s.cost.totalCost}`);
+    assert.equal(s.modelBreakdown['gpt-5.5'].tokens, 1100);
+    assert.ok(Math.abs(s.modelBreakdown['gpt-5.5'].cost - expected) < 1e-9);
+    const dailyCost = Object.values(s.dailyUsage).reduce((a, d) => a + d.cost, 0);
+    assert.ok(Math.abs(dailyCost - expected) < 1e-9);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('long-context GPT-5.x Codex usage is priced at long-context rates', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-long-context-'));
+  try {
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-long-context.jsonl', [
+      meta('long-context', iso(2)),
+      turnContext(iso(2), 'gpt-5.5'),
+      { timestamp: iso(2), type: 'event_msg', payload: { type: 'user_message', message: 'large repo analysis', kind: 'plain' } },
+      tokenCount(iso(1.9), usage(250000, 200000, 1000), usage(250000, 200000, 1000)),
+    ]);
+
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    const expected = (50000 * 10 + 200000 * 1 + 1000 * 45) / 1e6;
+    assert.ok(Math.abs(s.cost.totalCost - expected) < 1e-9, `expected ${expected}, got ${s.cost.totalCost}`);
+    assert.ok(s.modelBreakdown['gpt-5.5[long]'], 'long-context bucket should be visible in model breakdown');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // ── rollout parsing ──

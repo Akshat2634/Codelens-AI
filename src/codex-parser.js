@@ -39,8 +39,10 @@ import { findGitRoot, isVerificationCommand, toRelativePath } from './claude-par
 // but 'gpt-5.1-codex-max' matches 'gpt-5.1-codex-max' before 'gpt-5.1-codex').
 // Every OpenAI price change so far shipped as a NEW model id, so a flat map
 // covers 2025–2026 history — except o3's 80% price cut on 2025-06-10, which is
-// date-tiered below. `estimate: true` marks rates that are informed proxies
-// (no published API price); their cost is surfaced as estimated spend.
+// date-tiered below. GPT-5.5 / GPT-5.4 publish separate long-context rates,
+// carried as `longContext` on the same entry. `estimate: true` marks rates that
+// are informed proxies (no published API price); their cost is surfaced as
+// estimated spend.
 const CODEX_PRICING = [
   // Codex-branded models
   ['gpt-5.3-codex-spark', { input: 1.75, cachedInput: 0.175, output: 14, estimate: true }], // research preview, no API price — proxied at gpt-5.3-codex rates
@@ -53,15 +55,19 @@ const CODEX_PRICING = [
   ['gpt-5-codex',         { input: 1.25, cachedInput: 0.125, output: 10 }],
   ['codex-mini',          { input: 1.50, cachedInput: 0.375, output: 6 }], // codex-mini-latest; cached discount is 75%, not 90%
   // Mainline GPT models selectable in Codex
-  ['gpt-5.5-pro',         { input: 30,   cachedInput: 3,     output: 180 }],
-  ['gpt-5.5',             { input: 5,    cachedInput: 0.50,  output: 30 }],
+  // Pro variants do not publish a cached-input discount; if a rollout ever
+  // reports cached tokens for them, bill those tokens at full input rate.
+  ['gpt-5.5-pro',         { input: 30,   cachedInput: 30,    output: 180, longContext: { input: 60, cachedInput: 60, output: 270 } }],
+  ['gpt-5.5',             { input: 5,    cachedInput: 0.50,  output: 30,  longContext: { input: 10, cachedInput: 1, output: 45 } }],
+  ['gpt-5.4-pro',         { input: 30,   cachedInput: 30,    output: 180, longContext: { input: 60, cachedInput: 60, output: 270 } }],
   ['gpt-5.4-mini',        { input: 0.75, cachedInput: 0.075, output: 4.5 }],
-  ['gpt-5.4',             { input: 2.50, cachedInput: 0.25,  output: 15 }],
+  ['gpt-5.4-nano',        { input: 0.20, cachedInput: 0.02,  output: 1.25 }],
+  ['gpt-5.4',             { input: 2.50, cachedInput: 0.25,  output: 15,  longContext: { input: 5, cachedInput: 0.50, output: 22.5 } }],
   ['gpt-5.2',             { input: 1.75, cachedInput: 0.175, output: 14 }],
   ['gpt-5.1',             { input: 1.25, cachedInput: 0.125, output: 10 }],
   ['gpt-5-nano',          { input: 0.05, cachedInput: 0.005, output: 0.40 }],
   ['gpt-5-mini',          { input: 0.25, cachedInput: 0.025, output: 2 }],
-  ['gpt-5-pro',           { input: 15,   cachedInput: 1.50,  output: 120 }],
+  ['gpt-5-pro',           { input: 15,   cachedInput: 15,    output: 120 }],
   ['gpt-5',               { input: 1.25, cachedInput: 0.125, output: 10 }],
   ['gpt-4.1-mini',        { input: 0.40, cachedInput: 0.10,  output: 1.60 }],
   ['gpt-4.1-nano',        { input: 0.10, cachedInput: 0.025, output: 0.40 }],
@@ -89,10 +95,34 @@ const O3_EARLY = { input: 10, cachedInput: 2.50, output: 40 };
 const CODEX_FALLBACK = { input: 5, cachedInput: 0.50, output: 30, estimate: true };
 
 const PER_MIL = 1_000_000;
+// OpenAI web search is $10 per 1,000 calls; search content tokens are already
+// included in normal token_count events when they are billed.
+const WEB_SEARCH_COST_PER_REQUEST = 10 / 1000;
+const LONG_CONTEXT_INPUT_TOKENS = 200_000;
+const LONG_CONTEXT_WINDOW_TOKENS = 400_000;
 
 function normalizeCodexModelId(modelName) {
-  // Strip API date suffixes ('gpt-5.2-2025-12-11' → 'gpt-5.2') and '-latest'.
-  return modelName.toLowerCase().replace(/-\d{4}-\d{2}-\d{2}$/, '').replace(/-latest$/, '');
+  // Strip billing markers, API date suffixes ('gpt-5.2-2025-12-11' →
+  // 'gpt-5.2'), and '-latest'.
+  return modelName.toLowerCase()
+    .replace(/\[(?:long|fast|us)\]/g, '')
+    .replace(/-\d{4}-\d{2}-\d{2}$/, '')
+    .replace(/-latest$/, '');
+}
+
+function useLongContextPricing(modelName, price, contextWindow = 0, requestInputTokens = 0) {
+  if (!price?.longContext) return false;
+  const lower = String(modelName || '').toLowerCase();
+  return lower.includes('[long]')
+    || contextWindow >= LONG_CONTEXT_WINDOW_TOKENS
+    || requestInputTokens >= LONG_CONTEXT_INPUT_TOKENS;
+}
+
+function billingModelName(modelName, contextWindow = 0, requestInputTokens = 0) {
+  const p = getCodexPricing(modelName);
+  return useLongContextPricing(modelName, p, contextWindow, requestInputTokens)
+    ? `${modelName}[long]`
+    : modelName;
 }
 
 export function getCodexModelFamily(modelName) {
@@ -111,7 +141,7 @@ export function getCodexPricing(modelName, usageDateMs = Date.now()) {
   for (const [key, price] of CODEX_PRICING) {
     if (id === key || id.startsWith(key + '-')) {
       if (key === 'o3' && usageDateMs < O3_PRICE_CUT_MS) return O3_EARLY;
-      return price;
+      return useLongContextPricing(modelName, price) ? price.longContext : price;
     }
   }
   return CODEX_FALLBACK;
@@ -121,23 +151,24 @@ export function getCodexPricing(modelName, usageDateMs = Date.now()) {
 // FRESH input (cached already subtracted during accumulation). Buckets whose
 // model never resolved (no turn_context seen — 'unknown') are priced at the
 // fallback and flagged as estimated, like claude-parser's Sonnet fallback.
-function calculateCodexCostBreakdown(inputTokens, outputTokens, cacheReadTokens, modelName, usageDateMs = Date.now()) {
+function calculateCodexCostBreakdown(inputTokens, outputTokens, cacheReadTokens, modelName, usageDateMs = Date.now(), webSearchRequests = 0) {
   const p = getCodexPricing(modelName, usageDateMs) || CODEX_FALLBACK;
   const inputCost = inputTokens * p.input / PER_MIL;
   const outputCost = outputTokens * p.output / PER_MIL;
   const cacheReadCost = cacheReadTokens * p.cachedInput / PER_MIL;
+  const serverToolCost = webSearchRequests * WEB_SEARCH_COST_PER_REQUEST;
   return {
     inputCost,
     outputCost,
     cacheReadCost,
     cacheCreationCost: 0,
-    serverToolCost: 0,
-    totalCost: inputCost + outputCost + cacheReadCost,
+    serverToolCost,
+    totalCost: inputCost + outputCost + cacheReadCost + serverToolCost,
   };
 }
 
-export function calculateCodexCost(inputTokens, outputTokens, cacheReadTokens, modelName, usageDateMs = Date.now()) {
-  return calculateCodexCostBreakdown(inputTokens, outputTokens, cacheReadTokens, modelName, usageDateMs).totalCost;
+export function calculateCodexCost(inputTokens, outputTokens, cacheReadTokens, modelName, usageDateMs = Date.now(), webSearchRequests = 0) {
+  return calculateCodexCostBreakdown(inputTokens, outputTokens, cacheReadTokens, modelName, usageDateMs, webSearchRequests).totalCost;
 }
 
 // Recursively list rollout files under the sessions dir. Handles the dated
@@ -264,8 +295,8 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
   const defaultId = base.replace(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-/, '') || base;
   const session = createEmptyCodexSession(defaultId);
 
-  const modelTokens = {}; // model -> { input, output, cacheRead, reasoning }
-  const dailyModelTokens = {}; // dateStr -> model -> { input, output, cacheRead }
+  const modelTokens = {}; // model -> { input, output, cacheRead, webSearch }
+  const dailyModelTokens = {}; // dateStr -> model -> { input, output, cacheRead, webSearch }
   const rawFiles = new Set(); // paths as logged (absolute or cwd-relative)
   let currentModel = null;
   let prevTotal = null; // last seen total_token_usage, for delta fallback
@@ -309,9 +340,11 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
   // The cached-tokens field name drifted across Codex versions.
   const cachedOf = (u) => u.cached_input_tokens ?? u.cache_read_input_tokens ?? u.cached_tokens ?? 0;
 
-  const accumulateUsage = (delta, ts, model) => {
+  const accumulateUsage = (delta, ts, model, contextWindow = 0) => {
     const cached = cachedOf(delta);
-    const freshInput = Math.max(0, (delta.input_tokens || 0) - cached);
+    const rawInput = delta.input_tokens || 0;
+    const billingModel = billingModelName(model, contextWindow, rawInput);
+    const freshInput = Math.max(0, rawInput - cached);
     const output = delta.output_tokens || 0;
     const reasoning = delta.reasoning_output_tokens || 0;
     if (freshInput === 0 && cached === 0 && output === 0) return;
@@ -323,17 +356,31 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
     session.reasoningOutputTokens += reasoning;
     session.cacheReadTokens += cached;
 
-    if (!modelTokens[model]) modelTokens[model] = { input: 0, output: 0, cacheRead: 0 };
-    modelTokens[model].input += freshInput;
-    modelTokens[model].output += output;
-    modelTokens[model].cacheRead += cached;
+    if (!modelTokens[billingModel]) modelTokens[billingModel] = { input: 0, output: 0, cacheRead: 0, webSearch: 0 };
+    modelTokens[billingModel].input += freshInput;
+    modelTokens[billingModel].output += output;
+    modelTokens[billingModel].cacheRead += cached;
 
     const dateStr = ts ? localDayStr(ts) : UNBUCKETED_DAY;
     if (!dailyModelTokens[dateStr]) dailyModelTokens[dateStr] = {};
-    if (!dailyModelTokens[dateStr][model]) dailyModelTokens[dateStr][model] = { input: 0, output: 0, cacheRead: 0 };
-    dailyModelTokens[dateStr][model].input += freshInput;
-    dailyModelTokens[dateStr][model].output += output;
-    dailyModelTokens[dateStr][model].cacheRead += cached;
+    if (!dailyModelTokens[dateStr][billingModel]) dailyModelTokens[dateStr][billingModel] = { input: 0, output: 0, cacheRead: 0, webSearch: 0 };
+    dailyModelTokens[dateStr][billingModel].input += freshInput;
+    dailyModelTokens[dateStr][billingModel].output += output;
+    dailyModelTokens[dateStr][billingModel].cacheRead += cached;
+  };
+
+  const accumulateWebSearch = (ts, model) => {
+    if (cutoffMs && ts && Date.parse(ts) < cutoffMs) return;
+    const billingModel = model || 'unknown';
+    session.webSearchRequests++;
+
+    if (!modelTokens[billingModel]) modelTokens[billingModel] = { input: 0, output: 0, cacheRead: 0, webSearch: 0 };
+    modelTokens[billingModel].webSearch += 1;
+
+    const dateStr = ts ? localDayStr(ts) : UNBUCKETED_DAY;
+    if (!dailyModelTokens[dateStr]) dailyModelTokens[dateStr] = {};
+    if (!dailyModelTokens[dateStr][billingModel]) dailyModelTokens[dateStr][billingModel] = { input: 0, output: 0, cacheRead: 0, webSearch: 0 };
+    dailyModelTokens[dateStr][billingModel].webSearch += 1;
   };
 
   for await (const line of rolloutLines(filePath)) {
@@ -448,7 +495,7 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
             if (!ts || !seenUsage.has(dupKey)) {
               seenUsage.add(dupKey);
               tokenCountResponses++;
-              accumulateUsage(delta, ts, model);
+              accumulateUsage(delta, ts, model, info.model_context_window || 0);
             }
           }
         }
@@ -524,8 +571,8 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
       } else if (it === 'web_search_call') {
         session.toolCalls.web_search = (session.toolCalls.web_search || 0) + 1;
         touchTimestamp(ts);
+        accumulateWebSearch(ts, currentModel || 'unknown');
       }
-      continue;
     }
     // compacted / world_state / inter_agent_* / unknown types: ignore
   }
@@ -549,15 +596,16 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
   let maxTokens = 0;
   let primaryModel = null;
   for (const [model, tokens] of Object.entries(modelTokens)) {
-    const bd = calculateCodexCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, model, sessionDateMs);
+    const bd = calculateCodexCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, model, sessionDateMs, tokens.webSearch);
     const p = getCodexPricing(model, sessionDateMs) || CODEX_FALLBACK;
     session.cacheSavingsDollars += tokens.cacheRead * (p.input - p.cachedInput) / PER_MIL;
-    if (p.estimate) session.estimatedCost += bd.totalCost;
+    if (p.estimate) session.estimatedCost += bd.totalCost - bd.serverToolCost;
     const totalTokens = tokens.input + tokens.output + tokens.cacheRead;
     session.modelBreakdown[model] = { tokens: totalTokens, cost: bd.totalCost };
     session.cost.inputCost += bd.inputCost;
     session.cost.outputCost += bd.outputCost;
     session.cost.cacheReadCost += bd.cacheReadCost;
+    session.cost.serverToolCost += bd.serverToolCost;
     session.cost.totalCost += bd.totalCost;
     if (totalTokens > maxTokens) {
       maxTokens = totalTokens;
@@ -575,7 +623,7 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
     const target = localDayStr(targetMs);
     const day = dailyModelTokens[target] || (dailyModelTokens[target] = {});
     for (const [model, tk] of Object.entries(dailyModelTokens[UNBUCKETED_DAY])) {
-      if (!day[model]) day[model] = { input: 0, output: 0, cacheRead: 0 };
+      if (!day[model]) day[model] = { input: 0, output: 0, cacheRead: 0, webSearch: 0 };
       for (const k of Object.keys(tk)) day[model][k] += tk[k];
     }
     delete dailyModelTokens[UNBUCKETED_DAY];
@@ -595,16 +643,17 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
     const dayByModel = {};
     const dayMs = Date.parse(dateStr + 'T12:00:00Z');
     for (const [model, tokens] of Object.entries(models)) {
-      const bd = calculateCodexCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, model, dayMs);
+      const bd = calculateCodexCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, model, dayMs, tokens.webSearch);
       dayCost += bd.totalCost;
       dailyModelCost[model] = (dailyModelCost[model] || 0) + bd.totalCost;
       dailyTotal.inputCost += bd.inputCost;
       dailyTotal.outputCost += bd.outputCost;
       dailyTotal.cacheReadCost += bd.cacheReadCost;
+      dailyTotal.serverToolCost += bd.serverToolCost;
       dailyTotal.totalCost += bd.totalCost;
       const p = getCodexPricing(model, dayMs) || CODEX_FALLBACK;
       dailySavings += tokens.cacheRead * (p.input - p.cachedInput) / PER_MIL;
-      if (p.estimate) dailyEstimated += bd.totalCost;
+      if (p.estimate) dailyEstimated += bd.totalCost - bd.serverToolCost;
       dailyCoveredTokens += tokens.input + tokens.output + tokens.cacheRead;
       dayInput += tokens.input;
       dayOutput += tokens.output;

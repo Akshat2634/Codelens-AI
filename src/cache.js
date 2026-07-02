@@ -36,7 +36,11 @@ function cacheFileFor(options = {}) {
 //    cache keyed on claudeDir.
 // 10: OpenAI Codex sessions (source field on every session, codexFileIndex,
 //     cache keyed on codexDir).
-const CACHE_VERSION = 10;
+// 11: Current OpenAI Codex pricing table refresh (GPT-5.4 pro/nano, no cached
+//     discount for pro variants).
+// 12: GPT-5.5/GPT-5.4 long-context pricing for Codex usage buckets.
+// 13: OpenAI Codex web_search_call server-tool fees.
+const CACHE_VERSION = 13;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);
