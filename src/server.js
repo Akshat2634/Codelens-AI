@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,27 @@ import { commitLinesForSession } from './correlator.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
+
+// Locate the Chart.js UMD bundle to serve at /vendor. The bundle is vendored
+// into this package (src/vendor) so the dashboard works offline and — crucially
+// — does NOT depend on chart.js being fully resolvable at runtime. (npx caches
+// have been observed shipping a partial chart.js: require.resolve succeeds but
+// the sibling chart.umd.min.js is missing on disk, which used to 404 the chart
+// script and leave the dashboard blank.) The bundled copy is authoritative;
+// the node_modules copy is only a dev-time fallback if the vendored file is
+// somehow absent.
+function findChartJs() {
+  const bundled = path.join(__dirname, 'vendor', 'chart.umd.min.js');
+  if (existsSync(bundled)) return bundled;
+  try {
+    const resolved = path.join(path.dirname(require.resolve('chart.js')), 'chart.umd.min.js');
+    if (existsSync(resolved)) return resolved;
+  } catch {
+    // chart.js not installed (it's a devDependency) — the vendored copy is the
+    // source of truth; nothing to fall back to.
+  }
+  return null;
+}
 
 export function createServer(initialPayload, rebuildFn) {
   const app = express();
@@ -19,11 +40,17 @@ export function createServer(initialPayload, rebuildFn) {
     res.type('html').send(dashboardHtml);
   });
 
-  // Serve Chart.js from the installed package instead of a CDN, so the
-  // dashboard works offline and on networks that block third-party CDNs.
-  // require.resolve gives dist/chart.cjs; the UMD bundle sits beside it.
-  const chartJsFile = path.join(path.dirname(require.resolve('chart.js')), 'chart.umd.min.js');
+  // Serve the vendored Chart.js bundle instead of a CDN, so the dashboard works
+  // offline and on networks that block third-party CDNs. Resolved once at
+  // startup; sent with an explicit error if the asset is genuinely missing so
+  // the failure is a clear message rather than an unhandled 404 stack trace.
+  const chartJsFile = findChartJs();
   app.get('/vendor/chart.umd.min.js', (_req, res) => {
+    if (!chartJsFile) {
+      res.status(500).type('text/plain')
+        .send('Chart.js bundle is missing from this installation. Try reinstalling: npm cache clean --force && npx codelens-ai@latest');
+      return;
+    }
     res.type('application/javascript').sendFile(chartJsFile);
   });
 

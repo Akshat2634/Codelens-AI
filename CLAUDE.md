@@ -13,8 +13,8 @@
 - **Runtime:** Node.js >= 18, ES modules (`"type": "module"`)
 - **Backend:** Express.js 5.0.0
 - **CLI:** Commander.js 13.0.0
-- **Frontend:** Single-file HTML (`src/dashboard.html`) with vanilla JS + Chart.js 4.5.1 (vendored via npm, served at `/vendor/chart.umd.min.js` — no CDN, works offline)
-- **Testing:** Playwright (E2E)
+- **Frontend:** Single-file HTML (`src/dashboard.html`) with vanilla JS + Chart.js 4.5.1. The UMD bundle is **committed at `src/vendor/chart.umd.min.js`** and served at `/vendor/chart.umd.min.js` — no CDN, works offline, and does not depend on `chart.js` being resolvable at the user's runtime (npx caches have shipped partial `node_modules`). `chart.js` is a **devDependency**; refresh the vendored copy with `npm run vendor:chart` after upgrading it (also runs on `prepublishOnly`).
+- **Testing:** `node --test` unit + server-route tests (`tests/unit/`), a packaging smoke test (`npm run test:package` — packs → clean-installs → boots → asserts the dashboard and vendored chart serve), and Playwright (E2E)
 - **Styling:** Inline CSS design tokens, "warm-ink instrument panel" (dark) / "warm-paper ledger" (light) theme; fonts: Bricolage Grotesque (display), Instrument Sans (body), IBM Plex Mono (data). Chart palette is CVD-validated per theme — don't swap chart hues casually.
 
 ## Project Structure

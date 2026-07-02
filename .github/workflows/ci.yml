@@ -44,6 +44,29 @@ jobs:
       - name: Verify CLI starts without error
         run: node src/index.js --json --claude-dir tests/fixtures/claude-projects --days 30 > /dev/null
 
+  package:
+    # Production-fidelity guard: pack the tarball, install it with prod deps
+    # only (chart.js is a devDependency, so absent — exactly like `npx`), boot
+    # the CLI, and assert the dashboard + vendored Chart.js bundle serve. This
+    # catches the v0.8.20 class of failure (blank dashboard from a missing
+    # /vendor asset) that never showed up when testing against the source tree.
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Package smoke test (pack, clean-install, serve)
+        run: npm run test:package
+
   e2e:
     # Run Playwright smoke suite only once per PR (not across every Node version)
     # against fixture-backed sessions. Full dashboard coverage lives in
