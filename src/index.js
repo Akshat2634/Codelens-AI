@@ -151,7 +151,7 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
     : activePlans.length === 1 ? activePlans[0]
     : { name: 'combined', monthlyCost: activePlans.reduce((s, p) => s + p.monthlyCost, 0) };
 
-  const payloads = { all: mkView(correlatedSessions, combinedPlan, 'all') };
+  const payloads = { all: mkView(correlatedSessions, combinedPlan, sourceFilter || 'all') };
   if (sourceCounts.claude > 0 && sourceCounts.codex > 0) {
     payloads.claude = mkView(correlatedSessions.filter(s => (s.source || 'claude') === 'claude'), planConfigs.claude, 'claude');
     payloads.codex = mkView(correlatedSessions.filter(s => s.source === 'codex'), planConfigs.codex, 'codex');
@@ -178,7 +178,7 @@ async function main() {
     .option('--source <agent>', 'analyze a single agent only: claude | codex')
     .option('--plan <tier>', 'Claude subscription mode — effective $/commit vs your flat plan: pro | max5 | max20')
     .option('--plan-cost <amount>', 'custom Claude monthly subscription cost in USD (overrides --plan)')
-    .option('--codex-plan <tier>', 'Codex/ChatGPT subscription mode: plus | pro100 | pro | business')
+    .option('--codex-plan <tier>', 'Codex/ChatGPT subscription mode: free | go | plus | pro100 | pro | business | business-annual')
     .option('--codex-plan-cost <amount>', 'custom Codex monthly subscription cost in USD (overrides --codex-plan)');
 
   program.parse();
@@ -200,17 +200,18 @@ async function main() {
     }
     if (!planOpt) return null;
     const key = String(planOpt).toLowerCase();
-    if (tiers[key]) {
+    if (Object.hasOwn(tiers, key)) {
       return { name: namePrefix + key, monthlyCost: tiers[key] };
     }
     console.error(`  ${icon.err} ${c.red}Unknown ${flagName} "${planOpt}".${c.reset} Use ${Object.keys(tiers).join(', ')}, or ${flagName}-cost <amount>.`);
     process.exit(1);
   };
-  // ChatGPT tiers (Codex is included in the plan): Plus $20, Pro $100 (the
-  // "5x" tier launched Apr 2026), Pro $200 ("20x"), Business ~$25/seat/mo.
+  // ChatGPT tiers (Codex is included in the plan): Free $0, Go $8, Plus $20,
+  // Pro starts at $100 (5x) with a $200 20x tier, and Business is $20/seat/mo
+  // annually or $25/seat/mo monthly.
   const planConfigs = {
     claude: parsePlan(opts.plan, opts.planCost, { pro: 20, max5: 100, max20: 200 }, '--plan', ''),
-    codex: parsePlan(opts.codexPlan, opts.codexPlanCost, { plus: 20, pro100: 100, pro: 200, business: 25 }, '--codex-plan', 'codex-'),
+    codex: parsePlan(opts.codexPlan, opts.codexPlanCost, { free: 0, go: 8, plus: 20, pro100: 100, pro: 200, business: 25, 'business-annual': 20 }, '--codex-plan', 'codex-'),
   };
 
   const sourceFilter = opts.source ? String(opts.source).toLowerCase() : null;

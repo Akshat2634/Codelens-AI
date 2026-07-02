@@ -105,7 +105,7 @@ codelens-ai --autonomy             # print autonomy score to terminal and exit
 codelens-ai --source codex         # analyze a single agent only: claude | codex
 codelens-ai --plan max20           # Claude subscription mode: effective $/commit vs your flat plan
 codelens-ai --plan-cost 150        # custom Claude monthly subscription cost (USD)
-codelens-ai --codex-plan plus      # ChatGPT/Codex subscription: plus | pro100 | pro | business
+codelens-ai --codex-plan plus      # ChatGPT/Codex subscription: free | go | plus | pro100 | pro | business | business-annual
 codelens-ai --codex-plan-cost 40   # custom Codex monthly subscription cost (USD)
 codelens-ai --claude-dir <path>    # override ~/.claude/projects (testing/CI)
 codelens-ai --codex-dir <path>     # override ~/.codex/sessions (testing/CI)
@@ -113,7 +113,7 @@ codelens-ai --codex-dir <path>     # override ~/.codex/sessions (testing/CI)
 
 ### Effective cost (subscription mode)
 
-By default costs are **API-equivalent** — what your usage *would* cost at pay-as-you-go token rates. If you're on a flat-rate plan, those dollars aren't what you actually pay. Pass `--plan` (`pro` = $20/mo, `max5` = $100/mo, `max20` = $200/mo) / `--plan-cost <usd>` for Claude, or `--codex-plan` (`plus` = $20/mo, `pro100` = $100/mo, `pro` = $200/mo, `business` = $25/seat/mo) / `--codex-plan-cost <usd>` for ChatGPT/Codex, to add an **Effective Cost** panel that prorates your subscription to the analyzed window and shows:
+By default costs are **API-equivalent** — what your usage *would* cost at pay-as-you-go token rates. If you're on a flat-rate plan, those dollars aren't what you actually pay. Pass `--plan` (`pro` = $20/mo, `max5` = $100/mo, `max20` = $200/mo) / `--plan-cost <usd>` for Claude, or `--codex-plan` (`free` = $0/mo, `go` = $8/mo, `plus` = $20/mo, `pro100` = $100/mo, `pro` = $200/mo, `business` = $25/seat/mo monthly, `business-annual` = $20/seat/mo annually) / `--codex-plan-cost <usd>` for ChatGPT/Codex, to add an **Effective Cost** panel that prorates your subscription to the analyzed window and shows:
 
 - **Effective $/commit** and **$/surviving line** — your prorated fee ÷ output, the cost figures that actually reflect your bill.
 - **Plan utilization** — API-equivalent value ÷ prorated fee (e.g. `3.2×` means you extracted ~3.2× your subscription in pay-as-you-go value). This is an estimate of value extracted, **not** realized savings.
@@ -138,7 +138,7 @@ The dashboard includes:
 1. **Parses** JSONL session files from `~/.claude/projects/` (Claude Code) and rollout files from `~/.codex/sessions/` (OpenAI Codex CLI — including `.jsonl.zst` archives on Node >= 22.15)
 2. **Analyzes** git history from each repo you've worked in with either agent
 3. **Correlates** sessions to commits by file overlap and timing — all agents correlate together, so a commit is attributed to at most one session
-4. **Calculates** cost using each provider's published API token pricing (input, output, cache)
+4. **Calculates** cost using each provider's published API pricing (input, output, cache, and server-side web search when logged)
 5. **Serves** an interactive dashboard on localhost with per-agent views
 
 ### Caching
@@ -172,13 +172,15 @@ Token costs are version-aware and calculated per model, accounting for the two p
 
 #### OpenAI Codex models
 
-Codex sessions are costed from the `token_count` events in each rollout file. In OpenAI's accounting, `cached_input_tokens` is a subset of `input_tokens` (cache reads are billed at the cached rate, there is no cache-write premium) and `reasoning_output_tokens` is a subset of `output_tokens` (reasoning is billed at the output rate, never double-counted). Rates per million tokens from [OpenAI's API pricing](https://developers.openai.com/api/docs/pricing):
+Codex sessions are costed from the `token_count` events in each rollout file. In OpenAI's accounting, `cached_input_tokens` is a subset of `input_tokens` (cache reads are billed at the cached rate, there is no cache-write premium) and `reasoning_output_tokens` is a subset of `output_tokens` (reasoning is billed at the output rate, never double-counted). Server-side `web_search_call` entries add OpenAI's published web-search call fee. Rates per million tokens from [OpenAI's API pricing](https://developers.openai.com/api/docs/pricing):
 
 | Model | Input | Cached Input | Output |
 | --- | --- | --- | --- |
-| GPT-5.5 | $5.00/M | $0.50/M | $30/M |
-| GPT-5.4 / 5.4 Mini | $2.50 / $0.75/M | $0.25 / $0.075/M | $15 / $4.50/M |
-| GPT-5.3 Codex / 5.2 Codex / 5.2 | $1.75/M | $0.175/M | $14/M |
+| GPT-5.5 | $5.00/M short, $10/M long context | $0.50/M short, $1/M long context | $30/M short, $45/M long context |
+| GPT-5.5 Pro | $30/M short, $60/M long context | no published cached discount | $180/M short, $270/M long context |
+| GPT-5.4 / 5.4 Mini / 5.4 Nano | $2.50 / $0.75 / $0.20/M | $0.25 / $0.075 / $0.02/M | $15 / $4.50 / $1.25/M |
+| GPT-5.4 Pro | $30/M short, $60/M long context | no published cached discount | $180/M short, $270/M long context |
+| GPT-5.3 Codex | $1.75/M | $0.175/M | $14/M |
 | GPT-5.1 Codex (Max) / 5.1 / GPT-5 Codex / GPT-5 | $1.25/M | $0.125/M | $10/M |
 | GPT-5.1 Codex Mini / GPT-5 Mini | $0.25/M | $0.025/M | $2/M |
 | codex-mini-latest | $1.50/M | $0.375/M | $6/M |
@@ -188,9 +190,15 @@ Codex sessions are costed from the `token_count` events in each rollout file. In
 
 > **Note — o3:** OpenAI cut o3 prices 80% on Jun 10, 2025; usage is priced by the rate in effect on its date.
 >
+> **Note — long context:** GPT-5.5 and GPT-5.4 publish separate short-context and long-context rates. Codex logs that use long-context billing are kept as separate model buckets (for example, `gpt-5.5[long]`) before aggregation so mixed sessions do not average incompatible rates.
+>
+> **Note — current Codex models:** OpenAI's Codex docs currently recommend GPT-5.5, GPT-5.4, and GPT-5.4 mini; `gpt-5.3-codex-spark` is a ChatGPT Pro research preview and is not available in the API at launch. `gpt-5.3-codex` remains priced for API/log history but is deprecated for ChatGPT sign-in.
+>
+> **Note — web search:** Codex `web_search_call` entries are costed at OpenAI's $10 per 1,000 calls; search content tokens remain part of normal token usage when billed by the API.
+>
 > **Note — unpriced models:** Models without a published API price (e.g. `gpt-5.3-codex-spark`, future releases) are costed at proxy rates and included in the dashboard's "estimated spend" warning instead of silently reading $0.
 >
-> **Note — subscriptions:** If you use Codex through a ChatGPT plan (Plus/Pro/Business), the dollar figures are **API-equivalent value**, not what you were billed — pass `--codex-plan` to see effective cost against your flat fee. Since Apr 2026, OpenAI's own Codex rate card meters plan usage in token-denominated credits pegged to these same API rates.
+> **Note — subscriptions:** If you use Codex through a ChatGPT plan (Free/Go/Plus/Pro/Business), the dollar figures are **API-equivalent value**, not what you were billed — pass `--codex-plan` to see effective cost against your flat fee. API-key mode can also include published server-side tool-call fees when the rollout logs expose them.
 
 ### Line Survival
 

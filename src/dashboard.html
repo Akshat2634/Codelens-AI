@@ -2791,7 +2791,7 @@ function renderHeroStats(s) {
   const scoreDeg = Math.round(es.score * 3.6);
   return `<div class="stats-section">
     <h2>Performance Overview <i class="info-tip" data-tip="High-level metrics for your AI coding sessions — cost, output, efficiency, and overall score.">i</i></h2>
-    ${s.pricingEstimatedPct > 0 ? `<div style="margin:0 0 14px;padding:10px 14px;border-radius:10px;background:rgba(196,132,11,0.12);border:1px solid rgba(196,132,11,0.3);font-size:0.8rem;color:var(--text-secondary);">⚠️ ~${s.pricingEstimatedPct}% of the cost above is <strong>estimated</strong> — some sessions used a model with no known pricing and were billed at the Sonnet fallback rate.</div>` : ''}
+    ${s.pricingEstimatedPct > 0 ? `<div style="margin:0 0 14px;padding:10px 14px;border-radius:10px;background:rgba(196,132,11,0.12);border:1px solid rgba(196,132,11,0.3);font-size:0.8rem;color:var(--text-secondary);">⚠️ ~${s.pricingEstimatedPct}% of the cost above is <strong>estimated</strong> — some sessions used a model with no known pricing and were billed at the provider fallback rate.</div>` : ''}
     <div class="hero-stats">
       <div class="hero-stats-left">
         <div class="stat-card glow cost-card">
@@ -2938,7 +2938,10 @@ function renderPlan(s) {
   if (!p) return '';
   const planLabel = {
     pro: 'Claude Pro ($20/mo)', max5: 'Claude Max 5× ($100/mo)', max20: 'Claude Max 20× ($200/mo)',
-    'codex-plus': 'ChatGPT Plus ($20/mo)', 'codex-pro100': 'ChatGPT Pro ($100/mo)', 'codex-pro': 'ChatGPT Pro ($200/mo)', 'codex-business': 'ChatGPT Business ($' + p.monthlyCost + '/mo)',
+    'codex-free': 'ChatGPT Free ($0/mo)', 'codex-go': 'ChatGPT Go ($8/mo)', 'codex-plus': 'ChatGPT Plus ($20/mo)',
+    'codex-pro100': 'ChatGPT Pro 5× ($100/mo)', 'codex-pro': 'ChatGPT Pro 20× ($200/mo)',
+    'codex-business': 'ChatGPT Business monthly ($25/user/mo)',
+    'codex-business-annual': 'ChatGPT Business annual ($20/user/mo)',
     combined: 'Combined plans ($' + p.monthlyCost + '/mo)',
     custom: '$' + p.monthlyCost + '/mo',
   }[p.name] || ('$' + p.monthlyCost + '/mo');
@@ -3255,7 +3258,7 @@ function renderCacheEfficiency(t) {
     <div class="survival-card">
       <h3>
         Cache Efficiency
-        <i class="info-tip" data-tip="Cache reads cost ~10% of a fresh input token. This shows the share of input context served from cache and what those cached tokens would have cost at full input pricing — an avoided-cost estimate, not money you were necessarily billed (subscription plans pay a flat rate).">i</i>
+        <i class="info-tip" data-tip="Cache reads are billed at provider/model-specific discounted rates when a discount exists. This shows the share of input context served from cache and what those cached tokens would have cost at full input pricing — an avoided-cost estimate, not money you were necessarily billed (subscription plans pay a flat rate).">i</i>
       </h3>
       <div class="survival-bar"><div class="fill" style="width: ${hitRate}%; background: ${gradient};"></div></div>
       <div class="survival-stats">
@@ -3294,7 +3297,7 @@ function renderSessionsTable(sessions) {
             <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')} <i class="info-tip" data-tip="Primary model used in the session. Models marked (sub) are subagents spawned for background tasks like code search and exploration.">i</i></th>
             <th onclick="sortTable('msgCount')" class="${sortCol === 'msgCount' ? 'sorted' : ''}">Msgs${thArrow('msgCount')} <i class="info-tip" data-tip="Total messages in the session (your messages + agent responses).">i</i></th>
             <th onclick="sortTable('autopilotRatio')" class="${sortCol === 'autopilotRatio' ? 'sorted' : ''}">Autopilot${thArrow('autopilotRatio')} <i class="info-tip" data-tip="Agent responses per user message. Higher = more autonomous. 5x is excellent.">i</i></th>
-            <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')} <i class="info-tip" data-tip="Estimated cost from token usage at the provider's published API pricing (Anthropic for Claude, OpenAI for Codex). Includes input, output, and cache tokens (reads ~90% discount; Claude cache writes at their premium), plus web search fees and premium billing markers where applicable. For sessions that started before the analyzed window, only in-window usage is counted.">i</i></th>
+            <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')} <i class="info-tip" data-tip="Estimated cost from token usage at the provider's published API pricing (Anthropic for Claude, OpenAI for Codex). Includes input, output, and cache tokens at provider/model-specific rates, plus web search fees and premium billing markers where applicable. For sessions that started before the analyzed window, only in-window usage is counted.">i</i></th>
             <th onclick="sortTable('commitCount')" class="${sortCol === 'commitCount' ? 'sorted' : ''}">Commits${thArrow('commitCount')} <i class="info-tip" data-tip="Git commits that touch files the agent edited in this session. Falls back to time-window for chat-only sessions. The colored dot shows attribution confidence: green = high, amber = medium, red = low (e.g. time-only match).">i</i></th>
             <th onclick="sortTable('linesAdded')" class="${sortCol === 'linesAdded' ? 'sorted' : ''}">Lines${thArrow('linesAdded')} <i class="info-tip" data-tip="Lines added / lines deleted in matched commits.">i</i></th>
             <th>Grade <i class="info-tip" data-tip="Session efficiency: A = great ROI, B = good, C = average, D = poor, F = no commits or very high cost.">i</i></th>
@@ -3374,7 +3377,8 @@ function formatModelName(modelId) {
   let suffix = '';
   if (modelId.includes('[fast]')) suffix += ' (fast)';
   if (modelId.includes('[us]')) suffix += ' (us)';
-  if (suffix) modelId = modelId.replace(/\[fast\]|\[us\]/g, '');
+  if (modelId.includes('[long]')) suffix += ' (long context)';
+  if (suffix) modelId = modelId.replace(/\[fast\]|\[us\]|\[long\]/g, '');
   const lower = modelId.toLowerCase();
   // OpenAI models (Codex sessions): gpt-5.1-codex-max → GPT-5.1 Codex Max,
   // gpt-5-codex → GPT-5 Codex, codex-mini-latest → Codex Mini. o3 / o4-mini
