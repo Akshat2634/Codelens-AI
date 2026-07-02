@@ -29,7 +29,7 @@ function findChartJs() {
   return null;
 }
 
-export function createServer(initialPayload, rebuildFn) {
+export function createServer(initialPayload, rebuildFn, opts = {}) {
   const app = express();
   let payload = initialPayload;
 
@@ -48,7 +48,9 @@ export function createServer(initialPayload, rebuildFn) {
   // is gone when send() re-stats it — throwing an unhandled 404 stack trace. If
   // the buffer loaded at boot, it is guaranteed to serve; if it genuinely could
   // not be read, we send an explicit, actionable error instead.
-  const chartJsFile = findChartJs();
+  // opts.chartJsPath lets tests point the route at a missing/alternate file to
+  // exercise graceful degradation; production always resolves via findChartJs().
+  const chartJsFile = opts.chartJsPath !== undefined ? opts.chartJsPath : findChartJs();
   let chartJsBundle = null;
   if (chartJsFile) {
     try {
