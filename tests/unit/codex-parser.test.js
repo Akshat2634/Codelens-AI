@@ -389,6 +389,31 @@ test('subagent (thread_spawn) replay burst and exact duplicates are not counted'
   }
 });
 
+test('duplicate token_count events with different timestamps are deduped', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-dup-'));
+  try {
+    // Real Codex rollouts re-log the identical last_token_usage for the same
+    // completed turn seconds-to-minutes later (no new request in between) —
+    // the duplicate must be recognized by its usage values, not its timestamp.
+    const t1 = iso(2);
+    const t2 = new Date(Date.parse(t1) + 90_000).toISOString();
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T11-00-00-sess-4.jsonl', [
+      meta('sess-4', t1),
+      turnContext(t1, 'gpt-5.5'),
+      tokenCount(t1, usage(2000, 1000, 200), usage(2000, 1000, 200)),
+      tokenCount(t2, usage(2000, 1000, 200), usage(2000, 1000, 200)),
+    ]);
+
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    assert.equal(s.totalInputTokens, 1000, 'same-value re-log must not be billed twice');
+    assert.equal(s.cacheReadTokens, 1000);
+    assert.equal(s.totalOutputTokens, 200);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('legacy pre-envelope rollouts parse messages without token data', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'codex-legacy-'));
   try {

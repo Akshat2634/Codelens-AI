@@ -189,6 +189,42 @@ function parseGitLog(raw) {
   return commits;
 }
 
+// Sessions record the repo's absolute cwd at the time they ran. If the repo
+// is later moved or renamed on disk (a project folder reorganization, a
+// Dropbox/iCloud ".nosync" exclusion, a new machine with a different home
+// layout, ...), that exact path stops existing and analyzeGitRepo() would
+// silently return zero commits for it forever — orphaning every session tied
+// to the old location even though the git history is fully intact elsewhere.
+//
+// Resolve by folder name: if a missing repoPath's basename matches exactly
+// one OTHER path in the same set that still exists on disk, treat them as
+// the same repository. This only draws on paths already known from the
+// user's own parsed sessions (not a filesystem-wide search), and only acts
+// on an unambiguous match — a basename shared by more than one still-valid
+// path is left unresolved rather than guessed.
+export function resolveMovedRepoPaths(repoPaths) {
+  const candidatesByName = new Map();
+  for (const p of repoPaths) {
+    if (!existsSync(path.join(p, '.git'))) continue;
+    const base = path.basename(p);
+    if (!candidatesByName.has(base)) candidatesByName.set(base, []);
+    candidatesByName.get(base).push(p);
+  }
+
+  const aliasMap = new Map(); // stale repoPath -> resolved repoPath
+  const unresolved = [];
+  for (const p of repoPaths) {
+    if (existsSync(path.join(p, '.git'))) continue;
+    const candidates = (candidatesByName.get(path.basename(p)) || []).filter(c => c !== p);
+    if (candidates.length === 1) {
+      aliasMap.set(p, candidates[0]);
+    } else {
+      unresolved.push(p);
+    }
+  }
+  return { aliasMap, unresolved };
+}
+
 export function analyzeGitRepo(repoPath, days) {
   if (!existsSync(path.join(repoPath, '.git'))) {
     return { repoPath, commits: [], allCommits: [], defaultBranch: null };
