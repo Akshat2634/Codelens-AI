@@ -108,7 +108,7 @@ function oneHourCachePremium(p, cacheCreation1hTokens) {
 // https://platform.claude.com/docs/en/about-claude/pricing (data residency)
 const GEO_US_MULTIPLIER = 1.1;
 function geoMultiplier(modelName) {
-  return modelName && modelName.includes('[us]') ? GEO_US_MULTIPLIER : 1;
+  return modelName?.includes('[us]') ? GEO_US_MULTIPLIER : 1;
 }
 
 // Server-side web search bills $10 per 1,000 searches on top of token costs
