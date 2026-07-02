@@ -2607,11 +2607,13 @@ function renderWeeklyNarrative(n) {
     </div>`;
   }).join('');
   const bulletsHtml = (n.bullets || []).map(b => `<li>${escapeHtml(b)}</li>`).join('');
-  // Highlight the week-over-week verdict phrase as a tinted chip
+  // Highlight the week-over-week verdict phrase as a tinted chip. The trailing
+  // period is consumed into the match (dropped) so it doesn't float after the
+  // chip's rounded background — the chip ends the sentence on its own.
   const headlineHtml = escapeHtml(n.headline)
-    .replace(/(\d+% pricier than last week)/, '<span class="hl-delta hl-bad">$1</span>')
-    .replace(/(\d+% cheaper than last week)/, '<span class="hl-delta hl-good">$1</span>')
-    .replace(/(on par with last week)/, '<span class="hl-delta hl-flat">$1</span>');
+    .replace(/(\d+% pricier than last week)\.?/, '<span class="hl-delta hl-bad">$1</span>')
+    .replace(/(\d+% cheaper than last week)\.?/, '<span class="hl-delta hl-good">$1</span>')
+    .replace(/(on par with last week)\.?/, '<span class="hl-delta hl-flat">$1</span>');
   return `<div class="narrative">
     <div class="narrative-kicker">Weekly Report</div>
     <div class="narrative-headline">${headlineHtml}</div>
