@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Codex accounting correctness: per-request `last_token_usage` deltas (cumulative-total fallback with reset handling), exact-duplicate event dedup, subagent `thread_spawn` replay-burst skip, `cached_input ⊂ input` and `reasoning ⊂ output` semantics, plus OpenAI web-search server-tool fees
 - Per-source cache staleness — a new Codex rollout no longer forces a Claude re-parse (cache schema v13)
 
+### Fixed
+
+- Codex duplicate `token_count` events were not actually deduplicated: the dedup key included the event's timestamp, but real duplicate re-logs (Codex re-announcing the same completed turn's usage seconds-to-minutes later) carry different timestamps, so the key never matched and usage was double- or quadruple-counted on affected sessions
+- Sessions whose repo was later moved or renamed on disk (e.g. a folder reorganization) permanently showed zero correlated commits — `analyzeGitRepo` did a literal path-existence check with no fallback. Moved repos are now auto-resolved by matching folder name against another still-valid path from the same parse run; ambiguous or unmatched paths are surfaced with a warning instead of silently returning empty
+
 ## [0.2.1] - 2026-02-26
 
 ### Fixed

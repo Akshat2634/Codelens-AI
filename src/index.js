@@ -7,7 +7,7 @@ import { DEFAULT_CLAUDE_DIR, DEFAULT_CODEX_DIR, deleteCache, getCodexStaleFiles,
 import { parseAllProjects } from './claude-parser.js';
 import { parseCodexSessions } from './codex-parser.js';
 import { correlateSessions } from './correlator.js';
-import { analyzeGitRepo, getGitUser } from './git-analyzer.js';
+import { analyzeGitRepo, getGitUser, resolveMovedRepoPaths } from './git-analyzer.js';
 import { computeMetrics } from './metrics.js';
 import { createServer } from './server.js';
 
@@ -114,11 +114,30 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   // Step 2: Analyze git repos
   const startGit = Date.now();
   const repoPathsSet = new Set(sessions.map(s => s.repoPath).filter(Boolean));
+  // Resolve against every parsed session's repoPath, not just this view's
+  // (source-filtered) subset — under --source codex there may be no valid
+  // codex repoPath left to alias to, but a Claude session for the same repo
+  // (parsed in the same run) usually still has the current, correct path.
+  const allRepoPaths = new Set(allParsed.map(s => s.repoPath).filter(Boolean));
+  const { aliasMap, unresolved } = resolveMovedRepoPaths([...allRepoPaths]);
+  const analysisCache = {};
   const commitsByRepo = {};
   for (const repoPath of repoPathsSet) {
-    commitsByRepo[repoPath] = analyzeGitRepo(repoPath, days);
+    const analysisPath = aliasMap.get(repoPath) || repoPath;
+    if (!(analysisPath in analysisCache)) {
+      analysisCache[analysisPath] = analyzeGitRepo(analysisPath, days);
+    }
+    commitsByRepo[repoPath] = analysisCache[analysisPath];
   }
   console.log(`  ${icon.ok} Analyzing git repos ${c.dim}── ${repoPathsSet.size} repos (${fmt(Date.now() - startGit)})${c.reset}`);
+  const resolvedInView = [...repoPathsSet].filter(p => aliasMap.has(p));
+  const unresolvedInView = unresolved.filter(p => repoPathsSet.has(p));
+  if (resolvedInView.length > 0) {
+    console.log(`  ${icon.ok} Resolved ${resolvedInView.length} moved repo path(s) by folder name ${c.dim}(sessions recorded a path that no longer exists)${c.reset}`);
+  }
+  if (unresolvedInView.length > 0) {
+    console.log(`  ${icon.warn} ${c.yellow}${unresolvedInView.length} repo path(s) no longer exist and couldn't be auto-resolved — their sessions won't show commits:${c.reset} ${unresolvedInView.join(', ')}`);
+  }
 
   // Step 3: Correlate sessions with commits. All sources correlate together so
   // a commit is claimed by at most ONE session across agents — per-source views

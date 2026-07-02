@@ -504,11 +504,16 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
             prevTotal = cur;
           }
           if (delta) {
-            // Exact-duplicate events appear when Codex replays history
-            // (branched threads, resumed sessions) — count each once. Only
-            // dedup timestamped events: without a timestamp, two identical
-            // deltas are more plausibly two real requests than a replay.
-            const dupKey = `${ts}|${model}|${delta.input_tokens || 0}|${cachedOf(delta)}|${delta.output_tokens || 0}|${delta.reasoning_output_tokens || 0}`;
+            // Exact-duplicate events appear when Codex re-logs the same
+            // completed turn's usage (branched threads, resumed sessions,
+            // or a heartbeat re-announcement seconds-to-minutes later with
+            // no new request in between) — count each once. The timestamp
+            // is deliberately NOT part of the key: real duplicates carry
+            // different timestamps, so identity is the reported usage
+            // itself. Only dedup timestamped events: without a timestamp,
+            // two identical deltas are more plausibly two real requests
+            // than a replay.
+            const dupKey = `${model}|${delta.input_tokens || 0}|${cachedOf(delta)}|${delta.output_tokens || 0}|${delta.reasoning_output_tokens || 0}`;
             if (!ts || !seenUsage.has(dupKey)) {
               seenUsage.add(dupKey);
               tokenCountResponses++;
