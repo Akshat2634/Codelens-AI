@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Codelens AI** (`codelens-ai` on npm) is a CLI tool that measures ROI from AI coding agents by correlating Claude Code token usage with git commit output. It parses Claude Code session files, analyzes git history, and serves an interactive dashboard at `http://localhost:3457`.
+**Codelens AI** (`codelens-ai` on npm) is a CLI tool that measures ROI from AI coding agents by correlating token usage with git commit output. It parses **Claude Code** session files (`~/.claude/projects/`) and **OpenAI Codex CLI** rollout files (`~/.codex/sessions/`), analyzes git history, and serves an interactive dashboard at `http://localhost:3457` with per-agent source tabs (All Agents / Claude Code / OpenAI Codex).
 
 **Version:** 0.8.2
 **License:** MIT
@@ -23,16 +23,19 @@
 src/
 ├── index.js           # CLI entry point & orchestration (Commander)
 ├── claude-parser.js   # Parses JSONL session files from ~/.claude/projects/
+├── codex-parser.js    # Parses OpenAI Codex rollout files from ~/.codex/sessions/
 ├── git-analyzer.js    # Git log analysis, branch detection, diff stats
 ├── correlator.js      # Matches sessions to commits via file overlap + time window
 ├── metrics.js         # ROI calculations, grades, insights, heatmap, survival rate
-├── server.js          # Express REST API routes
-├── cache.js           # Smart caching with stale file detection
-├── dashboard.html     # Single-file SPA dashboard (3000+ lines)
-└── agents/            # Agent integration stubs (claude/, cursor/)
+├── server.js          # Express REST API routes (?source= selects per-agent views)
+├── cache.js           # Smart caching with per-source stale file detection
+└── dashboard.html     # Single-file SPA dashboard (4000+ lines)
 
 tests/
-└── dashboard.spec.js  # Playwright E2E tests
+├── unit/              # node --test suites (parsers, correlator, metrics, server)
+├── e2e/smoke.spec.js  # Playwright smoke suite (fixture-backed, incl. source tabs)
+├── fixtures/          # build-fixtures.js generates Claude + Codex session fixtures
+└── local/             # full dashboard suite for local runs
 
 .github/workflows/
 ├── ci.yml             # CI: syntax check, Node 18/20/22 matrix
@@ -42,11 +45,17 @@ tests/
 ## Data Flow
 
 ```
-Claude Sessions (JSONL) → claude-parser.js → [Cache] → git-analyzer.js
-→ correlator.js → metrics.js → server.js (REST API) → dashboard.html
+Claude Sessions (JSONL)  → claude-parser.js ┐
+Codex Rollouts (JSONL)   → codex-parser.js  ┴→ [Cache] → git-analyzer.js
+→ correlator.js (all sources together) → metrics.js (per-source payloads)
+→ server.js (REST API, ?source=) → dashboard.html (source tabs)
 ```
 
+Every session object carries `source: 'claude' | 'codex'` and an identical shape (codex-parser mirrors claude-parser's output). Correlation runs over ALL sessions together so a commit is claimed by at most one session across agents; per-source payloads filter the correlated set.
+
 ## Key API Routes (server.js)
+
+All GET routes accept `?source=all|claude|codex` (default `all`; per-agent views exist only when both agents have sessions — unknown source falls back to `all`).
 
 - `GET /` — dashboard HTML
 - `GET /api/all` — full payload
@@ -70,6 +79,10 @@ npx codelens-ai --no-open       # don't auto-open browser
 npx codelens-ai --json          # dump raw JSON to stdout
 npx codelens-ai --project X     # filter by project name
 npx codelens-ai --refresh       # force full re-parse
+npx codelens-ai --source codex  # analyze a single agent: claude | codex
+npx codelens-ai --claude-dir X  # override ~/.claude/projects (testing/CI)
+npx codelens-ai --codex-dir X   # override ~/.codex/sessions (testing/CI)
+npx codelens-ai --plan max20 --codex-plan plus   # per-agent subscription mode
 npx claude-roi                  # backward-compatible alias
 ```
 
@@ -85,11 +98,12 @@ node --check src/*.js           # syntax validation
 ## Key Design Decisions
 
 - **Single-file dashboard** — no build step, served directly by Express
-- **Zero-config** — auto-discovers `~/.claude/projects/`
-- **Smart caching** — incremental parsing, only re-processes changed JSONL files (`~/.cache/agent-analytics/`)
-- **File-first correlation** — sessions matched to commits by file overlap, 2-hour temporal buffer
+- **Zero-config** — auto-discovers `~/.claude/projects/` and `~/.codex/sessions/` (`$CODEX_HOME` honored)
+- **Smart caching** — incremental parsing with per-source staleness, so a new Codex rollout doesn't force a Claude re-parse (`~/.cache/agent-analytics/`)
+- **File-first correlation** — sessions matched to commits by file overlap, 2-hour temporal buffer; all agent sources correlate together so a commit is attributed to at most one session
+- **Uniform session shape** — codex-parser produces the exact claude-parser session shape (`cacheReadTokens` = OpenAI `cached_input_tokens`, `cacheCreationTokens` = 0) so correlator/metrics/server are source-agnostic
 - **Privacy-first** — all data stays local, no telemetry
-- **Version-aware pricing** — token costs reflect Anthropic's pricing tiers per model
+- **Version-aware pricing** — token costs reflect each provider's pricing tiers per model (Anthropic per-version tiers; OpenAI per-model-id, with o3's Jun 2025 price cut date-tiered)
 
 ## Coding Conventions
 
@@ -112,9 +126,10 @@ Use these skills when working on this project:
 
 ## Important Notes
 
-- The dashboard is a single 3000+ line HTML file — changes should maintain the inline architecture
-- Cache is stored at `~/.cache/agent-analytics/parsed-sessions.json`
-- Session JSONL files are at `~/.claude/projects/`
-- Token pricing is hardcoded in `claude-parser.js` — update when Anthropic changes pricing
-- Playwright tests require Claude session fixtures to run (run locally, not in CI)
+- The dashboard is a single 4000+ line HTML file — changes should maintain the inline architecture
+- Cache is stored at `~/.cache/agent-analytics/parsed-sessions.json`; runs with custom `--claude-dir`/`--codex-dir` write to a separate `parsed-sessions-<hash>.json` so tests/CI never evict the real cache
+- Claude session JSONL files are at `~/.claude/projects/`; Codex rollouts at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (zstd-compressed `.jsonl.zst` after ~7 days — readable on Node >= 22.15)
+- Token pricing is hardcoded in `claude-parser.js` (Anthropic) and `codex-parser.js` (OpenAI) — update when providers change pricing
+- Codex gotchas already handled in `codex-parser.js`: `token_count` totals are cumulative (use `last_token_usage` deltas), `cached_input_tokens ⊂ input_tokens`, `reasoning_output_tokens ⊂ output_tokens`, subagent `thread_spawn` rollouts replay parent history (skipped), legacy pre-envelope 2025 format
+- Playwright tests require session fixtures to run (regenerated by `tests/fixtures/build-fixtures.js`)
 - CI runs syntax checks only; E2E tests are local-only

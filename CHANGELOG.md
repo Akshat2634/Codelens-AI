@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **OpenAI Codex CLI support** — end-to-end: `src/codex-parser.js` parses `~/.codex/sessions/` rollout files (envelope format, legacy 2025 pre-envelope format, and zstd-compressed `.jsonl.zst` archives on Node >= 22.15) into the same session shape as the Claude parser
+- **Agent source tabs** — when both Claude Code and Codex sessions exist, the dashboard shows All Agents / Claude Code / OpenAI Codex tabs; every section recomputes per agent, and the selection persists across reloads
+- `?source=all|claude|codex` on all API routes; per-source payloads computed server-side
+- OpenAI model pricing (GPT-5.x, GPT-5.x-Codex, codex-mini, o3/o4-mini with o3's Jun 2025 price cut date-tiered); unpriced models are costed at proxy rates and flagged as estimated spend
+- CLI flags: `--source claude|codex`, `--codex-dir`, `--codex-plan free|go|plus|pro100|pro|business|business-annual`, `--codex-plan-cost`
+- Codex accounting correctness: per-request `last_token_usage` deltas (cumulative-total fallback with reset handling), exact-duplicate event dedup, subagent `thread_spawn` replay-burst skip, `cached_input ⊂ input` and `reasoning ⊂ output` semantics, plus OpenAI web-search server-tool fees
+- Per-source cache staleness — a new Codex rollout no longer forces a Claude re-parse (cache schema v13)
+
 ## [0.2.1] - 2026-02-26
 
 ### Fixed

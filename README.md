@@ -4,11 +4,12 @@
 
 **Agent Productivity-to-Cost Correlator** — Is your AI coding agent actually shipping code?
 
-Codelens AI ties Claude Code token usage to actual git output. It reads your local Claude Code session files, correlates them with git commits by timestamp, and serves a dashboard answering: *"Am I getting ROI from my AI coding agent?"*
+Codelens AI ties AI coding agent token usage to actual git output. It reads your local **Claude Code** and **OpenAI Codex CLI** session files, correlates them with git commits, and serves a dashboard answering: *"Am I getting ROI from my AI coding agents?"* When both agents have sessions, the dashboard adds **All Agents / Claude Code / OpenAI Codex** tabs so you can compare them side by side.
 
 - One command, zero config
 - All data stays local
-- Works with any git repo where you've used Claude Code
+- Supports Claude Code and OpenAI Codex CLI in one dashboard
+- Works with any git repo where you've used either agent
 
 ## Installation
 
@@ -58,9 +59,11 @@ node src/index.js
 
 ## Prerequisites
 
-- **Node.js >= 18** — [Download](https://nodejs.org/)
+- **Node.js >= 18** — [Download](https://nodejs.org/) (Node >= 22.15 to also read Codex's zstd-compressed archive rollouts)
 - **Git** — installed and configured with `user.name` and `user.email`
-- **Claude Code** — you must have used [Claude Code](https://claude.com/claude-code) at least once so session data exists at `~/.claude/projects/`
+- At least one supported agent with local session data:
+  - **Claude Code** — [Claude Code](https://claude.com/claude-code) sessions at `~/.claude/projects/`
+  - **OpenAI Codex CLI** — [Codex](https://developers.openai.com/codex) sessions at `~/.codex/sessions/` (`$CODEX_HOME` is honored)
 
 ## Quick Start
 
@@ -68,7 +71,7 @@ node src/index.js
 npx codelens-ai
 ```
 
-This parses your `~/.claude/projects/` session data, analyzes your git repos, and opens a dashboard at `http://localhost:3457`.
+This parses your `~/.claude/projects/` and `~/.codex/sessions/` data, analyzes your git repos, and opens a dashboard at `http://localhost:3457`.
 
 ## What It Measures
 
@@ -78,7 +81,8 @@ This parses your `~/.claude/projects/` session data, analyzes your git repos, an
 | **Line Survival Rate**| % of AI-written lines that survive 24h without being rewritten  |
 | **Orphaned Sessions** | Sessions with 10+ messages that produced zero commits           |
 | **ROI Grade (A-F)**   | Composite score based on tokens-per-commit and survival rate    |
-| **Model Comparison**  | Efficiency breakdown across Opus, Sonnet, and Haiku             |
+| **Model Comparison**  | Efficiency across Opus, Sonnet, Haiku, GPT-5 Codex, and more    |
+| **Agent Comparison**  | Per-agent dashboard tabs (All / Claude Code / OpenAI Codex)     |
 | **Branch Awareness**  | What % of AI commits landed on production                       |
 | **Peak Hours**        | Hour-of-day x day-of-week productivity heatmap                  |
 | **Autonomy Score**    | Composite A-F grade measuring how independently the agent works |
@@ -98,13 +102,18 @@ codelens-ai --json                 # dump all metrics as JSON to stdout
 codelens-ai --project techops      # filter to a specific project
 codelens-ai --refresh              # force full re-parse (ignore cache)
 codelens-ai --autonomy             # print autonomy score to terminal and exit
-codelens-ai --plan max20           # subscription mode: effective $/commit vs your flat plan
-codelens-ai --plan-cost 150        # custom monthly subscription cost (USD)
+codelens-ai --source codex         # analyze a single agent only: claude | codex
+codelens-ai --plan max20           # Claude subscription mode: effective $/commit vs your flat plan
+codelens-ai --plan-cost 150        # custom Claude monthly subscription cost (USD)
+codelens-ai --codex-plan plus      # ChatGPT/Codex subscription: free | go | plus | pro100 | pro | business | business-annual
+codelens-ai --codex-plan-cost 40   # custom Codex monthly subscription cost (USD)
+codelens-ai --claude-dir <path>    # override ~/.claude/projects (testing/CI)
+codelens-ai --codex-dir <path>     # override ~/.codex/sessions (testing/CI)
 ```
 
 ### Effective cost (subscription mode)
 
-By default costs are **API-equivalent** — what your usage *would* cost at pay-as-you-go token rates. If you're on a flat-rate Claude plan, those dollars aren't what you actually pay. Pass `--plan` (`pro` = $20/mo, `max5` = $100/mo, `max20` = $200/mo) or `--plan-cost <usd>` to add an **Effective Cost** panel that prorates your subscription to the analyzed window and shows:
+By default costs are **API-equivalent** — what your usage *would* cost at pay-as-you-go token rates. If you're on a flat-rate plan, those dollars aren't what you actually pay. Pass `--plan` (`pro` = $20/mo, `max5` = $100/mo, `max20` = $200/mo) / `--plan-cost <usd>` for Claude, or `--codex-plan` (`free` = $0/mo, `go` = $8/mo, `plus` = $20/mo, `pro100` = $100/mo, `pro` = $200/mo, `business` = $25/seat/mo monthly, `business-annual` = $20/seat/mo annually) / `--codex-plan-cost <usd>` for ChatGPT/Codex, to add an **Effective Cost** panel that prorates your subscription to the analyzed window and shows:
 
 - **Effective $/commit** and **$/surviving line** — your prorated fee ÷ output, the cost figures that actually reflect your bill.
 - **Plan utilization** — API-equivalent value ÷ prorated fee (e.g. `3.2×` means you extracted ~3.2× your subscription in pay-as-you-go value). This is an estimate of value extracted, **not** realized savings.
@@ -113,6 +122,7 @@ By default costs are **API-equivalent** — what your usage *would* cost at pay-
 
 The dashboard includes:
 
+- **Agent source tabs** — when both Claude Code and Codex sessions exist, switch between **All Agents**, **Claude Code**, and **OpenAI Codex** views; every section recomputes for the selected agent
 - **Hero stats** — total cost, commits shipped, cost per commit, ROI grade
 - **Attribution & Coverage** — per-commit confidence (high/medium/low) that a commit was really the AI's, plus a reconciliation of AI-attributed vs co-authored vs organic (manual) lines, so the ROI numbers are auditable rather than a black box
 - **Smart insights** — auto-generated observations about your usage patterns
@@ -125,11 +135,11 @@ The dashboard includes:
 
 ## How It Works
 
-1. **Parses** JSONL session files from `~/.claude/projects/`
-2. **Analyzes** git history from each repo you've worked in with Claude
-3. **Correlates** sessions to commits by timestamp (during session + 30min buffer)
-4. **Calculates** cost using Anthropic token pricing (input, output, cache read/write)
-5. **Serves** an interactive dashboard on localhost
+1. **Parses** JSONL session files from `~/.claude/projects/` (Claude Code) and rollout files from `~/.codex/sessions/` (OpenAI Codex CLI — including `.jsonl.zst` archives on Node >= 22.15)
+2. **Analyzes** git history from each repo you've worked in with either agent
+3. **Correlates** sessions to commits by file overlap and timing — all agents correlate together, so a commit is attributed to at most one session
+4. **Calculates** cost using each provider's published API pricing (input, output, cache, and server-side web search when logged)
+5. **Serves** an interactive dashboard on localhost with per-agent views
 
 ### Caching
 
@@ -160,6 +170,36 @@ Token costs are version-aware and calculated per model, accounting for the two p
 >
 > **Note — legacy tiers:** The 0.1× / 1.25× / 2× multipliers describe current models. Claude 3 Haiku predates them and uses Anthropic's originally-published cache rates ($0.30 write / $0.03 read), and 1-hour cache-write rates for retired tiers (e.g. Sonnet 3.7, Haiku 3) are derived at 2× input. These legacy rows are kept only to cost older session logs accurately.
 
+#### OpenAI Codex models
+
+Codex sessions are costed from the `token_count` events in each rollout file. In OpenAI's accounting, `cached_input_tokens` is a subset of `input_tokens` (cache reads are billed at the cached rate, there is no cache-write premium) and `reasoning_output_tokens` is a subset of `output_tokens` (reasoning is billed at the output rate, never double-counted). Server-side `web_search_call` entries add OpenAI's published web-search call fee. Rates per million tokens from [OpenAI's API pricing](https://developers.openai.com/api/docs/pricing):
+
+| Model | Input | Cached Input | Output |
+| --- | --- | --- | --- |
+| GPT-5.5 | $5.00/M short, $10/M long context | $0.50/M short, $1/M long context | $30/M short, $45/M long context |
+| GPT-5.5 Pro | $30/M short, $60/M long context | no published cached discount | $180/M short, $270/M long context |
+| GPT-5.4 / 5.4 Mini / 5.4 Nano | $2.50 / $0.75 / $0.20/M | $0.25 / $0.075 / $0.02/M | $15 / $4.50 / $1.25/M |
+| GPT-5.4 Pro | $30/M short, $60/M long context | no published cached discount | $180/M short, $270/M long context |
+| GPT-5.3 Codex | $1.75/M | $0.175/M | $14/M |
+| GPT-5.1 Codex (Max) / 5.1 / GPT-5 Codex / GPT-5 | $1.25/M | $0.125/M | $10/M |
+| GPT-5.1 Codex Mini / GPT-5 Mini | $0.25/M | $0.025/M | $2/M |
+| codex-mini-latest | $1.50/M | $0.375/M | $6/M |
+| o3 (from Jun 10 2025 / before) | $2 / $10/M | $0.50 / $2.50/M | $8 / $40/M |
+| o4-mini | $1.10/M | $0.275/M | $4.40/M |
+| GPT-4.1 | $2.00/M | $0.50/M | $8/M |
+
+> **Note — o3:** OpenAI cut o3 prices 80% on Jun 10, 2025; usage is priced by the rate in effect on its date.
+>
+> **Note — long context:** GPT-5.5 and GPT-5.4 publish separate short-context and long-context rates. Codex logs that use long-context billing are kept as separate model buckets (for example, `gpt-5.5[long]`) before aggregation so mixed sessions do not average incompatible rates.
+>
+> **Note — current Codex models:** OpenAI's Codex docs currently recommend GPT-5.5, GPT-5.4, and GPT-5.4 mini; `gpt-5.3-codex-spark` is a ChatGPT Pro research preview and is not available in the API at launch. `gpt-5.3-codex` remains priced for API/log history but is deprecated for ChatGPT sign-in.
+>
+> **Note — web search:** Codex `web_search_call` entries are costed at OpenAI's $10 per 1,000 calls; search content tokens remain part of normal token usage when billed by the API.
+>
+> **Note — unpriced models:** Models without a published API price (e.g. `gpt-5.3-codex-spark`, future releases) are costed at proxy rates and included in the dashboard's "estimated spend" warning instead of silently reading $0.
+>
+> **Note — subscriptions:** If you use Codex through a ChatGPT plan (Free/Go/Plus/Pro/Business), the dollar figures are **API-equivalent value**, not what you were billed — pass `--codex-plan` to see effective cost against your flat fee. API-key mode can also include published server-side tool-call fees when the rollout logs expose them.
+
 ### Line Survival
 
 Line survival uses an approximate heuristic: if lines added in commit A are deleted by a subsequent commit on the same file within 24 hours, they're counted as "churned." This is not git-blame-based tracking and survival rates are rounded to the nearest 5%.
@@ -174,11 +214,12 @@ Codelens-AI/
 └── src/
     ├── index.js          # CLI entry point
     ├── claude-parser.js  # Parse Claude Code JSONL session files
-    ├── cache.js          # Parsed data caching layer
+    ├── codex-parser.js   # Parse OpenAI Codex CLI rollout files
+    ├── cache.js          # Parsed data caching layer (per-source staleness)
     ├── git-analyzer.js   # Parse git log with branch awareness
-    ├── correlator.js     # Match sessions to commits by timestamp
+    ├── correlator.js     # Match sessions to commits by file overlap + timing
     ├── metrics.js        # Calculate ROI metrics and insights
-    ├── server.js         # Express server + API routes
+    ├── server.js         # Express server + API routes (?source= views)
     └── dashboard.html    # Single-file dashboard (inline CSS/JS)
 ```
 

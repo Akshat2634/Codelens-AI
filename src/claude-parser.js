@@ -935,6 +935,7 @@ export async function parseAllProjects(claudeDir, days, projectFilter) {
 export {
   calculateCost,
   calculateCostBreakdown,
+  findGitRoot,
   getModelFamily,
   getPricingTier,
   isVerificationCommand,
