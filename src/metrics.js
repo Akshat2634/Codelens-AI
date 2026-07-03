@@ -542,6 +542,11 @@ function computeAutonomyMetrics(correlatedSessions, cutoffMs = 0) {
     toolbeltCoverage,
     commitVelocity,
     totalBashCalls: totalBash,
+    // Non-read-only ("state-changing") shell calls — the denominator the
+    // self-heal score is actually computed against. Exposed so the card and
+    // insight can show a fraction consistent with the percentage (verif /
+    // attempted), instead of pairing the percentage with the full bash count.
+    attemptedBashCalls: Math.max(0, totalBash - totalReadOnly),
     totalVerificationCalls: totalVerif,
     topVerificationCommands,
     perSession,
@@ -631,13 +636,13 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
       candidates.push({
         priority: 1,
         type: 'warning',
-        text: `${pct}% of sessions (${orphanedCount}/${correlatedSessions.length}) ran 10+ messages without producing a commit — likely wasted effort.`,
+        text: `${pct}% of sessions (${orphanedCount}/${correlatedSessions.length}) ran more than 10 messages without producing a commit — likely wasted effort.`,
       });
     } else if (pct > 0) {
       candidates.push({
         priority: 3,
         type: 'info',
-        text: `${pct}% of sessions (${orphanedCount}/${correlatedSessions.length}) ran 10+ messages without producing a commit.`,
+        text: `${pct}% of sessions (${orphanedCount}/${correlatedSessions.length}) ran more than 10 messages without producing a commit.`,
       });
     }
   }
@@ -647,7 +652,10 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
     candidates.push({
       priority: 1,
       type: 'warning',
-      text: `Only ${autonomyMetrics.selfHealScore}% of ${autonomyMetrics.totalBashCalls} shell commands were tests or lints — low self-healing.`,
+      // Pair the percentage with the denominator it was computed against
+      // (state-changing calls, read-only excluded) so "N% of M" stays
+      // internally consistent.
+      text: `Only ${autonomyMetrics.selfHealScore}% of ${autonomyMetrics.attemptedBashCalls} state-changing shell commands were tests or lints — low self-healing.`,
     });
   } else if (autonomyMetrics && autonomyMetrics.selfHealScore >= 40 && autonomyMetrics.totalBashCalls > 10) {
     candidates.push({
@@ -916,7 +924,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   const modelBreakdown = {};
   const ensureFamily = (family) => {
     if (!modelBreakdown[family]) {
-      modelBreakdown[family] = { cost: 0, tokens: 0, sessions: 0, commits: 0, dominantCost: 0, avgCostPerCommit: null, subModels: {} };
+      modelBreakdown[family] = { cost: 0, tokens: 0, sessions: 0, commits: 0, dominantCost: 0, dominantTokens: 0, avgCostPerCommit: null, subModels: {} };
     }
     return modelBreakdown[family];
   };
@@ -952,15 +960,19 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     if (domFamily) {
       const fam = ensureFamily(domFamily);
       fam.commits += session.commitCount;
-      // Cost of the sessions where this family was dominant — the matching
-      // population for its commits, so avgCostPerCommit divides like with like
-      // (family-wide cost includes sessions whose commits went to other families).
+      // Cost AND tokens of the sessions where this family was dominant — the
+      // matching population for its commits, so per-commit ratios divide like
+      // with like (family-wide totals include sessions whose commits went to
+      // other families; a family used only as a background helper — e.g. Haiku —
+      // otherwise divides its large family-wide token total by its few dominant
+      // commits and looks wildly inefficient).
       fam.dominantCost += session.cost.totalCost;
+      fam.dominantTokens += Object.values(famAgg).reduce((s, a) => s + a.tokens, 0);
     }
   }
   for (const data of Object.values(modelBreakdown)) {
     data.avgCostPerCommit = data.commits > 0 ? data.dominantCost / data.commits : null;
-    data.tokensPerCommit = data.commits > 0 ? Math.round(data.tokens / data.commits) : null;
+    data.tokensPerCommit = data.commits > 0 ? Math.round(data.dominantTokens / data.commits) : null;
     data.subModels = Object.fromEntries(
       Object.entries(data.subModels).sort(([, a], [, b]) => b.cost - a.cost)
     );

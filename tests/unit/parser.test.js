@@ -283,3 +283,63 @@ test('readOnlyBashCalls counts read-only Bash commands without changing totalBas
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('isMeta user entries are excluded from userMessageCount', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codelens-ismeta-'));
+  try {
+    const proj = path.join(root, 'proj');
+    mkdirSync(proj, { recursive: true });
+    const sid = 'aaaaaaaa-1111-2222-3333-666666666666';
+    const now = new Date().toISOString();
+    const lines = [
+      { type: 'user', sessionId: sid, cwd: '/tmp/x', gitBranch: 'main', timestamp: now, message: { content: [{ type: 'text', text: 'real prompt 1' }] } },
+      // System-injected meta entries (skill notices, slash-command defs, image
+      // placeholders) carry isMeta:true — not genuine user turns.
+      { type: 'user', isMeta: true, timestamp: now, message: { content: [{ type: 'text', text: 'Skill base directory notice (injected)' }] } },
+      { type: 'user', isMeta: true, timestamp: now, message: { content: 'a slash-command definition' } },
+      { type: 'user', timestamp: now, message: { content: [{ type: 'text', text: 'real prompt 2' }] } },
+      { type: 'assistant', requestId: 'r1', timestamp: now, message: { model: 'claude-sonnet-5', usage: { input_tokens: 10, output_tokens: 5 }, content: [{ type: 'text', text: 'ok' }] } },
+    ];
+    writeFileSync(path.join(proj, sid + '.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions } = await parseAllProjects(root, 30);
+    const s = sessions.find(x => x.sessionId === sid);
+    assert.ok(s, 'session should be parsed');
+    assert.equal(s.userMessageCount, 2, 'only genuine user turns counted; isMeta injections excluded');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('MultiEdit and NotebookEdit populate filesWritten (not just Write/Edit)', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codelens-multiedit-'));
+  try {
+    const proj = path.join(root, 'proj');
+    mkdirSync(proj, { recursive: true });
+    const sid = 'aaaaaaaa-1111-2222-3333-777777777777';
+    const now = new Date().toISOString();
+    const tool = (id, name, input) => ({
+      type: 'assistant', requestId: id, timestamp: now,
+      message: { model: 'claude-sonnet-5', usage: { input_tokens: 5, output_tokens: 2 }, content: [{ type: 'tool_use', id, name, input }] },
+    });
+    const lines = [
+      { type: 'user', sessionId: sid, cwd: '/repo', gitBranch: 'main', timestamp: now, message: { content: [{ type: 'text', text: 'edit' }] } },
+      tool('e1', 'Write', { file_path: '/repo/a.js' }),
+      tool('e2', 'MultiEdit', { file_path: '/repo/b.js' }),
+      tool('e3', 'NotebookEdit', { notebook_path: '/repo/nb.ipynb' }),
+      tool('e4', 'Read', { file_path: '/repo/c.js' }),
+    ];
+    writeFileSync(path.join(proj, sid + '.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions } = await parseAllProjects(root, 30);
+    const s = sessions.find(x => x.sessionId === sid);
+    assert.ok(s, 'session should be parsed');
+    assert.ok(s.filesWritten.includes('a.js'), 'Write recorded');
+    assert.ok(s.filesWritten.includes('b.js'), 'MultiEdit recorded');
+    assert.ok(s.filesWritten.includes('nb.ipynb'), 'NotebookEdit recorded');
+    assert.ok(!s.filesWritten.includes('c.js'), 'Read must not land in filesWritten');
+    assert.ok(s.filesRead.includes('c.js'), 'Read recorded in filesRead');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -304,6 +304,47 @@ export function analyzeGitRepo(repoPath, days) {
     }
     allCommits = deduped;
 
+    // Second dedup pass: GitHub "Squash and merge" (and retained branch-vs-main
+    // copies) produce a NEW commit on the default branch with a DIFFERENT author
+    // date — and often a " (#123)" PR-number subject suffix — than the original
+    // feature-branch commit, so the exact-%aI signature above never collapses
+    // them and both survive under `--all`, double-counting commits and lines
+    // (observed at ~20-30% inflation on real repos). Collapse a pair only on
+    // unambiguous evidence: same author, IDENTICAL per-file diffstat, matching
+    // subject (ignoring a trailing PR-number suffix), one copy on the default
+    // branch and one off it, and author dates within a short window. Drop the
+    // off-branch twin, keep the on-main copy. Requiring an identical diffstat +
+    // subject + one-on/one-off-main keeps genuinely distinct commits that merely
+    // share a subject (repeated version bumps, "regenerate lockfile") from ever
+    // being merged.
+    const SQUASH_WINDOW_MS = 10 * 60 * 1000;
+    const normalizeSubject = (s) => (s || '').replace(/\s*\(#\d+\)\s*$/, '').trim();
+    const patchKey = (c) => `${(c.authorEmail || '').toLowerCase()}|${normalizeSubject(c.subject)}|` +
+      c.files.map(f => `${f.path}:${f.added}:${f.deleted}`).sort().join(',');
+    const squashGroups = new Map();
+    for (const commit of allCommits) {
+      if (!commit.files || commit.files.length === 0) continue; // need a diffstat to match on
+      const key = patchKey(commit);
+      if (!squashGroups.has(key)) squashGroups.set(key, []);
+      squashGroups.get(key).push(commit);
+    }
+    const dropHashes = new Set();
+    for (const group of squashGroups.values()) {
+      if (group.length < 2) continue;
+      const onMainCopies = group.filter(c => c.onMain);
+      if (onMainCopies.length === 0) continue; // no canonical main copy → leave as-is
+      for (const c of group) {
+        if (c.onMain) continue; // keep every on-main copy
+        // Drop an off-main twin only if a matching on-main copy is within the window.
+        if (onMainCopies.some(m => Math.abs((c.timestampMs || 0) - (m.timestampMs || 0)) <= SQUASH_WINDOW_MS)) {
+          dropHashes.add(c.hash);
+        }
+      }
+    }
+    if (dropHashes.size > 0) {
+      allCommits = allCommits.filter(c => !dropHashes.has(c.hash));
+    }
+
     // Enforce the lookback window on AUTHOR date (%aI), matching every downstream
     // metric (all of which bucket on author date). `--since` filters on committer
     // date, which can differ from author date after a rebase or cherry-pick.

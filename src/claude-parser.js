@@ -316,11 +316,15 @@ function extractToolUse(session, msg, seenToolUseIds) {
       }
     }
 
-    // Track files written/read
-    const filePath = block.input?.file_path;
+    // Track files written/read. Write/Edit/MultiEdit carry input.file_path;
+    // NotebookEdit uses input.notebook_path. All four are file-editing tools
+    // and must land in filesWritten so file-overlap correlation can attribute
+    // commits — omitting MultiEdit/NotebookEdit leaves such a session with no
+    // files, forcing weaker time-only (chat-only) attribution or orphaning.
+    const filePath = block.input?.file_path || block.input?.notebook_path;
     if (!filePath) continue;
 
-    if (toolName === 'Write' || toolName === 'Edit') {
+    if (toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit' || toolName === 'NotebookEdit') {
       if (!session.filesWritten.includes(filePath)) {
         session.filesWritten.push(filePath);
       }
@@ -428,13 +432,20 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
         }
       }
 
-      // Count user messages (only actual user content, not tool results)
-      const content = obj.message.content;
-      if (Array.isArray(content)) {
-        const hasUserText = content.some(b => b.type === 'text');
-        if (hasUserText) session.userMessageCount++;
-      } else if (typeof content === 'string') {
-        session.userMessageCount++;
+      // Count user messages (only actual user content, not tool results or
+      // system-injected meta entries). Entries flagged isMeta:true — skill
+      // base-directory notices, slash-command definitions, image placeholders —
+      // are injected context, not genuine user turns; counting them inflates
+      // userMessageCount, which feeds the chat-only attribution floor, the
+      // orphaned-session threshold, and the autopilot ratio.
+      if (obj.isMeta !== true) {
+        const content = obj.message.content;
+        if (Array.isArray(content)) {
+          const hasUserText = content.some(b => b.type === 'text');
+          if (hasUserText) session.userMessageCount++;
+        } else if (typeof content === 'string') {
+          session.userMessageCount++;
+        }
       }
 
       continue;
