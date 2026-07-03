@@ -12,6 +12,12 @@ const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
 // dir?" check below can't drift from the CLI's own defaults.
 export const DEFAULT_CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
 export const DEFAULT_CODEX_DIR = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
+// The primary cache file is reserved for the plain ~/.codex layout. Comparing
+// against DEFAULT_CODEX_DIR (which bakes in $CODEX_HOME at load) would let a
+// run with a temporary CODEX_HOME map onto parsed-sessions.json and evict the
+// cache built from the user's real sessions — overrides must fall through to
+// the hashed filename below, same as --codex-dir.
+const PLAIN_CODEX_DIR = path.join(os.homedir(), '.codex', 'sessions');
 
 // Runs against custom --claude-dir/--codex-dir (tests, CI, fixtures) get their
 // own cache file, so they never evict the cache built from the user's real
@@ -20,7 +26,7 @@ export const DEFAULT_CODEX_DIR = path.join(process.env.CODEX_HOME || path.join(o
 function cacheFileFor(options = {}) {
   const claudeDir = options.claudeDir || DEFAULT_CLAUDE_DIR;
   const codexDir = options.codexDir || DEFAULT_CODEX_DIR;
-  if (claudeDir === DEFAULT_CLAUDE_DIR && codexDir === DEFAULT_CODEX_DIR) return CACHE_FILE;
+  if (claudeDir === DEFAULT_CLAUDE_DIR && codexDir === PLAIN_CODEX_DIR) return CACHE_FILE;
   const hash = createHash('sha1').update(`${claudeDir}|${codexDir}`).digest('hex').slice(0, 8);
   return path.join(CACHE_DIR, `parsed-sessions-${hash}.json`);
 }
@@ -40,7 +46,9 @@ function cacheFileFor(options = {}) {
 //     discount for pro variants).
 // 12: GPT-5.5/GPT-5.4 long-context pricing for Codex usage buckets.
 // 13: OpenAI Codex web_search_call server-tool fees.
-const CACHE_VERSION = 13;
+// 14: token dedup criterion changed and readOnlyBashCalls added to sessions —
+//     cached sessions from 13 carry double-counted totals.
+const CACHE_VERSION = 14;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);

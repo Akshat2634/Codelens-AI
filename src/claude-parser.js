@@ -159,6 +159,17 @@ function toRelativePath(absolutePath, repoPath) {
     if (rel.startsWith('/')) rel = rel.slice(1);
     return rel;
   }
+  // Stale-alias cwd: the recorded repoPath can be a dead alias of the live
+  // root (e.g. cwd logged as .../GitHub/repo while files landed under
+  // .../GitHub.nosync/repo), so the prefix check fails even though the path
+  // is inside the same-named repo folder. Suffix-match on the folder name
+  // before collapsing to a bare basename — lastIndexOf picks the innermost
+  // match, i.e. the shortest relative path.
+  if (repoPath) {
+    const marker = path.sep + path.basename(repoPath) + path.sep;
+    const idx = absolutePath.lastIndexOf(marker);
+    if (idx !== -1) return absolutePath.slice(idx + marker.length);
+  }
   // Fallback: return just the filename
   return absolutePath.split('/').pop();
 }
@@ -245,6 +256,34 @@ function isVerificationCommand(command) {
   return VERIFICATION_PATTERNS.some(p => p.test(core));
 }
 
+// Read-only inspection commands (for the self-heal score): they examine state
+// without changing it. Conservative allow-list keyed on the effective first
+// token — anything ambiguous is NOT read-only.
+const READ_ONLY_COMMANDS = new Set([
+  'cat', 'ls', 'rg', 'grep', 'egrep', 'fgrep', 'find', 'head', 'tail', 'wc',
+  'pwd', 'stat', 'nl', 'which', 'file', 'du', 'df', 'tree', 'realpath',
+  'dirname', 'basename', 'type', 'printenv', 'env', 'echo', 'printf',
+]);
+
+function isReadOnlyCommand(command) {
+  if (!command || typeof command !== 'string') return false;
+  // Strip cd/path and env var prefixes, same as isVerificationCommand
+  const core = command
+    .replace(/^(?:cd\s+\S+\s*&&\s*)+/g, '')
+    .replace(/^(?:cd\s+\S+\s*;\s*)+/g, '')
+    .replace(/^(?:\w+=\S+\s+)+/g, '')
+    .trim();
+  const tokens = core.split(/\s+/);
+  const first = tokens[0];
+  // sed only reads with an explicit -n (print mode) and never with an
+  // in-place flag (-i / -i.bak / -i''); combined or ambiguous flags don't qualify.
+  if (first === 'sed') {
+    const args = tokens.slice(1);
+    return args.includes('-n') && !args.some(a => a.startsWith('-i'));
+  }
+  return READ_ONLY_COMMANDS.has(first);
+}
+
 function extractToolUse(session, msg, seenToolUseIds) {
   const content = msg.content;
   if (!Array.isArray(content)) return;
@@ -272,6 +311,7 @@ function extractToolUse(session, msg, seenToolUseIds) {
         session.totalBashCalls++;
         const isVerif = isVerificationCommand(command);
         if (isVerif) session.verificationBashCalls++;
+        if (isReadOnlyCommand(command)) session.readOnlyBashCalls++;
         session.bashCommands.push({ command: command.slice(0, 200), isVerification: isVerif });
       }
     }
@@ -318,6 +358,7 @@ function createEmptySession(sessionId) {
     bashCommands: [],
     totalBashCalls: 0,
     verificationBashCalls: 0,
+    readOnlyBashCalls: 0,
     estimatedCost: 0,
     // What the cache-read tokens would have cost at full input price minus what
     // was paid — computed per pricing tier (a flat 9x of cacheReadCost is wrong
@@ -776,6 +817,7 @@ function mergeSubagentIntoSession(parent, sub) {
   // Merge bash command tracking
   parent.totalBashCalls += sub.totalBashCalls;
   parent.verificationBashCalls += sub.verificationBashCalls;
+  parent.readOnlyBashCalls += sub.readOnlyBashCalls;
   parent.bashCommands.push(...sub.bashCommands);
 
   // Merge daily usage
@@ -938,6 +980,7 @@ export {
   findGitRoot,
   getModelFamily,
   getPricingTier,
+  isReadOnlyCommand,
   isVerificationCommand,
   listSubagentTranscripts,
   PRICING,

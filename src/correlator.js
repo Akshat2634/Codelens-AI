@@ -1,4 +1,9 @@
 const FALLBACK_BUFFER_MS = 2 * 60 * 60 * 1000; // 2 hours for time-only fallback
+// Minimum combined message count (user + assistant) before a chat-only session
+// may claim commits by time proximity alone. Without this floor a trivial
+// seconds-long, one-message session absorbs whole manual commits that merely
+// landed within the 2h buffer, fabricating AI-attributed lines and grades.
+const MIN_CHAT_ONLY_MESSAGES = 5;
 
 function computeOverlappingLines(commits, sessionFiles) {
   let linesAdded = 0;
@@ -60,7 +65,8 @@ function temporalDistance(commitMs, sessionStartMs, sessionEndMs) {
  *
  * Primary: match commits whose changed files overlap with session.filesWritten.
  *   Time constraint: commit is within [sessionStart, sessionEnd + 2 hours].
- * Fallback: for sessions with no filesWritten (chat-only), use time window
+ * Fallback: for sessions with no filesWritten (chat-only) that have plausible
+ *   substance (>= MIN_CHAT_ONLY_MESSAGES messages), use time window
  *   [sessionStart, sessionEnd + 2 hours].
  *
  * cutoffMs (the lookback-window start) clamps the matching window of sessions
@@ -96,10 +102,12 @@ export function correlateSessions(sessions, commitsByRepo, cutoffMs = 0) {
 
       const hasFileOverlap = sessionFiles.size > 0 &&
         commit.files.some(f => sessionFiles.has(f.path));
-      const isChatOnly = sessionFiles.size === 0;
+      const chatOnlyEligible = sessionFiles.size === 0 &&
+        (session.userMessageCount + session.assistantMessageCount) >= MIN_CHAT_ONLY_MESSAGES;
 
-      // Must have file overlap, or be a chat-only session (time-based fallback)
-      if (!hasFileOverlap && !isChatOnly) continue;
+      // Must have file overlap, or be a substantial chat-only session
+      // (time-based fallback)
+      if (!hasFileOverlap && !chatOnlyEligible) continue;
 
       const distance = temporalDistance(commit.timestampMs, sessionStartMs, sessionEndMs);
       const existing = commitAssignment.get(commit.hash);
@@ -171,6 +179,10 @@ export function correlateSessions(sessions, commitsByRepo, cutoffMs = 0) {
     //     files the session actually wrote (filesWritten ∩ commit.files).
     //   - inWindowFrac: share of commits made inside the session window
     //     (distance 0) vs. claimed via the 2h post-session buffer.
+    // File evidence dominates: agents don't run `git commit` for the user, so
+    // commits routinely land minutes AFTER the session ends — a low
+    // inWindowFrac only downgrades a strong file match to medium, never low.
+    // Weak file overlap (< 20% of added lines) is low regardless of timing.
     // Chat-only (time-only) matches have no file evidence → low.
     let attributionConfidence = null;
     if (matched.length > 0) {
@@ -188,8 +200,8 @@ export function correlateSessions(sessions, commitsByRepo, cutoffMs = 0) {
       const overlapFrac = sessionFiles.size === 0 ? 0 : (totalAddedAll > 0 ? overlapAdded / totalAddedAll : 1);
       const inWindowFrac = inWindow / matched.length;
       if (sessionFiles.size === 0) attributionConfidence = 'low';
-      else if (overlapFrac >= 0.5 && inWindowFrac >= 0.5) attributionConfidence = 'high';
-      else if (overlapFrac < 0.2 || inWindowFrac < 0.2) attributionConfidence = 'low';
+      else if (overlapFrac >= 0.5) attributionConfidence = inWindowFrac >= 0.5 ? 'high' : 'medium';
+      else if (overlapFrac < 0.2) attributionConfidence = 'low';
       else attributionConfidence = 'medium';
     }
 

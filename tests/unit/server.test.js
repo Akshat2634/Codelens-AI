@@ -152,6 +152,40 @@ test('per-source selection applies to sub-resource routes too', async () => {
   });
 });
 
+// Sorting by a string column with a null value present used to hit the
+// numeric branch (null → 0 via ?? 0, minus a string = NaN) — an arbitrary,
+// engine-dependent order. Nulls must coerce and group deterministically.
+test('GET /api/sessions?sort=model sorts deterministically with a null model present', async () => {
+  const mkSession = (id, model) => ({
+    sessionId: id, model, cost: { totalCost: 1 }, commits: [],
+    startTime: '2026-07-01T00:00:00Z', userMessageCount: 1, assistantMessageCount: 1,
+  });
+  const payload = {
+    meta: {}, summary: {}, insights: [], modelBreakdown: {},
+    sessions: [
+      mkSession('s1', 'gpt-5-codex'),
+      mkSession('s2', null),
+      mkSession('s3', 'claude-sonnet-4-5'),
+      mkSession('s4', null),
+    ],
+  };
+  const app = createServer(payload, null, { chartJsPath: null });
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const { port } = server.address();
+  try {
+    const asc = await (await fetch(`http://127.0.0.1:${port}/api/sessions?sort=model&order=asc`)).json();
+    assert.equal(asc.sessions.length, 4, 'no session may be dropped by the sort');
+    // Nulls coerce ('0') and group ahead of the model ids
+    assert.deepEqual(asc.sessions.map(s => s.model), [null, null, 'claude-sonnet-4-5', 'gpt-5-codex']);
+
+    const desc = await (await fetch(`http://127.0.0.1:${port}/api/sessions?sort=model&order=desc`)).json();
+    assert.deepEqual(desc.sessions.map(s => s.model), ['gpt-5-codex', 'claude-sonnet-4-5', null, null]);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test('a bare single payload (pre-Codex shape) still serves on every route', async () => {
   const app = createServer({ summary: { totalCost: 7 }, meta: {}, insights: [], sessions: [], modelBreakdown: {} }, null, { chartJsPath: null });
   const server = app.listen(0);

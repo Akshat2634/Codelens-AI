@@ -20,6 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Codex duplicate `token_count` events were not actually deduplicated: the dedup key included the event's timestamp, but real duplicate re-logs (Codex re-announcing the same completed turn's usage seconds-to-minutes later) carry different timestamps, so the key never matched and usage was double- or quadruple-counted on affected sessions
+- **Long-context pricing threshold corrected from 200K to >272K input tokens** — OpenAI's GPT-5.5/5.4 long-context tier applies only to requests exceeding the 272K standard input cap, so 200K–272K requests were overbilled at 2x input / 1.5x output rates (and cache savings correspondingly inflated)
+- Token dedup now also requires the cumulative total to be unchanged, so a genuine repeat request with an identical per-turn delta can never be dropped; all-zero compaction events no longer inflate `assistantMessageCount`
+- `filesWritten` no longer collapses to bare basenames when a rollout's recorded cwd is a stale alias of the repo root (e.g. the repo moved from `GitHub/` to `GitHub.nosync/`) — paths now recover via folder-name suffix matching, restoring commit line attribution
+- Chat-only sessions need at least 5 messages before they can claim commits by time proximity alone (a 6-second one-prompt session could previously absorb whole manual commits)
+- Attribution confidence no longer forces "low" on commits landing after the session window: strong file overlap now reads high/medium — Codex commits (which always land post-session since Codex CLI never commits for you) were 100% "low" by construction
+- `--json` no longer truncates at the 64KB pipe buffer (`codelens-ai --json | jq` lost ~97% of the payload), no longer mixes the colored progress banner into stdout (goes to stderr), and emits valid JSON (`null`) with zero sessions
+- Toolbelt coverage and self-heal score are now measured against each agent's own tool vocabulary — Codex was scored against Claude's 14-tool list (structurally "Narrow tool usage") and its shell-routed file reads (62% of calls) deflated self-heal to 5%
+- Per-agent attribution panels no longer label the other agent's AI-matched commits as "Organic (manual)"
+- Sparse timelines are gap-filled with zero days so months-apart bursts no longer render as a smooth interpolated trend; axis labels include the year on multi-year ranges
+- Deep-research models (`o3-deep-research`, `o4-mini-deep-research`) get explicit pricing instead of silently binding to their cheaper prefix siblings
+- `--source all` accepted as the documented no-filter value; `?source=` deep links honored on dashboard load; `--days`/`--port` validated up front; nonexistent `--claude-dir`/`--codex-dir` warned about; `CODEX_HOME` overrides no longer evict the primary cache; moved-repo aliasing corroborates against `git ls-files` before claiming commits; ChatGPT `team` plan recognized
+- Model display polish: null-model sessions sort deterministically, legacy `claude-3-5-sonnet-*` ids render as "Sonnet 3.5" (not "3"), long-context billing buckets are no longer listed as separate models, `[1m]` marker supported, misleading tooltips corrected (self-heal, toolbelt, cost-per-commit chart, Lines column, estimated-cost banner, cache-write funnel hidden for Codex)
 - Sessions whose repo was later moved or renamed on disk (e.g. a folder reorganization) permanently showed zero correlated commits — `analyzeGitRepo` did a literal path-existence check with no fallback. Moved repos are now auto-resolved by matching folder name against another still-valid path from the same parse run; ambiguous or unmatched paths are surfaced with a warning instead of silently returning empty
 
 ## [0.2.1] - 2026-02-26

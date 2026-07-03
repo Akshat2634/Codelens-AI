@@ -75,7 +75,8 @@ test('commit outside time window is not matched', () => {
 });
 
 test('chat-only session uses time-based fallback', () => {
-  // No filesWritten → fallback to time-window matching
+  // No filesWritten → fallback to time-window matching (default mkSession has
+  // 25 messages — well above the chat-only substance floor)
   const session = mkSession({ filesWritten: [] });
   const commit = mkCommit({ files: [{ path: 'src/bar.js', added: 5, deleted: 0 }], totalAdded: 5, totalDeleted: 0 });
   const { correlatedSessions } = correlateSessions(
@@ -84,6 +85,43 @@ test('chat-only session uses time-based fallback', () => {
   );
   assert.equal(correlatedSessions[0].commitCount, 1);
   assert.equal(correlatedSessions[0].matchedByFiles, false);
+  // Time-only matches have no file evidence → always low confidence
+  assert.equal(correlatedSessions[0].attributionConfidence, 'low');
+});
+
+test('tiny chat-only session cannot claim commits by time alone', () => {
+  // 2 messages, no filesWritten — below the substance floor, so the nearby
+  // manual commit stays organic instead of being absorbed
+  const session = mkSession({ filesWritten: [], userMessageCount: 1, assistantMessageCount: 1 });
+  const commit = mkCommit();
+  const { correlatedSessions, organicCommits } = correlateSessions(
+    [session],
+    { '/repo': { commits: [commit], defaultBranch: 'main' } }
+  );
+  assert.equal(correlatedSessions[0].commitCount, 0);
+  assert.equal(correlatedSessions[0].linesAdded, 0);
+  assert.equal(organicCommits.length, 1);
+});
+
+test('chat-only session at the message floor still matches by time', () => {
+  const session = mkSession({ filesWritten: [], userMessageCount: 2, assistantMessageCount: 3 });
+  const commit = mkCommit();
+  const { correlatedSessions, organicCommits } = correlateSessions(
+    [session],
+    { '/repo': { commits: [commit], defaultBranch: 'main' } }
+  );
+  assert.equal(correlatedSessions[0].commitCount, 1);
+  assert.equal(organicCommits.length, 0);
+});
+
+test('file-overlap matching is unaffected by the chat-only message floor', () => {
+  const session = mkSession({ filesWritten: ['src/foo.js'], userMessageCount: 1, assistantMessageCount: 0 });
+  const commit = mkCommit();
+  const { correlatedSessions } = correlateSessions(
+    [session],
+    { '/repo': { commits: [commit], defaultBranch: 'main' } }
+  );
+  assert.equal(correlatedSessions[0].commitCount, 1);
 });
 
 test('orphaned: >10 msgs and 0 matched commits', () => {
@@ -131,4 +169,74 @@ test('cost-per-commit computed when session matches commits', () => {
   );
   assert.ok(correlatedSessions[0].costPerCommit > 0);
   assert.equal(correlatedSessions[0].costPerCommit, 2.5 / 1);
+});
+
+test('attribution confidence: strong overlap + in-window commit is high', () => {
+  const session = mkSession({ filesWritten: ['src/foo.js'] });
+  const commit = mkCommit(); // 10:30, inside 10:00-11:00, 100% of added lines overlap
+  const { correlatedSessions } = correlateSessions(
+    [session],
+    { '/repo': { commits: [commit], defaultBranch: 'main' } }
+  );
+  assert.equal(correlatedSessions[0].attributionConfidence, 'high');
+});
+
+test('attribution confidence: strong overlap with post-session commit is medium, not low', () => {
+  // Agents never run `git commit` for the user — a commit landing after the
+  // session but inside the 2h buffer must not read low when the file
+  // evidence is overwhelming (the normal Codex flow).
+  const session = mkSession({ filesWritten: ['src/foo.js'] });
+  const commit = mkCommit({
+    timestamp: '2026-04-20T11:30:00.000Z',
+    timestampMs: new Date('2026-04-20T11:30:00.000Z').getTime(),
+  });
+  const { correlatedSessions } = correlateSessions(
+    [session],
+    { '/repo': { commits: [commit], defaultBranch: 'main' } }
+  );
+  assert.equal(correlatedSessions[0].commitCount, 1);
+  assert.equal(correlatedSessions[0].attributionConfidence, 'medium');
+});
+
+test('attribution confidence: partial overlap (20-50%) is medium regardless of timing', () => {
+  const session = mkSession({ filesWritten: ['src/foo.js'] });
+  const commit = mkCommit({
+    files: [
+      { path: 'src/foo.js', added: 30, deleted: 0 },
+      { path: 'src/bar.js', added: 70, deleted: 0 },
+    ],
+    totalAdded: 100,
+    totalDeleted: 0,
+  });
+  const { correlatedSessions } = correlateSessions(
+    [session],
+    { '/repo': { commits: [commit], defaultBranch: 'main' } }
+  );
+  assert.equal(correlatedSessions[0].attributionConfidence, 'medium');
+});
+
+test('attribution confidence: weak overlap (<20% of added lines) is low', () => {
+  const session = mkSession({ filesWritten: ['src/foo.js'] });
+  const commit = mkCommit({
+    files: [
+      { path: 'src/foo.js', added: 10, deleted: 0 },
+      { path: 'src/bar.js', added: 90, deleted: 0 },
+    ],
+    totalAdded: 100,
+    totalDeleted: 0,
+  });
+  const { correlatedSessions } = correlateSessions(
+    [session],
+    { '/repo': { commits: [commit], defaultBranch: 'main' } }
+  );
+  assert.equal(correlatedSessions[0].attributionConfidence, 'low');
+});
+
+test('attribution confidence: null when no commits matched', () => {
+  const session = mkSession({ filesWritten: ['src/foo.js'] });
+  const { correlatedSessions } = correlateSessions(
+    [session],
+    { '/repo': { commits: [], defaultBranch: 'main' } }
+  );
+  assert.equal(correlatedSessions[0].attributionConfidence, null);
 });
