@@ -8,6 +8,7 @@ import {
   calculateCostBreakdown,
   getModelFamily,
   getPricingTier,
+  isReadOnlyCommand,
   isVerificationCommand,
   PRICING,
   parseAllProjects,
@@ -194,4 +195,91 @@ test('toRelativePath strips repo prefix and handles worktrees', () => {
   assert.equal(toRelativePath('/other/path/file.js', '/not-a-match'), 'file.js');
   // No absolute path
   assert.equal(toRelativePath(null, '/repo'), null);
+});
+
+test('toRelativePath suffix-matches the repo folder when the recorded cwd is a stale alias', () => {
+  // Live case: cwd logged under GitHub/ (dead) while files landed under
+  // GitHub.nosync/ — the prefix check fails but the repo folder name matches.
+  assert.equal(
+    toRelativePath(
+      '/Users/me/Documents/GitHub.nosync/Codelens-AI/src/codex-parser.js',
+      '/Users/me/Documents/GitHub/Codelens-AI'
+    ),
+    'src/codex-parser.js'
+  );
+  // lastIndexOf picks the innermost same-named folder → shortest relative path
+  assert.equal(
+    toRelativePath('/data/proj/vendor/proj/src/x.js', '/elsewhere/proj'),
+    'src/x.js'
+  );
+  // No same-named folder anywhere in the path → basename fallback
+  assert.equal(
+    toRelativePath('/Users/me/other-repo/src/file.js', '/Users/me/Documents/GitHub/Codelens-AI'),
+    'file.js'
+  );
+});
+
+test('isReadOnlyCommand classifies read-only inspection commands', () => {
+  assert.equal(isReadOnlyCommand('cat package.json'), true);
+  assert.equal(isReadOnlyCommand('ls -la src/'), true);
+  assert.equal(isReadOnlyCommand('rg -n "foo" src/'), true);
+  assert.equal(isReadOnlyCommand('grep -r foo .'), true);
+  assert.equal(isReadOnlyCommand('find . -name "*.js"'), true);
+  assert.equal(isReadOnlyCommand('head -50 file.js'), true);
+  assert.equal(isReadOnlyCommand('wc -l src/*.js'), true);
+  assert.equal(isReadOnlyCommand('echo hello'), true);
+  assert.equal(isReadOnlyCommand('printenv PATH'), true);
+  // cd/env-var prefixes are stripped, same as isVerificationCommand
+  assert.equal(isReadOnlyCommand('cd /repo && cat file.js'), true);
+  assert.equal(isReadOnlyCommand('FOO=bar env'), true);
+  // sed only reads with an explicit -n and never with an in-place flag
+  assert.equal(isReadOnlyCommand("sed -n '1,20p' file.js"), true);
+  assert.equal(isReadOnlyCommand("sed -i '' 's/a/b/' file.js"), false);
+  assert.equal(isReadOnlyCommand("sed -n -i.bak 's/a/b/' file.js"), false);
+  assert.equal(isReadOnlyCommand("sed 's/a/b/' file.js"), false);
+});
+
+test('isReadOnlyCommand is conservative: writes and ambiguity are not read-only', () => {
+  assert.equal(isReadOnlyCommand('rm -rf dist'), false);
+  assert.equal(isReadOnlyCommand('npm test'), false);
+  assert.equal(isReadOnlyCommand('git status'), false);
+  assert.equal(isReadOnlyCommand('node script.js'), false);
+  assert.equal(isReadOnlyCommand('awk "{print $1}" file'), false);
+  assert.equal(isReadOnlyCommand(''), false);
+  assert.equal(isReadOnlyCommand(null), false);
+  assert.equal(isReadOnlyCommand(undefined), false);
+});
+
+test('readOnlyBashCalls counts read-only Bash commands without changing totalBashCalls', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codelens-readonly-'));
+  try {
+    const proj = path.join(root, 'proj');
+    mkdirSync(proj, { recursive: true });
+    const sid = 'aaaaaaaa-1111-2222-3333-555555555555';
+    const now = new Date().toISOString();
+    const bash = (id, command) => ({
+      type: 'assistant', requestId: id, timestamp: now,
+      message: {
+        model: 'claude-sonnet-5',
+        usage: { input_tokens: 10, output_tokens: 5 },
+        content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }],
+      },
+    });
+    const lines = [
+      { type: 'user', sessionId: sid, cwd: '/tmp/x', gitBranch: 'main', timestamp: now, message: { content: [{ type: 'text', text: 'go' }] } },
+      bash('t1', 'cat src/index.js'),
+      bash('t2', 'npm test'),
+      bash('t3', "sed -i '' 's/a/b/' src/index.js"),
+    ];
+    writeFileSync(path.join(proj, sid + '.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions } = await parseAllProjects(root, 30);
+    const s = sessions.find(x => x.sessionId === sid);
+    assert.ok(s, 'session should be parsed');
+    assert.equal(s.totalBashCalls, 3, 'totalBashCalls semantics unchanged');
+    assert.equal(s.verificationBashCalls, 1);
+    assert.equal(s.readOnlyBashCalls, 1, 'only cat is read-only');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

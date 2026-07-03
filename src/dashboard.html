@@ -2377,6 +2377,16 @@ function familyLabel(f) {
   const special = { gpt: 'GPT', codex: 'Codex', 'o-series': 'o-series', unknown: 'Unknown' };
   return special[f] || f.charAt(0).toUpperCase() + f.slice(1);
 }
+// Normalize a model id to its base id: strip billing markers
+// ([fast]/[us]/[long]/[1m]), a trailing API date suffix, and '-latest' — the
+// same forms the pricing path strips — so ids that differ only by billing tier
+// or snapshot compare equal.
+function modelBaseId(id) {
+  return String(id)
+    .replace(/\[fast\]|\[us\]|\[long\]|\[1m\]/g, '')
+    .replace(/-\d{4}-\d{2}-\d{2}$/, '')
+    .replace(/-latest$/, '');
+}
 // A family label ('GPT') is only useful when it's grouping more than one
 // real model. subModels keys can differ only by a billing-tier suffix
 // ('gpt-5.5' vs 'gpt-5.5[long]' for long-context requests) — those are the
@@ -2384,7 +2394,7 @@ function familyLabel(f) {
 // show its real name instead of the generic family bucket it happens to be in.
 function modelDisplayLabel(breakdown, family) {
   const subs = Object.keys(breakdown[family]?.subModels || {});
-  const bases = [...new Set(subs.map(id => id.replace(/\[fast\]|\[us\]|\[long\]/g, '')))];
+  const bases = [...new Set(subs.map(modelBaseId))];
   return bases.length === 1 ? formatModelName(bases[0]) : familyLabel(family);
 }
 let DATA = null;
@@ -2399,7 +2409,12 @@ const SOURCE_META = {
   claude: { label: 'Claude Code', accent: '--accent-orange' },
   codex: { label: 'OpenAI Codex', accent: '--accent-cyan' },
 };
-let currentSource = localStorage.getItem('codelens-source') || 'all';
+// Deep links win over the remembered choice: ?source=claude|codex|all selects
+// the tab directly (anything else falls through to localStorage, then 'all').
+const urlSource = new URLSearchParams(location.search).get('source');
+let currentSource = (urlSource === 'all' || urlSource === 'claude' || urlSource === 'codex')
+  ? urlSource
+  : localStorage.getItem('codelens-source') || 'all';
 
 function hasMultipleSources() {
   const s = DATA && DATA.meta && DATA.meta.sources;
@@ -2441,6 +2456,12 @@ window.switchSource = async function(source) {
     DATA = fresh;
     currentSource = DATA.meta.source || 'all';
     localStorage.setItem('codelens-source', currentSource);
+    // Keep the URL shareable: reflect the active tab in ?source= (dropped for
+    // the default 'all' view) without adding history entries.
+    const url = new URL(location.href);
+    if (currentSource === 'all') url.searchParams.delete('source');
+    else url.searchParams.set('source', currentSource);
+    history.replaceState(null, '', url);
     // Full re-render: re-arm the value animations and scroll-reveal observers
     // (same as refresh), or sections below the fold would stay hidden.
     initialRenderDone = false;
@@ -2724,7 +2745,7 @@ function render() {
         <div class="chart-container"><canvas id="chart-tools"></canvas></div>
       </div>
       <div class="chart-card">
-        <h3>Cost per Commit by Model <i class="info-tip" data-tip="Compare how much each model costs per commit. Lower blue bars = better value. Purple bars show commit volume for confidence. Use this to decide which model to use for different tasks.">i</i></h3>
+        <h3>Cost per Commit by Model <i class="info-tip" data-tip="Average cost per commit for each model family — one bar per family, colored to match the model chart. Lower = better value. The commit count under each label is the confidence signal: an average over 1–2 commits is low-confidence. Use this to decide which model to use for different tasks.">i</i></h3>
         <div class="chart-container"><canvas id="chart-model-efficiency"></canvas></div>
       </div>
       <div class="chart-card">
@@ -2801,7 +2822,7 @@ function renderHeroStats(s) {
   const scoreDeg = Math.round(es.score * 3.6);
   return `<div class="stats-section">
     <h2>Performance Overview <i class="info-tip" data-tip="High-level metrics for your AI coding sessions — cost, output, efficiency, and overall score.">i</i></h2>
-    ${s.pricingEstimatedPct > 0 ? `<div style="margin:0 0 14px;padding:10px 14px;border-radius:10px;background:rgba(196,132,11,0.12);border:1px solid rgba(196,132,11,0.3);font-size:0.8rem;color:var(--text-secondary);">⚠️ ~${s.pricingEstimatedPct}% of the cost above is <strong>estimated</strong> — some sessions used a model with no known pricing and were billed at the provider fallback rate.</div>` : ''}
+    ${s.pricingEstimatedPct > 0 ? `<div style="margin:0 0 14px;padding:10px 14px;border-radius:10px;background:rgba(196,132,11,0.12);border:1px solid rgba(196,132,11,0.3);font-size:0.8rem;color:var(--text-secondary);">⚠️ ~${s.pricingEstimatedPct}% of the cost above is <strong>estimated</strong> — some sessions used a model with no published API price; their spend is a best-effort estimate (billed at a comparable model's rate or the provider fallback rate).</div>` : ''}
     <div class="hero-stats">
       <div class="hero-stats-left">
         <div class="stat-card glow cost-card">
@@ -2905,11 +2926,19 @@ function renderAttribution(s) {
   const totalCommits = c.aiMatched + c.organic;
   if (totalCommits === 0) return '';
   const bc = c.byConfidence;
+  // On a per-agent tab, "no matched session" includes commits the OTHER
+  // agent's sessions claimed — those are AI work, not manual. Split them out
+  // when the server reports the count (absent on older payloads and always 0
+  // on the all view, where the plain organic segment is correct).
+  const otherAgentCommits = (DATA.meta.source || 'all') !== 'all'
+    ? Math.min(c.organic, DATA.meta.otherAgentClaimedCommits || 0)
+    : 0;
   const segs = [
     { label: 'High-confidence AI', val: bc.high, color: 'var(--accent-green)' },
     { label: 'Medium', val: bc.medium, color: 'var(--accent-orange)' },
     { label: 'Low-confidence', val: bc.low, color: 'var(--accent-red)' },
-    { label: 'Organic (manual)', val: c.organic, color: 'var(--text-muted)' },
+    ...(otherAgentCommits > 0 ? [{ label: 'Other agent (AI)', val: otherAgentCommits, color: 'var(--accent-purple)' }] : []),
+    { label: 'Organic (manual)', val: c.organic - otherAgentCommits, color: 'var(--text-muted)' },
   ];
   const pcts = pctTo100(segs.map(x => x.val));
   const segHtml = segs.map((x, i) => x.val > 0 ? `<div class="seg" style="width:${pcts[i]}%;background:${x.color};" title="${x.label}: ${x.val} commits"></div>` : '').join('');
@@ -2952,6 +2981,7 @@ function renderPlan(s) {
     'codex-pro100': 'ChatGPT Pro 5× ($100/mo)', 'codex-pro': 'ChatGPT Pro 20× ($200/mo)',
     'codex-business': 'ChatGPT Business monthly ($25/user/mo)',
     'codex-business-annual': 'ChatGPT Business annual ($20/user/mo)',
+    'codex-team': 'ChatGPT Team ($25/user/mo)',
     combined: 'Combined plans ($' + p.monthlyCost + '/mo)',
     custom: '$' + p.monthlyCost + '/mo',
   }[p.name] || ('$' + p.monthlyCost + '/mo');
@@ -3112,6 +3142,11 @@ function renderTokenFunnel(t) {
   // Display-friendly percentages: show "< 0.1%" instead of "0.0%" when value exists but rounds down
   const fmtPct = (raw, val) => (raw === '0.0' && val > 0) ? '< 0.1' : raw;
 
+  // Codex has no cache-write concept (cacheCreation is always 0 there) — a
+  // permanent "Cache Write 0 (0.0%)" entry would imply it's a thing that
+  // could happen. Only show the segment/legend when writes exist.
+  const hasCacheWrite = t.funnel.cacheCreation > 0;
+
   const wasteHigh = parseFloat(pOrph) > 25;
 
   return `<div class="token-funnel">
@@ -3127,13 +3162,13 @@ function renderTokenFunnel(t) {
           <div class="segment" style="width:${pInput}%;background:var(--accent-blue);" title="Input: ${formatTokens(t.funnel.input)}">${parseFloat(pInput) > 8 ? pInput + '%' : ''}</div>
           <div class="segment" style="width:${pOutput}%;background:var(--accent-purple);" title="Output: ${formatTokens(t.funnel.output)}">${parseFloat(pOutput) > 8 ? pOutput + '%' : ''}</div>
           <div class="segment" style="width:${pCacheRead}%;background:var(--accent-cyan);" title="Cache Read: ${formatTokens(t.funnel.cacheRead)}">${parseFloat(pCacheRead) > 8 ? pCacheRead + '%' : ''}</div>
-          <div class="segment" style="width:${pCacheCreate}%;background:var(--accent-orange);" title="Cache Write: ${formatTokens(t.funnel.cacheCreation)}">${parseFloat(pCacheCreate) > 8 ? pCacheCreate + '%' : ''}</div>
+          ${hasCacheWrite ? `<div class="segment" style="width:${pCacheCreate}%;background:var(--accent-orange);" title="Cache Write: ${formatTokens(t.funnel.cacheCreation)}">${parseFloat(pCacheCreate) > 8 ? pCacheCreate + '%' : ''}</div>` : ''}
         </div>
         <div class="funnel-legend">
           <span><span class="dot" style="background:var(--accent-blue);"></span>Input ${formatTokens(t.funnel.input)} (${fmtPct(pInput, t.funnel.input)}%)</span>
           <span><span class="dot" style="background:var(--accent-purple);"></span>Output ${formatTokens(t.funnel.output)} (${fmtPct(pOutput, t.funnel.output)}%)</span>
           <span><span class="dot" style="background:var(--accent-cyan);"></span>Cache Read ${formatTokens(t.funnel.cacheRead)} (${fmtPct(pCacheRead, t.funnel.cacheRead)}%)</span>
-          <span><span class="dot" style="background:var(--accent-orange);"></span>Cache Write ${formatTokens(t.funnel.cacheCreation)} (${fmtPct(pCacheCreate, t.funnel.cacheCreation)}%)</span>
+          ${hasCacheWrite ? `<span><span class="dot" style="background:var(--accent-orange);"></span>Cache Write ${formatTokens(t.funnel.cacheCreation)} (${fmtPct(pCacheCreate, t.funnel.cacheCreation)}%)</span>` : ''}
         </div>
       </div>
 
@@ -3184,6 +3219,14 @@ function renderAutonomySection(am) {
     bd.velocityScore * 0.35,
   ]);
 
+  // Each agent has its own tool vocabulary — name the right one per tab, and
+  // on the mixed view say each agent is measured against its own tool set.
+  const toolbeltTip = {
+    claude: 'How many distinct tools (Read, Write, Edit, Bash, Grep, Glob, etc.) the agent uses, as a share of the common tool set.',
+    codex: 'How many distinct tools (shell, apply_patch, web_search, update_plan, write_stdin, etc.) the agent uses, as a share of the common tool set.',
+    all: 'How many distinct tools the agents use — each agent is measured against its own tool set (Claude Code: Read, Write, Edit, Bash… OpenAI Codex: shell, apply_patch, web_search…).',
+  }[(DATA.meta.source || 'all')] + ' A descriptor of tool variety — not part of the autonomy score, since a focused session that needs few tools isn\'t less autonomous.';
+
   return `<div class="autonomy-section">
     <h2>Agent Autonomy <i class="info-tip" data-tip="How independently your AI agent works. The score blends autopilot ratio (actions per prompt), self-healing (test/lint usage), and commit efficiency. Toolbelt coverage is shown for context but is not part of the score.">i</i></h2>
     <div class="autonomy-layout">
@@ -3206,15 +3249,15 @@ function renderAutonomySection(am) {
           </div>
           <div class="auto-metric">
             <div class="metric-header">
-              <span class="metric-name">Self-Heal Score <i class="info-tip" data-tip="Percentage of Bash commands that are tests, lints, or type checks. Higher means the agent verifies its own work.">i</i></span>
+              <span class="metric-name">Self-Heal Score <i class="info-tip" data-tip="Percentage of state-changing shell commands that are tests, lints, or type checks — read-only inspection (cat, rg, ls) is excluded from the denominator. Higher means the agent verifies its own work.">i</i></span>
             </div>
             <div class="metric-value" style="color: var(--accent-green);">${am.selfHealScore}%</div>
             <div class="metric-bar"><div class="fill" style="width: ${am.selfHealScore}%; background: var(--accent-green);"></div></div>
-            <div class="metric-sub">${am.totalVerificationCalls} of ${am.totalBashCalls} bash calls were tests/lints</div>
+            <div class="metric-sub">${am.totalVerificationCalls} of ${am.totalBashCalls} shell calls were tests/lints</div>
           </div>
           <div class="auto-metric">
             <div class="metric-header">
-              <span class="metric-name">Toolbelt Coverage <i class="info-tip" data-tip="How many distinct tools (Read, Write, Edit, Bash, Grep, Glob, etc.) the agent uses, as a share of the common tool set. A descriptor of tool variety — not part of the autonomy score, since a focused session that needs few tools isn't less autonomous.">i</i></span>
+              <span class="metric-name">Toolbelt Coverage <i class="info-tip" data-tip="${toolbeltTip}">i</i></span>
             </div>
             <div class="metric-value" style="color: var(--accent-purple);">${am.toolbeltCoverage}%</div>
             <div class="metric-bar"><div class="fill" style="width: ${am.toolbeltCoverage}%; background: var(--accent-purple);"></div></div>
@@ -3273,7 +3316,7 @@ function renderCacheEfficiency(t) {
       <div class="survival-bar"><div class="fill" style="width: ${hitRate}%; background: ${gradient};"></div></div>
       <div class="survival-stats">
         <div><span>${formatTokens(t.totalCacheReadTokens)}</span> tokens from cache</div>
-        <div><span>${formatTokens(t.totalInputTokens + t.totalCacheCreationTokens)}</span> fresh input tokens (incl. cache writes)</div>
+        <div><span>${formatTokens(t.totalInputTokens + t.totalCacheCreationTokens)}</span> fresh input tokens${t.totalCacheCreationTokens > 0 ? ' (incl. cache writes)' : ''}</div>
         <div><span style="color:var(--accent-cyan);">$${t.cacheSavingsDollars.toFixed(2)}</span> vs. uncached pricing</div>
         <div><span style="color:${accentColor};">${hitRate}%</span> cache hit rate</div>
       </div>
@@ -3304,12 +3347,12 @@ function renderSessionsTable(sessions) {
           <tr>
             <th onclick="sortTable('startTime')" class="${sortCol === 'startTime' ? 'sorted' : ''}">Date${thArrow('startTime')} <i class="info-tip" data-tip="Session start time in your local timezone. Multi-day sessions show an arrow (↳) with the end date below.">i</i></th>
             <th onclick="sortTable('projectName')" class="${sortCol === 'projectName' ? 'sorted' : ''}">Project${thArrow('projectName')}</th>
-            <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')} <i class="info-tip" data-tip="Primary model used in the session, then any additional models. For Claude Code these '(sub)' models are subagents spawned for background tasks; for OpenAI Codex they are mid-session model switches.">i</i></th>
+            <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')} <i class="info-tip" data-tip="Primary model used in the session, then any additional models. For Claude Code these '(sub)' models are subagents spawned for background tasks; for OpenAI Codex they are mid-session model switches or long-context billing tiers.">i</i></th>
             <th onclick="sortTable('msgCount')" class="${sortCol === 'msgCount' ? 'sorted' : ''}">Msgs${thArrow('msgCount')} <i class="info-tip" data-tip="Total messages in the session (your messages + agent responses).">i</i></th>
             <th onclick="sortTable('autopilotRatio')" class="${sortCol === 'autopilotRatio' ? 'sorted' : ''}">Autopilot${thArrow('autopilotRatio')} <i class="info-tip" data-tip="Agent responses per user message. Higher = more autonomous. 5x is excellent.">i</i></th>
             <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')} <i class="info-tip" data-tip="Estimated cost from token usage at the provider's published API pricing (Anthropic for Claude, OpenAI for Codex). Includes input, output, and cache tokens at provider/model-specific rates, plus web search fees and premium billing markers where applicable. For sessions that started before the analyzed window, only in-window usage is counted.">i</i></th>
             <th onclick="sortTable('commitCount')" class="${sortCol === 'commitCount' ? 'sorted' : ''}">Commits${thArrow('commitCount')} <i class="info-tip" data-tip="Git commits that touch files the agent edited in this session. Falls back to time-window for chat-only sessions. The colored dot shows attribution confidence: green = high, amber = medium, red = low (e.g. time-only match).">i</i></th>
-            <th onclick="sortTable('linesAdded')" class="${sortCol === 'linesAdded' ? 'sorted' : ''}">Lines${thArrow('linesAdded')} <i class="info-tip" data-tip="Lines added / lines deleted in matched commits.">i</i></th>
+            <th onclick="sortTable('linesAdded')" class="${sortCol === 'linesAdded' ? 'sorted' : ''}">Lines${thArrow('linesAdded')} <i class="info-tip" data-tip="Lines credited to the agent in matched commits — only lines in files this session edited. Expanded commit rows show each commit's full totals.">i</i></th>
             <th>Grade <i class="info-tip" data-tip="Session efficiency: A = great ROI, B = good, C = average, D = poor, F = no commits or very high cost.">i</i></th>
           </tr>
         </thead>
@@ -3326,8 +3369,12 @@ function renderSessionsTable(sessions) {
               ? `<span title="${srcMeta.label}" style="display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;vertical-align:middle;background:var(${srcMeta.accent});opacity:0.75;"></span>`
               : '';
             const primaryName = formatModelName(s.model || 'unknown');
+            // Compare base ids, not raw keys: 'gpt-5.5[long]' or a dated
+            // snapshot of the primary model is a billing bucket of the same
+            // model, not an extra model — listing it as one is misleading.
+            const primaryBase = modelBaseId(s.model || 'unknown');
             const subModels = Object.keys(s.modelBreakdown || {})
-              .filter(m => m !== s.model)
+              .filter(m => m !== s.model && modelBaseId(m) !== primaryBase)
               .map(formatModelName)
               .filter(Boolean);
             // For Claude, extra models are subagents; for Codex they're
@@ -3379,6 +3426,9 @@ function renderSessionsTable(sessions) {
 function getSortValue(session, col) {
   if (col === 'cost.totalCost') return session.cost?.totalCost ?? 0;
   if (col === 'msgCount') return (session.userMessageCount || 0) + (session.assistantMessageCount || 0);
+  // Sort by the displayed name, not the raw id: raw ids order differently than
+  // what's on screen, and a null model would poison the string comparator.
+  if (col === 'model') return formatModelName(session.model || 'unknown');
   return session[col];
 }
 
@@ -3391,7 +3441,8 @@ function formatModelName(modelId) {
   if (modelId.includes('[fast]')) suffix += ' (fast)';
   if (modelId.includes('[us]')) suffix += ' (us)';
   if (modelId.includes('[long]')) suffix += ' (long context)';
-  if (suffix) modelId = modelId.replace(/\[fast\]|\[us\]|\[long\]/g, '');
+  if (modelId.includes('[1m]')) suffix += ' (1m context)';
+  if (suffix) modelId = modelId.replace(/\[fast\]|\[us\]|\[long\]|\[1m\]/g, '');
   const lower = modelId.toLowerCase();
   // OpenAI models (Codex sessions): gpt-5.1-codex-max → GPT-5.1 Codex Max,
   // gpt-5-codex → GPT-5 Codex, codex-mini-latest → Codex Mini. o3 / o4-mini
@@ -3409,6 +3460,15 @@ function formatModelName(modelId) {
   // claude-opus-4-6 → Opus 4.6, claude-sonnet-4-5-20250929 → Sonnet 4.5,
   // claude-sonnet-5 → Sonnet 5, claude-fable-5 → Fable 5, claude-haiku-4-5-20251001 → Haiku 4.5
   const m = lower.replace('claude-', '');
+  // Legacy version-first ids put the version before the family:
+  // claude-3-5-sonnet-20241022 → Sonnet 3.5, claude-3-opus-20240229 → Opus 3.
+  // Without this they'd fall through to the family-first fallback as bare '3'.
+  const legacy = m.match(/^(\d+)(?:-(\d{1,2})(?!\d))?-(opus|sonnet|haiku)/);
+  if (legacy) {
+    const family = legacy[3].charAt(0).toUpperCase() + legacy[3].slice(1);
+    const version = legacy[2] ? legacy[1] + '.' + legacy[2] : legacy[1];
+    return family + ' ' + version + suffix;
+  }
   // Match a family followed by a version that's either major-minor (4-6) or a single major (5).
   // The minor is 1-2 digits not followed by another digit, so an 8-digit date suffix
   // (e.g. claude-sonnet-5-20260615) isn't mistaken for a minor version.
@@ -3468,7 +3528,15 @@ function initCharts() {
   Chart.defaults.plugins.legend.labels.padding = 16;
   Chart.defaults.plugins.legend.labels.font = bodyFont;
 
-  const dateLabel = d => new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  // With gap-filled daily data a sparse multi-year range (Sep 2025 → Jul 2026)
+  // shows two different 'Sep 14's — include the year whenever the range
+  // crosses a calendar-year boundary (dates are ISO 'YYYY-MM-DD' strings).
+  const spansYears = DATA.daily.length > 1
+    && DATA.daily[0].date.slice(0, 4) !== DATA.daily[DATA.daily.length - 1].date.slice(0, 4);
+  const dateLabelOpts = spansYears
+    ? { month: 'short', day: 'numeric', year: 'numeric' }
+    : { month: 'short', day: 'numeric' };
+  const dateLabel = d => new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, dateLabelOpts);
   const axisTitle = text => ({ display: true, text, color: T.secondary, font: { ...monoFont, size: 11, weight: '600' } });
 
   // Token Burn Rate — stacked daily bars, one axis. (Cumulative overlay was a
@@ -3741,7 +3809,7 @@ function initCharts() {
     data: {
       labels: modelEffLabels.map(m => [
         modelDisplayLabel(modelEff, m),
-        Math.round(modelEff[m].commits) + ' commits',
+        plural(Math.round(modelEff[m].commits), 'commit'),
       ]),
       datasets: [{
         label: 'Avg $/Commit',

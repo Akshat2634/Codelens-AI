@@ -255,7 +255,15 @@ function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics) {
       else if (d >= 15) headline += ` — ${d}% pricier than last week.`;
       else headline += ` — on par with last week.`;
     } else if (lastWeek.sessions === 0) {
-      headline += ` — first week of measured activity.`;
+      // "First week" only when nothing at all precedes this week's start — an
+      // agent used intermittently for months just has a quiet prior week.
+      const earliestActivityMs = Math.min(...correlatedSessions.map(s => {
+        const firstDay = Object.keys(s.dailyUsage || {}).sort()[0];
+        return firstDay ? Date.parse(firstDay + 'T12:00:00') : new Date(s.startTime).getTime();
+      }));
+      headline += earliestActivityMs >= thisStart
+        ? ` — first week of measured activity.`
+        : ` — no activity last week to compare.`;
     } else {
       headline += `.`;
     }
@@ -413,6 +421,15 @@ const KNOWN_TOOLS = [
   'WebFetch', 'WebSearch', 'NotebookEdit', 'NotebookRead', 'TodoWrite', 'Agent',
 ];
 const TOTAL_AVAILABLE_TOOLS = KNOWN_TOOLS.length; // 14
+// Codex CLI ships a much smaller toolbelt — measuring its sessions against the
+// Claude vocabulary structurally reads "narrow tool usage" for every session.
+const KNOWN_CODEX_TOOLS = [
+  'shell', 'apply_patch', 'update_plan', 'web_search', 'write_stdin',
+  'read_thread_terminal', 'request_user_input', 'view_image', 'tool_search',
+];
+// The shell tool's name has drifted across Codex CLI versions; collapse the
+// aliases so one logical tool can't count several times in the numerator.
+const CODEX_SHELL_ALIASES = new Set(['exec_command', 'container.exec', 'local_shell_call']);
 
 function computeAutonomyGrade(score) {
   if (score >= 80) return 'A';
@@ -428,14 +445,22 @@ function computeAutonomyMetrics(correlatedSessions, cutoffMs = 0) {
       ? Math.round((s.assistantMessageCount / s.userMessageCount) * 100) / 100
       : 0;
 
+    // Self-heal denominator excludes read-only shell calls (sed/rg/ls) —
+    // Codex routes file reading through the shell, which would structurally
+    // deflate the score. `|| 0` keeps sessions cached before the field existed.
+    const attemptedBashCalls = Math.max(1, (s.totalBashCalls || 0) - (s.readOnlyBashCalls || 0));
     const selfHealScore = s.totalBashCalls > 0
-      ? Math.round((s.verificationBashCalls / s.totalBashCalls) * 100)
+      ? Math.round(Math.min(1, s.verificationBashCalls / attemptedBashCalls) * 100)
       : 0;
 
-    const uniqueTools = Object.keys(s.toolCalls).length;
+    const isCodex = s.source === 'codex';
+    const uniqueTools = isCodex
+      ? new Set(Object.keys(s.toolCalls).map(t => (CODEX_SHELL_ALIASES.has(t) ? 'shell' : t))).size
+      : Object.keys(s.toolCalls).length;
+    const knownToolCount = isCodex ? KNOWN_CODEX_TOOLS.length : TOTAL_AVAILABLE_TOOLS;
     // Descriptor only (not scored): clamp at 100 since sessions can use more
     // distinct tools (MCP/custom/Task) than the fixed known-tool denominator.
-    const toolbeltCoverage = Math.min(100, Math.round((uniqueTools / TOTAL_AVAILABLE_TOOLS) * 100));
+    const toolbeltCoverage = Math.min(100, Math.round((uniqueTools / knownToolCount) * 100));
 
     const totalToolCalls = Object.values(s.toolCalls).reduce((sum, c) => sum + c, 0);
     // Tool calls are whole-session while commitCount is window-clipped — for a
@@ -456,8 +481,11 @@ function computeAutonomyMetrics(correlatedSessions, cutoffMs = 0) {
     : 0;
 
   const totalBash = correlatedSessions.reduce((s, c) => s + (c.totalBashCalls || 0), 0);
+  const totalReadOnly = correlatedSessions.reduce((s, c) => s + (c.readOnlyBashCalls || 0), 0);
   const totalVerif = correlatedSessions.reduce((s, c) => s + (c.verificationBashCalls || 0), 0);
-  const selfHealScore = totalBash > 0 ? Math.round((totalVerif / totalBash) * 100) : 0;
+  const selfHealScore = totalBash > 0
+    ? Math.round(Math.min(1, totalVerif / Math.max(1, totalBash - totalReadOnly)) * 100)
+    : 0;
 
   const toolbeltCoverage = perSession.length > 0
     ? Math.min(100, Math.round(perSession.reduce((s, a) => s + a.toolbeltCoverage, 0) / perSession.length))
@@ -619,18 +647,22 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
     candidates.push({
       priority: 1,
       type: 'warning',
-      text: `Only ${autonomyMetrics.selfHealScore}% of ${autonomyMetrics.totalBashCalls} bash commands were tests or lints — low self-healing.`,
+      text: `Only ${autonomyMetrics.selfHealScore}% of ${autonomyMetrics.totalBashCalls} shell commands were tests or lints — low self-healing.`,
     });
   } else if (autonomyMetrics && autonomyMetrics.selfHealScore >= 40 && autonomyMetrics.totalBashCalls > 10) {
     candidates.push({
       priority: 3,
       type: 'success',
-      text: `${autonomyMetrics.selfHealScore}% of bash commands were tests/lints — solid self-healing habit.`,
+      text: `${autonomyMetrics.selfHealScore}% of shell commands were tests/lints — solid self-healing habit.`,
     });
   }
 
-  // 3. Model cost efficiency — actionable comparison
-  const modelFamilies = Object.entries(modelBreakdown).filter(([, d]) => d.sessions > 0 && d.avgCostPerCommit);
+  // 3. Model cost efficiency — actionable comparison. One-commit samples
+  // produce absurd ratios, so both compared families need a minimum of
+  // commits before the insight fires.
+  const MIN_COMMITS_FOR_COST_COMPARE = 3;
+  const modelFamilies = Object.entries(modelBreakdown)
+    .filter(([, d]) => d.sessions > 0 && d.avgCostPerCommit && d.commits >= MIN_COMMITS_FOR_COST_COMPARE);
   if (modelFamilies.length > 1) {
     const sorted = [...modelFamilies].sort((a, b) => a[1].avgCostPerCommit - b[1].avgCostPerCommit);
     const best = sorted[0];
@@ -640,7 +672,9 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
       candidates.push({
         priority: 2,
         type: 'info',
-        text: `${capitalise(worst[0])} costs ${ratio.toFixed(1)}x more per commit than ${capitalise(best[0])}.`,
+        // "-family models" keeps the phrasing unambiguous when a family name
+        // collides with an agent name (e.g. "Codex" on the Codex tab).
+        text: `${capitalise(worst[0])}-family models cost ${ratio.toFixed(1)}x more per commit than ${capitalise(best[0])}-family models.`,
       });
     }
   }
@@ -839,6 +873,18 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
       cDay.linesAdded += added;
       cDay.linesDeleted += deleted;
       cDay.netLines += added - deleted;
+    }
+  }
+  // Gap-fill zero rows for every missing calendar day between the first and
+  // last active day — sparse data (a few active days across months) would
+  // otherwise render as an evenly-spaced, smoothly-interpolated fake trend on
+  // the timeline chart. Bounded by the --days window since active days are.
+  const activeDays = [...dailyMap.keys()].sort();
+  if (activeDays.length > 1) {
+    const lastMs = Date.parse(activeDays[activeDays.length - 1] + 'T12:00:00');
+    // Noon-anchored stepping absorbs DST hour shifts without skipping a date
+    for (let t = Date.parse(activeDays[0] + 'T12:00:00'); t <= lastMs; t += 24 * 3600 * 1000) {
+      ensureDay(toDateStr(t));
     }
   }
   const daily = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));

@@ -2,7 +2,7 @@ import { createReadStream, existsSync, readdirSync, readFileSync, statSync } fro
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import zlib from 'node:zlib';
-import { findGitRoot, isVerificationCommand, toRelativePath } from './claude-parser.js';
+import { findGitRoot, isReadOnlyCommand, isVerificationCommand, toRelativePath } from './claude-parser.js';
 
 // ── OpenAI Codex CLI session parser ──
 //
@@ -76,9 +76,11 @@ const CODEX_PRICING = [
   ['gpt-oss',             { input: 0,    cachedInput: 0,     output: 0 }],
   // Early Codex CLI models (2025 logs) + o-series siblings that would
   // otherwise be swallowed by a shorter prefix at the wrong rate
+  ['o4-mini-deep-research', { input: 2,  cachedInput: 0.50,  output: 8 }],
   ['o4-mini',             { input: 1.10, cachedInput: 0.275, output: 4.40 }],
   ['o3-pro',              { input: 20,   cachedInput: 5,     output: 80 }],
   ['o3-mini',             { input: 1.10, cachedInput: 0.55,  output: 4.40 }],
+  ['o3-deep-research',    { input: 10,   cachedInput: 2.50,  output: 40 }],
   ['o3',                  { input: 2,    cachedInput: 0.50,  output: 8 }], // post-2025-06-10 (80% cut); earlier dates tiered below
   ['o1-pro',              { input: 150,  cachedInput: 37.50, output: 600 }],
   ['o1-mini',             { input: 1.10, cachedInput: 0.55,  output: 4.40 }],
@@ -98,10 +100,12 @@ const PER_MIL = 1_000_000;
 // OpenAI web search is $10 per 1,000 calls; search content tokens are already
 // included in normal token_count events when they are billed.
 const WEB_SEARCH_COST_PER_REQUEST = 10 / 1000;
-// GPT-5.5/GPT-5.4 charge long-context rates once a SINGLE request's input
-// exceeds this many tokens (OpenAI bills per request, not per session). All
-// current long-context tiers share the 200K boundary.
-const LONG_CONTEXT_INPUT_TOKENS = 200_000;
+// GPT-5.5/GPT-5.4 charge long-context rates only when a SINGLE request's
+// input EXCEEDS 272K tokens (OpenAI bills per request, not per session).
+// 272K is those models' standard input cap — the long tier exists for their
+// 1M-context capability, and real Codex CLI rollouts report a
+// model_context_window below 272K, so no default request can cross this.
+const LONG_CONTEXT_INPUT_TOKENS = 272_000;
 // Sentinel day-bucket for usage with no resolvable timestamp; resolved to the
 // session's earliest real day after parsing (mirrors claude-parser).
 const UNBUCKETED_DAY = '__unbucketed__';
@@ -124,7 +128,7 @@ function normalizeCodexModelId(modelName) {
 function useLongContextPricing(modelName, price, requestInputTokens = 0) {
   if (!price?.longContext) return false;
   return String(modelName || '').toLowerCase().includes('[long]')
-    || requestInputTokens >= LONG_CONTEXT_INPUT_TOKENS;
+    || requestInputTokens > LONG_CONTEXT_INPUT_TOKENS;
 }
 
 function billingModelName(modelName, requestInputTokens = 0) {
@@ -252,6 +256,7 @@ function createEmptyCodexSession(sessionId) {
     bashCommands: [],
     totalBashCalls: 0,
     verificationBashCalls: 0,
+    readOnlyBashCalls: 0,
     estimatedCost: 0,
     cacheSavingsDollars: 0,
     codexPlanType: null,
@@ -293,6 +298,7 @@ function trackShellCommand(session, command) {
   const isVerif = isVerificationCommand(command);
   session.totalBashCalls++;
   if (isVerif) session.verificationBashCalls++;
+  if (isReadOnlyCommand(command)) session.readOnlyBashCalls++;
   session.bashCommands.push({ command: command.slice(0, 200), isVerification: isVerif });
 }
 
@@ -315,7 +321,7 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
   let agentMessages = 0;
   let itemAssistantMessages = 0;
   let tokenCountResponses = 0;
-  const seenUsage = new Set(); // exact-duplicate token events (replays) are skipped
+  const seenUsage = new Map(); // delta-key -> cumulative-total key; re-logged token events are skipped
   const seenWebSearch = new Set(); // web_search_call ids already billed (replays)
   // Subagent rollouts (thread_spawn) REPLAY the parent's entire history,
   // re-timestamped into the spawn second — counting those events inflates
@@ -504,18 +510,32 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
             prevTotal = cur;
           }
           if (delta) {
-            // Exact-duplicate events appear when Codex re-logs the same
-            // completed turn's usage (branched threads, resumed sessions,
-            // or a heartbeat re-announcement seconds-to-minutes later with
-            // no new request in between) — count each once. The timestamp
-            // is deliberately NOT part of the key: real duplicates carry
-            // different timestamps, so identity is the reported usage
-            // itself. Only dedup timestamped events: without a timestamp,
-            // two identical deltas are more plausibly two real requests
-            // than a replay.
-            const dupKey = `${model}|${delta.input_tokens || 0}|${cachedOf(delta)}|${delta.output_tokens || 0}|${delta.reasoning_output_tokens || 0}`;
-            if (!ts || !seenUsage.has(dupKey)) {
-              seenUsage.add(dupKey);
+            const dIn = delta.input_tokens || 0;
+            const dCached = cachedOf(delta);
+            const dOut = delta.output_tokens || 0;
+            const dReason = delta.reasoning_output_tokens || 0;
+            // Context-compaction events carry an all-zero last_token_usage —
+            // no model request happened, so they must not count as an
+            // assistant action or enter the dedup map.
+            if (dIn === 0 && dCached === 0 && dOut === 0 && dReason === 0) continue;
+            // Duplicate events appear when Codex re-logs the same completed
+            // turn's usage (branched threads, resumed sessions, or a
+            // heartbeat re-announcement seconds-to-minutes later with no new
+            // request in between) — count each once. A re-log repeats the
+            // delta with the cumulative total UNCHANGED; an identical delta
+            // whose total ADVANCED is a genuine repeat request and must be
+            // counted. The timestamp is deliberately NOT part of the key:
+            // real duplicates carry different timestamps, so identity is the
+            // reported usage itself. Only dedup timestamped events: without
+            // a timestamp, two identical deltas are more plausibly two real
+            // requests than a replay.
+            const dupKey = `${model}|${dIn}|${dCached}|${dOut}|${dReason}`;
+            const total = info.total_token_usage;
+            const totalKey = total
+              ? `${total.input_tokens || 0}|${cachedOf(total)}|${total.output_tokens || 0}|${total.reasoning_output_tokens || 0}`
+              : '';
+            if (!ts || seenUsage.get(dupKey) !== totalKey) {
+              seenUsage.set(dupKey, totalKey);
               tokenCountResponses++;
               accumulateUsage(delta, ts, model);
             }
@@ -604,6 +624,11 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
           session.toolCalls.web_search = (session.toolCalls.web_search || 0) + 1;
           accumulateWebSearch(ts, currentModel || 'unknown');
         }
+      } else if (it === 'tool_search_call') {
+        // Tool-registry lookups (dynamic tool discovery) — a tool call with
+        // no per-call fee, unlike web_search_call.
+        session.toolCalls.tool_search = (session.toolCalls.tool_search || 0) + 1;
+        touchTimestamp(ts);
       }
     }
     // compacted / world_state / inter_agent_* / unknown types: ignore

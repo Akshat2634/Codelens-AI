@@ -202,7 +202,13 @@ function parseGitLog(raw) {
 // user's own parsed sessions (not a filesystem-wide search), and only acts
 // on an unambiguous match — a basename shared by more than one still-valid
 // path is left unresolved rather than guessed.
-export function resolveMovedRepoPaths(repoPaths) {
+//
+// A basename alone can still pair two unrelated repos that share a folder
+// name (api, backend, ...), so when the dead path's sessions recorded any
+// filesWritten (repo-relative), the alias is only accepted if at least one of
+// those paths is tracked by the candidate repo. Chat-only sessions have
+// nothing to corroborate with — the plain name match stands for them.
+export function resolveMovedRepoPaths(repoPaths, sessions = []) {
   const candidatesByName = new Map();
   for (const p of repoPaths) {
     if (!existsSync(path.join(p, '.git'))) continue;
@@ -211,16 +217,47 @@ export function resolveMovedRepoPaths(repoPaths) {
     candidatesByName.get(base).push(p);
   }
 
+  const writtenByRepoPath = new Map(); // repoPath -> Set of repo-relative filesWritten
+  for (const s of sessions) {
+    if (!s.repoPath || !s.filesWritten || s.filesWritten.length === 0) continue;
+    if (!writtenByRepoPath.has(s.repoPath)) writtenByRepoPath.set(s.repoPath, new Set());
+    for (const f of s.filesWritten) writtenByRepoPath.get(s.repoPath).add(f);
+  }
+
+  const trackedFilesCache = new Map(); // candidate repoPath -> Set of tracked paths (null on git failure)
+  const trackedFiles = (repo) => {
+    if (!trackedFilesCache.has(repo)) {
+      try {
+        const raw = execSync(
+          `git -C "${repo}" ls-files`,
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 50 * 1024 * 1024 }
+        );
+        trackedFilesCache.set(repo, new Set(raw.split('\n').filter(Boolean).map(unquoteGitPath)));
+      } catch {
+        trackedFilesCache.set(repo, null);
+      }
+    }
+    return trackedFilesCache.get(repo);
+  };
+
   const aliasMap = new Map(); // stale repoPath -> resolved repoPath
   const unresolved = [];
   for (const p of repoPaths) {
     if (existsSync(path.join(p, '.git'))) continue;
     const candidates = (candidatesByName.get(path.basename(p)) || []).filter(c => c !== p);
-    if (candidates.length === 1) {
-      aliasMap.set(p, candidates[0]);
-    } else {
+    if (candidates.length !== 1) {
       unresolved.push(p);
+      continue;
     }
+    const written = writtenByRepoPath.get(p);
+    if (written && written.size > 0) {
+      const tracked = trackedFiles(candidates[0]);
+      if (!tracked || ![...written].some(f => tracked.has(f))) {
+        unresolved.push(p);
+        continue;
+      }
+    }
+    aliasMap.set(p, candidates[0]);
   }
   return { aliasMap, unresolved };
 }

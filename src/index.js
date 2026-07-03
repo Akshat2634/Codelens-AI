@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { Command } from 'commander';
 import { DEFAULT_CLAUDE_DIR, DEFAULT_CODEX_DIR, deleteCache, getCodexStaleFiles, getStaleFiles, loadCache, saveCache } from './cache.js';
@@ -28,6 +28,9 @@ const icon = {
   err: `${c.red}✖${c.reset}`,
 };
 const fmt = (ms) => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+// Progress/banner output. main() reroutes this to stderr under --json so
+// stdout carries only the JSON document.
+let progress = console.log;
 
 async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null) {
   // Step 1: Parse sessions from every agent source (with caching)
@@ -44,7 +47,7 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
 
   if (forceRefresh) {
     deleteCache(cacheOptions);
-    console.log(`  ${icon.arrow} Cache cleared, performing full parse...`);
+    progress(`  ${icon.arrow} Cache cleared, performing full parse...`);
   }
 
   const cached = forceRefresh ? null : loadCache(cacheOptions);
@@ -69,7 +72,7 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
       claudeIndex = cached.fileIndex;
       parseNotes.push(`claude: ${claudeSessions.length} cached`);
     } else {
-      parseNotes.push(`claude: ${stale.newFiles.length} new, ${stale.modifiedFiles.length} updated`);
+      parseNotes.push(`claude: ${stale.newFiles.length} new, ${stale.modifiedFiles.length} updated, ${stale.deletedFiles.length} deleted`);
     }
     const staleCodex = getCodexStaleFiles(codexDir, cached.codexFileIndex || {}, cutoffMs);
     if (staleCodex.newFiles.length === 0 && staleCodex.modifiedFiles.length === 0 && staleCodex.deletedFiles.length === 0) {
@@ -77,7 +80,7 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
       codexIndex = cached.codexFileIndex || {};
       parseNotes.push(`codex: ${codexSessions.length} cached`);
     } else {
-      parseNotes.push(`codex: ${staleCodex.newFiles.length} new, ${staleCodex.modifiedFiles.length} updated`);
+      parseNotes.push(`codex: ${staleCodex.newFiles.length} new, ${staleCodex.modifiedFiles.length} updated, ${staleCodex.deletedFiles.length} deleted`);
     }
   }
 
@@ -95,7 +98,7 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   }
 
   const allParsed = [...claudeSessions, ...codexSessions];
-  console.log(`  ${icon.ok} Parsing sessions ${c.dim}── ${parseNotes.join(' · ')} (${fmt(Date.now() - startParse)})${c.reset}`);
+  progress(`  ${icon.ok} Parsing sessions ${c.dim}── ${parseNotes.join(' · ')} (${fmt(Date.now() - startParse)})${c.reset}`);
 
   // Save the cache as soon as parsing is done — even if the run then bails
   // (e.g. a --source filter that matches nothing), the parse work is kept.
@@ -119,7 +122,7 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   // codex repoPath left to alias to, but a Claude session for the same repo
   // (parsed in the same run) usually still has the current, correct path.
   const allRepoPaths = new Set(allParsed.map(s => s.repoPath).filter(Boolean));
-  const { aliasMap, unresolved } = resolveMovedRepoPaths([...allRepoPaths]);
+  const { aliasMap, unresolved } = resolveMovedRepoPaths([...allRepoPaths], allParsed);
   const analysisCache = {};
   const commitsByRepo = {};
   for (const repoPath of repoPathsSet) {
@@ -129,21 +132,21 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
     }
     commitsByRepo[repoPath] = analysisCache[analysisPath];
   }
-  console.log(`  ${icon.ok} Analyzing git repos ${c.dim}── ${repoPathsSet.size} repos (${fmt(Date.now() - startGit)})${c.reset}`);
+  progress(`  ${icon.ok} Analyzing git repos ${c.dim}── ${repoPathsSet.size} repos (${fmt(Date.now() - startGit)})${c.reset}`);
   const resolvedInView = [...repoPathsSet].filter(p => aliasMap.has(p));
   const unresolvedInView = unresolved.filter(p => repoPathsSet.has(p));
   if (resolvedInView.length > 0) {
-    console.log(`  ${icon.ok} Resolved ${resolvedInView.length} moved repo path(s) by folder name ${c.dim}(sessions recorded a path that no longer exists)${c.reset}`);
+    progress(`  ${icon.ok} Resolved ${resolvedInView.length} moved repo path(s) by folder name ${c.dim}(sessions recorded a path that no longer exists)${c.reset}`);
   }
   if (unresolvedInView.length > 0) {
-    console.log(`  ${icon.warn} ${c.yellow}${unresolvedInView.length} repo path(s) no longer exist and couldn't be auto-resolved — their sessions won't show commits:${c.reset} ${unresolvedInView.join(', ')}`);
+    progress(`  ${icon.warn} ${c.yellow}${unresolvedInView.length} repo path(s) no longer exist and couldn't be auto-resolved — their sessions won't show commits:${c.reset} ${unresolvedInView.join(', ')}`);
   }
 
   // Step 3: Correlate sessions with commits. All sources correlate together so
   // a commit is claimed by at most ONE session across agents — per-source views
   // then filter the correlated set, never re-attribute.
   const { correlatedSessions, organicCommits } = correlateSessions(sessions, commitsByRepo, cutoffMs);
-  console.log(`  ${icon.ok} Correlating sessions ${c.dim}── done${c.reset}`);
+  progress(`  ${icon.ok} Correlating sessions ${c.dim}── done${c.reset}`);
 
   // Step 4: Compute metrics — one payload over everything, plus a per-agent
   // view when more than one agent has sessions (drives the dashboard tabs).
@@ -152,17 +155,33 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
     claude: correlatedSessions.filter(s => (s.source || 'claude') === 'claude').length,
     codex: correlatedSessions.filter(s => s.source === 'codex').length,
   };
+  // Dominant plan tier the Codex rollouts self-report (rate_limits.plan_type)
+  // — a hint the dashboard can surface next to --codex-plan. Computed over all
+  // parsed codex sessions so it's stable across views and --source filters.
+  const planTypeCounts = new Map();
+  for (const s of codexSessions) {
+    if (s.codexPlanType) planTypeCounts.set(s.codexPlanType, (planTypeCounts.get(s.codexPlanType) || 0) + 1);
+  }
+  let codexPlanDetected = null;
+  for (const [planType, count] of planTypeCounts) {
+    if (codexPlanDetected === null || count > planTypeCounts.get(codexPlanDetected)) codexPlanDetected = planType;
+  }
   // organicCommits passed to a view must be "every in-window commit this view's
   // sessions did NOT claim", so reconciliation.commits.aiMatched + organic
   // always equals the window's commit count (the audit the attribution panel
   // promises). For the combined view that's the joint organic set; for a
   // per-agent view it also includes commits the OTHER agent claimed — from this
   // agent's ROI perspective those are code it didn't write.
-  const mkView = (subset, planConfig, sourceName, viewOrganic) => {
+  const mkView = (subset, planConfig, sourceName, viewOrganic, otherAgentClaimed = 0) => {
     const p = computeMetrics(subset, viewOrganic, commitsByRepo, days, planConfig);
     p.meta.source = sourceName;
     p.meta.sources = sourceCounts;
     p.meta.gitUser = gitUser;
+    p.meta.codexPlanDetected = codexPlanDetected;
+    // Per-agent views fold the OTHER agent's AI-claimed commits into their
+    // organic set (see viewOrganic above) — expose the folded count so the
+    // dashboard can label those commits as the other agent's, not manual.
+    p.meta.otherAgentClaimedCommits = otherAgentClaimed;
     return p;
   };
 
@@ -198,8 +217,8 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
     const isClaude = s => (s.source || 'claude') === 'claude';
     const codexClaimed = commitsClaimedBy(s => s.source === 'codex');
     const claudeClaimed = commitsClaimedBy(isClaude);
-    payloads.claude = mkView(correlatedSessions.filter(isClaude), planConfigs.claude, 'claude', [...organicCommits, ...codexClaimed]);
-    payloads.codex = mkView(correlatedSessions.filter(s => s.source === 'codex'), planConfigs.codex, 'codex', [...organicCommits, ...claudeClaimed]);
+    payloads.claude = mkView(correlatedSessions.filter(isClaude), planConfigs.claude, 'claude', [...organicCommits, ...codexClaimed], codexClaimed.length);
+    payloads.codex = mkView(correlatedSessions.filter(s => s.source === 'codex'), planConfigs.codex, 'codex', [...organicCommits, ...claudeClaimed], claudeClaimed.length);
   }
 
   return payloads;
@@ -220,16 +239,27 @@ async function main() {
     .option('--autonomy', 'print autonomy metrics table to stdout and exit')
     .option('--claude-dir <path>', 'override path to Claude Code projects directory (for testing/CI)')
     .option('--codex-dir <path>', 'override path to OpenAI Codex sessions directory (for testing/CI)')
-    .option('--source <agent>', 'analyze a single agent only: claude | codex')
+    .option('--source <agent>', 'analyze a single agent only: claude | codex | all')
     .option('--plan <tier>', 'Claude subscription mode — effective $/commit vs your flat plan: pro | max5 | max20')
     .option('--plan-cost <amount>', 'custom Claude monthly subscription cost in USD (overrides --plan)')
-    .option('--codex-plan <tier>', 'Codex/ChatGPT subscription mode: free | go | plus | pro100 | pro | business | business-annual')
+    .option('--codex-plan <tier>', 'Codex/ChatGPT subscription mode: free | go | plus | pro100 | pro | team | business | business-annual')
     .option('--codex-plan-cost <amount>', 'custom Codex monthly subscription cost in USD (overrides --codex-plan)');
 
   program.parse();
   const opts = program.opts();
+  if (opts.json) progress = console.error;
   const port = parseInt(opts.port, 10);
   const days = parseInt(opts.days, 10);
+  // Validate before any work: a bad --days would otherwise clobber the cache
+  // with days:NaN and die later with a cryptic "Invalid time value".
+  if (!/^\d+$/.test(String(opts.days)) || days < 1) {
+    console.error(`  ${icon.err} ${c.red}--days must be a positive integer, got "${opts.days}".${c.reset}`);
+    process.exit(1);
+  }
+  if (!/^\d+$/.test(String(opts.port)) || port < 1 || port > 65535) {
+    console.error(`  ${icon.err} ${c.red}--port must be an integer between 1 and 65535, got "${opts.port}".${c.reset}`);
+    process.exit(1);
+  }
 
   // Optional subscription "effective cost" mode, per agent.
   // Monthly USD: Anthropic plans / OpenAI ChatGPT plans (Codex is included in
@@ -253,29 +283,40 @@ async function main() {
   };
   // ChatGPT tiers (Codex is included in the plan): Free $0, Go $8, Plus $20,
   // Pro starts at $100 (5x) with a $200 20x tier, and Business is $20/seat/mo
-  // annually or $25/seat/mo monthly.
+  // annually or $25/seat/mo monthly. `team` is what real rollouts report in
+  // rate_limits.plan_type for business seats — priced as the monthly tier.
   const planConfigs = {
     claude: parsePlan(opts.plan, opts.planCost, { pro: 20, max5: 100, max20: 200 }, '--plan', ''),
-    codex: parsePlan(opts.codexPlan, opts.codexPlanCost, { free: 0, go: 8, plus: 20, pro100: 100, pro: 200, business: 25, 'business-annual': 20 }, '--codex-plan', 'codex-'),
+    codex: parsePlan(opts.codexPlan, opts.codexPlanCost, { free: 0, go: 8, plus: 20, pro100: 100, pro: 200, team: 25, business: 25, 'business-annual': 20 }, '--codex-plan', 'codex-'),
   };
 
-  const sourceFilter = opts.source ? String(opts.source).toLowerCase() : null;
+  // `all` is the no-filter default — the name every API route and doc uses.
+  let sourceFilter = opts.source ? String(opts.source).toLowerCase() : null;
+  if (sourceFilter === 'all') sourceFilter = null;
   if (sourceFilter && sourceFilter !== 'claude' && sourceFilter !== 'codex') {
-    console.error(`  ${icon.err} ${c.red}Unknown --source "${opts.source}".${c.reset} Use claude or codex.`);
+    console.error(`  ${icon.err} ${c.red}Unknown --source "${opts.source}".${c.reset} Use claude, codex, or all.`);
     process.exit(1);
   }
 
   const invokedAs = path.basename(process.argv[1]);
   if (invokedAs.includes('claude-roi')) {
-    console.log(`  ${icon.warn} ${c.yellow}claude-roi has been renamed to codelens-ai${c.reset}`);
-    console.log(`    Switch to: ${c.cyan}npx codelens-ai${c.reset}\n`);
+    progress(`  ${icon.warn} ${c.yellow}claude-roi has been renamed to codelens-ai${c.reset}`);
+    progress(`    Switch to: ${c.cyan}npx codelens-ai${c.reset}\n`);
   }
-  console.log(`${icon.dot} ${c.bold}${c.cyan}codelens-ai${c.reset} v${VERSION}\n`);
+  progress(`${icon.dot} ${c.bold}${c.cyan}codelens-ai${c.reset} v${VERSION}\n`);
 
   // Defaults live in cache.js so custom-dir runs get their own cache file.
   // Codex CLI stores rollout files under $CODEX_HOME/sessions (~/.codex by default).
   const claudeDir = opts.claudeDir ? path.resolve(opts.claudeDir) : DEFAULT_CLAUDE_DIR;
   const codexDir = opts.codexDir ? path.resolve(opts.codexDir) : DEFAULT_CODEX_DIR;
+  // An explicit override pointing nowhere is almost certainly a typo — but the
+  // other agent's default dir may still hold sessions, so warn without exiting.
+  if (opts.claudeDir && !existsSync(claudeDir)) {
+    console.error(`  ${icon.warn} ${c.yellow}--claude-dir does not exist:${c.reset} ${claudeDir}`);
+  }
+  if (opts.codexDir && !existsSync(codexDir)) {
+    console.error(`  ${icon.warn} ${c.yellow}--codex-dir does not exist:${c.reset} ${codexDir}`);
+  }
 
   const payloads = await buildPayload(claudeDir, codexDir, days, opts.project, opts.refresh, planConfigs, sourceFilter);
   if (payloads) {
@@ -286,11 +327,16 @@ async function main() {
 
   if (!payloads) {
     if (sourceFilter) {
-      console.log(`  ${icon.warn} ${c.yellow}No ${sourceFilter} sessions found in the last ${days} days.${c.reset}`);
-      console.log(`    Drop --source to analyze every agent, or check the session directory for ${sourceFilter}.`);
+      progress(`  ${icon.warn} ${c.yellow}No ${sourceFilter} sessions found in the last ${days} days.${c.reset}`);
+      progress(`    Drop --source to analyze every agent, or check ${sourceFilter === 'claude' ? claudeDir : codexDir}`);
     } else {
-      console.log(`  ${icon.warn} ${c.yellow}No AI coding agent sessions found.${c.reset}`);
-      console.log(`    Claude Code sessions are read from ~/.claude/projects/ and OpenAI Codex sessions from ~/.codex/sessions/`);
+      progress(`  ${icon.warn} ${c.yellow}No AI coding agent sessions found.${c.reset}`);
+      progress(`    Claude Code sessions are read from ${claudeDir} and OpenAI Codex sessions from ${codexDir}`);
+    }
+    if (opts.json) {
+      // Still emit a parseable document: the warning went to stderr above.
+      process.stdout.write('null', () => process.exit(0));
+      return;
     }
     process.exit(0);
   }
@@ -298,8 +344,10 @@ async function main() {
 
   // Output
   if (opts.json) {
-    process.stdout.write(JSON.stringify(payload, null, 2));
-    process.exit(0);
+    // stdout to a pipe is async — exiting inside write()'s same tick would
+    // truncate everything past the 64KB pipe buffer. Exit only once flushed.
+    process.stdout.write(JSON.stringify(payload, null, 2), () => process.exit(0));
+    return;
   }
 
   if (opts.autonomy) {
@@ -320,8 +368,10 @@ async function main() {
         .map(cmd => `${cmd.command} (${cmd.count})`).join(', ');
       console.log(`  Top Tests: ${top3}`);
     }
-    console.log('');
-    process.exit(0);
+    // Same flush-before-exit as --json: stdout writes are queued in order, so
+    // this final write's callback fires after every line above has flushed.
+    process.stdout.write('\n', () => process.exit(0));
+    return;
   }
 
   // Start server — pass a rebuild function so /api/refresh can re-run the pipeline

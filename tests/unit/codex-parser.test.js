@@ -122,6 +122,19 @@ test('sibling models are not swallowed by shorter prefixes at the wrong rate', (
   assert.ok(!oss.estimate, 'free local models are exact, not estimated');
 });
 
+test('deep-research models are not swallowed by the o3/o4-mini prefixes', () => {
+  // o3-deep-research is $10/$2.50/$40 — NOT the post-cut o3 rate ($2/$0.50/$8)
+  const o3dr = getCodexPricing('o3-deep-research');
+  assert.equal(o3dr.input, 10);
+  assert.equal(o3dr.cachedInput, 2.5);
+  assert.equal(o3dr.output, 40);
+  // o4-mini-deep-research is $2/$0.50/$8 — not the o4-mini rate
+  const o4dr = getCodexPricing('o4-mini-deep-research');
+  assert.equal(o4dr.input, 2);
+  assert.equal(o4dr.cachedInput, 0.5);
+  assert.equal(o4dr.output, 8);
+});
+
 test('calculateCodexCost: cached input billed at the cached rate, reasoning not double-billed', () => {
   // 1M fresh input + 1M output + 1M cached on gpt-5-codex: $1.25 + $10 + $0.125
   const cost = calculateCodexCost(1_000_000, 1_000_000, 1_000_000, 'gpt-5-codex');
@@ -162,14 +175,41 @@ test('long-context GPT-5.x Codex usage is priced at long-context rates', async (
       meta('long-context', iso(2)),
       turnContext(iso(2), 'gpt-5.5'),
       { timestamp: iso(2), type: 'event_msg', payload: { type: 'user_message', message: 'large repo analysis', kind: 'plain' } },
-      tokenCount(iso(1.9), usage(250000, 200000, 1000), usage(250000, 200000, 1000)),
+      tokenCount(iso(1.9), usage(300000, 200000, 1000), usage(300000, 200000, 1000)),
     ]);
 
     const { sessions } = await parseCodexSessions(root, 30);
     const s = sessions[0];
-    const expected = (50000 * 10 + 200000 * 1 + 1000 * 45) / 1e6;
+    const expected = (100000 * 10 + 200000 * 1 + 1000 * 45) / 1e6;
     assert.ok(Math.abs(s.cost.totalCost - expected) < 1e-9, `expected ${expected}, got ${s.cost.totalCost}`);
     assert.ok(s.modelBreakdown['gpt-5.5[long]'], 'long-context bucket should be visible in model breakdown');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('long-context boundary: exactly 272K input bills base rates, 272,001 bills long rates', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-lc-boundary-'));
+  try {
+    const t1 = iso(2);
+    const t2 = new Date(Date.parse(t1) + 60_000).toISOString();
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-boundary.jsonl', [
+      meta('lc-boundary', t1),
+      turnContext(t1, 'gpt-5.5'),
+      // 272,000 input is AT the standard cap — still base rates
+      tokenCount(t1, usage(272000, 0, 10), usage(272000, 0, 10)),
+      // one token over the cap — long-context rates
+      tokenCount(t2, usage(272001, 0, 20), usage(544001, 0, 30)),
+    ]);
+
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    assert.ok(s.modelBreakdown['gpt-5.5'], 'exactly-272K request stays in the base bucket');
+    assert.ok(s.modelBreakdown['gpt-5.5[long]'], '272,001-token request moves to the long bucket');
+    const baseCost = (272000 * 5 + 10 * 30) / 1e6;
+    const longCost = (272001 * 10 + 20 * 45) / 1e6;
+    assert.ok(Math.abs(s.modelBreakdown['gpt-5.5'].cost - baseCost) < 1e-9, `expected base ${baseCost}, got ${s.modelBreakdown['gpt-5.5'].cost}`);
+    assert.ok(Math.abs(s.modelBreakdown['gpt-5.5[long]'].cost - longCost) < 1e-9, `expected long ${longCost}, got ${s.modelBreakdown['gpt-5.5[long]'].cost}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -233,6 +273,25 @@ test('web-search fee lands in the same bucket as the model’s base tokens (no p
     // Tokens and the fee share the single 'gpt-5.5' bucket — no zero-token twin.
     assert.deepEqual(Object.keys(s.modelBreakdown), ['gpt-5.5']);
     assert.equal(s.modelBreakdown['gpt-5.5'].tokens, 1100);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('tool_search_call response items are counted as tool calls with no fee', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-tool-search-'));
+  try {
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-tsearch.jsonl', [
+      meta('tsearch', iso(2)),
+      turnContext(iso(2), 'gpt-5.5'),
+      { timestamp: iso(1.99), type: 'response_item', payload: { type: 'tool_search_call', id: 'ts-1', status: 'completed' } },
+      tokenCount(iso(1.9), usage(1000, 0, 100), usage(1000, 0, 100)),
+    ]);
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    assert.equal(s.toolCalls.tool_search, 1);
+    assert.equal(s.cost.serverToolCost, 0, 'tool search carries no per-call fee');
+    assert.equal(s.webSearchRequests, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -317,6 +376,64 @@ test('parses a modern envelope rollout: tokens, cost, files, commands, plan type
     // dailyUsage reconciles with session totals
     const dailyCost = Object.values(s.dailyUsage).reduce((a, d) => a + d.cost, 0);
     assert.ok(Math.abs(dailyCost - s.cost.totalCost) < 1e-9);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('filesWritten normalize to repo-relative paths when the recorded cwd is a stale alias', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-alias-'));
+  try {
+    // session_meta cwd is a DEAD alias of the repo root (findGitRoot finds
+    // nothing) while apply_patch bodies carry absolute paths under the
+    // differently-prefixed LIVE root — the live GitHub vs GitHub.nosync case.
+    const deadCwd = '/nonexistent-alias/GitHub/Codelens-AI';
+    const liveRoot = '/nonexistent-alias/GitHub.nosync/Codelens-AI';
+    const patch = (header) => `*** Begin Patch\n${header}\n@@\n*** End Patch`;
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-alias.jsonl', [
+      meta('alias', iso(2), { cwd: deadCwd }),
+      turnContext(iso(2), 'gpt-5.5'),
+      { timestamp: iso(2), type: 'event_msg', payload: { type: 'user_message', message: 'fix', kind: 'plain' } },
+      { timestamp: iso(1.99), type: 'response_item', payload: { type: 'custom_tool_call', name: 'apply_patch', call_id: 'a1', input: patch(`*** Update File: ${liveRoot}/src/codex-parser.js`) } },
+      { timestamp: iso(1.98), type: 'response_item', payload: { type: 'custom_tool_call', name: 'apply_patch', call_id: 'a2', input: patch(`*** Add File: ${liveRoot}/tests/unit/codex-parser.test.js`) } },
+      // relative path resolves against the dead cwd — must dedupe with the
+      // absolute live-root form of the same file
+      { timestamp: iso(1.97), type: 'response_item', payload: { type: 'custom_tool_call', name: 'apply_patch', call_id: 'a3', input: patch('*** Update File: src/codex-parser.js') } },
+      tokenCount(iso(1.9), usage(1000, 0, 100), usage(1000, 0, 100)),
+    ]);
+
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    assert.deepEqual(
+      [...s.filesWritten].sort(),
+      ['src/codex-parser.js', 'tests/unit/codex-parser.test.js'],
+      'all paths normalize to repo-relative with no bare-basename or duplicate entries'
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('readOnlyBashCalls counts read-only shell commands without changing totalBashCalls', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-readonly-'));
+  try {
+    const exec = (ts, id, cmd) => ({ timestamp: ts, type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: JSON.stringify({ cmd }), call_id: id } });
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-readonly.jsonl', [
+      meta('readonly', iso(2)),
+      turnContext(iso(2), 'gpt-5.5'),
+      exec(iso(1.99), 'r1', 'cat src/server.js'),
+      exec(iso(1.98), 'r2', 'npm test'),
+      // bash -lc wrapper is unwrapped before classification
+      { timestamp: iso(1.97), type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: JSON.stringify({ command: ['bash', '-lc', "sed -n '1,20p' src/server.js"] }), call_id: 'r3' } },
+      exec(iso(1.96), 'r4', 'rm -rf dist'),
+      tokenCount(iso(1.9), usage(1000, 0, 100), usage(1000, 0, 100)),
+    ]);
+
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    assert.equal(s.totalBashCalls, 4, 'totalBashCalls semantics unchanged');
+    assert.equal(s.verificationBashCalls, 1);
+    assert.equal(s.readOnlyBashCalls, 2, 'cat and sed -n are read-only; npm test and rm are not');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -409,6 +526,57 @@ test('duplicate token_count events with different timestamps are deduped', async
     assert.equal(s.totalInputTokens, 1000, 'same-value re-log must not be billed twice');
     assert.equal(s.cacheReadTokens, 1000);
     assert.equal(s.totalOutputTokens, 200);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('identical deltas whose cumulative total ADVANCED are genuine repeats, both counted', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-repeat-'));
+  try {
+    // Two requests that happen to report the same last_token_usage are only a
+    // re-log if the cumulative total is UNCHANGED — an advancing total proves a
+    // new request happened and must be billed.
+    const t1 = iso(2);
+    const t2 = new Date(Date.parse(t1) + 90_000).toISOString();
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T12-00-00-repeat.jsonl', [
+      meta('repeat', t1),
+      turnContext(t1, 'gpt-5.5'),
+      tokenCount(t1, usage(2000, 1000, 200), usage(2000, 1000, 200)),
+      tokenCount(t2, usage(2000, 1000, 200), usage(4000, 2000, 400)),
+    ]);
+
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    assert.equal(s.totalInputTokens, 2000, 'advancing total means a genuine repeat request');
+    assert.equal(s.cacheReadTokens, 2000);
+    assert.equal(s.totalOutputTokens, 400);
+    assert.equal(s.assistantMessageCount, 2, 'each real request is one assistant action');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('all-zero compaction token_count events do not count as assistant actions', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-compaction-'));
+  try {
+    const t1 = iso(2);
+    const t2 = new Date(Date.parse(t1) + 60_000).toISOString();
+    const t3 = new Date(Date.parse(t1) + 120_000).toISOString();
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T13-00-00-compact.jsonl', [
+      meta('compact', t1),
+      turnContext(t1, 'gpt-5.5'),
+      tokenCount(t1, usage(1000, 0, 100), usage(1000, 0, 100)),
+      // context compaction: all-zero last_token_usage, no model request
+      tokenCount(t2, usage(0, 0, 0, 0), usage(1000, 0, 100)),
+      tokenCount(t3, usage(500, 0, 50), usage(1500, 0, 150)),
+    ]);
+
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    assert.equal(s.assistantMessageCount, 2, 'the zero compaction event is not an assistant action');
+    assert.equal(s.totalInputTokens, 1500);
+    assert.equal(s.totalOutputTokens, 150);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -548,8 +716,8 @@ test('sessions produced are shape-compatible with claude-parser sessions', async
       'durationMinutes', 'totalInputTokens', 'totalOutputTokens', 'cacheCreationTokens',
       'cacheReadTokens', 'cost', 'model', 'modelBreakdown', 'toolCalls', 'filesWritten',
       'filesRead', 'userMessageCount', 'assistantMessageCount', 'bashCommands',
-      'totalBashCalls', 'verificationBashCalls', 'estimatedCost', 'cacheSavingsDollars',
-      'dailyUsage', 'source',
+      'totalBashCalls', 'verificationBashCalls', 'readOnlyBashCalls', 'estimatedCost',
+      'cacheSavingsDollars', 'dailyUsage', 'source',
     ]) {
       assert.ok(key in s, `missing session field: ${key}`);
     }

@@ -307,3 +307,166 @@ test('weeklyNarrative populated when this-week sessions exist', () => {
   assert.ok(labels.includes('Commits'));
   assert.ok(labels.includes('Spend'));
 });
+
+test('toolbelt coverage uses per-source vocabulary and collapses codex shell aliases', () => {
+  const claude = mkCorrelated({
+    sessionId: 'cl',
+    source: 'claude',
+    toolCalls: { Read: 5, Edit: 3, Bash: 2 },
+  });
+  const codex = mkCorrelated({
+    sessionId: 'cx',
+    source: 'codex',
+    toolCalls: { shell: 4, exec_command: 2, local_shell_call: 1, apply_patch: 3, update_plan: 1 },
+  });
+  const m = computeMetrics([claude, codex], [], {}, 30);
+  const bySession = Object.fromEntries(m.autonomyMetrics.perSession.map(a => [a.sessionId, a]));
+  // Claude: 3 unique of the 14-tool Claude vocabulary
+  assert.equal(bySession.cl.toolbeltCoverage, Math.round((3 / 14) * 100));
+  // Codex: shell/exec_command/local_shell_call collapse to one logical tool →
+  // 3 unique (shell, apply_patch, update_plan) of the 9-tool codex vocabulary
+  assert.equal(bySession.cx.toolbeltCoverage, Math.round((3 / 9) * 100));
+});
+
+test('toolbelt coverage caps at 100 when tools exceed the known vocabulary', () => {
+  const wide = mkCorrelated({
+    sessionId: 'w',
+    source: 'codex',
+    toolCalls: {
+      shell: 1, apply_patch: 1, update_plan: 1, web_search: 1, write_stdin: 1,
+      read_thread_terminal: 1, request_user_input: 1, view_image: 1,
+      tool_search: 1, 'mcp.custom': 1, 'mcp.other': 1,
+    },
+  });
+  const m = computeMetrics([wide], [], {}, 30);
+  assert.equal(m.autonomyMetrics.perSession[0].toolbeltCoverage, 100);
+});
+
+test('selfHealScore excludes read-only shell calls from the denominator', () => {
+  // Codex routes file reading through the shell — 62 of 100 calls being
+  // sed/rg/ls must not deflate the verification share of actual work
+  const codex = mkCorrelated({
+    totalBashCalls: 100,
+    readOnlyBashCalls: 62,
+    verificationBashCalls: 19,
+  });
+  const m = computeMetrics([codex], [], {}, 30);
+  assert.equal(m.autonomyMetrics.selfHealScore, 50); // 19 / (100 - 62)
+  assert.equal(m.autonomyMetrics.perSession[0].selfHealScore, 50);
+  // Displayed raw counts stay untouched
+  assert.equal(m.autonomyMetrics.totalBashCalls, 100);
+  assert.equal(m.autonomyMetrics.totalVerificationCalls, 19);
+});
+
+test('selfHealScore clamps at 100 and tolerates sessions cached before readOnlyBashCalls', () => {
+  // verification ⊄ read-only is possible in odd data — clamp, don't exceed 100
+  const clamp = mkCorrelated({ totalBashCalls: 10, readOnlyBashCalls: 9, verificationBashCalls: 5 });
+  assert.equal(computeMetrics([clamp], [], {}, 30).autonomyMetrics.selfHealScore, 100);
+  // Old cached sessions have no readOnlyBashCalls field → old behavior
+  const legacy = mkCorrelated({ totalBashCalls: 10, verificationBashCalls: 4 });
+  assert.equal(computeMetrics([legacy], [], {}, 30).autonomyMetrics.selfHealScore, 40);
+});
+
+test('self-heal insight uses agent-neutral shell wording', () => {
+  const session = mkCorrelated({
+    totalBashCalls: 30,
+    readOnlyBashCalls: 0,
+    verificationBashCalls: 0,
+  });
+  const m = computeMetrics([session], [], {}, 30);
+  const warning = m.insights.find(i => i.text.includes('low self-healing'));
+  assert.ok(warning, 'low self-heal warning should fire');
+  assert.ok(warning.text.includes('shell commands'));
+  assert.ok(!m.insights.some(i => i.text.includes('bash commands')));
+});
+
+test('model cost insight requires 3+ commits per family and names families explicitly', () => {
+  const opusHeavy = mkCorrelated({
+    sessionId: 'op',
+    cost: { totalCost: 30, inputCost: 15, outputCost: 15, cacheReadCost: 0, cacheCreationCost: 0 },
+    modelBreakdown: { 'claude-opus-4-8': { tokens: 1000, cost: 30 } },
+    commits: [], commitCount: 3,
+  });
+  const sonnetCheap = mkCorrelated({
+    sessionId: 'so',
+    cost: { totalCost: 3, inputCost: 1.5, outputCost: 1.5, cacheReadCost: 0, cacheCreationCost: 0 },
+    modelBreakdown: { 'claude-sonnet-4-6': { tokens: 1000, cost: 3 } },
+    commits: [], commitCount: 3,
+  });
+  const m = computeMetrics([opusHeavy, sonnetCheap], [], {}, 30);
+  const insight = m.insights.find(i => i.text.includes('-family models cost'));
+  assert.ok(insight, 'cost comparison should fire when both families have 3+ commits');
+  assert.equal(insight.text, 'Opus-family models cost 10.0x more per commit than Sonnet-family models.');
+
+  // One family resting on a 1-commit sample → no comparison
+  const sonnetTiny = mkCorrelated({ ...sonnetCheap, commitCount: 1 });
+  const m2 = computeMetrics([opusHeavy, sonnetTiny], [], {}, 30);
+  assert.ok(!m2.insights.some(i => i.text.includes('-family models cost')));
+});
+
+test('weekly narrative distinguishes first week from a quiet prior week', () => {
+  const now = Date.now();
+  const mkWeekSession = (overrides = {}) => mkCorrelated({
+    startTime: new Date(now - 24 * 3600 * 1000).toISOString(),
+    endTime: new Date(now - 23 * 3600 * 1000).toISOString(),
+    commits: [{
+      hash: 'wk', timestamp: new Date(now - 23 * 3600 * 1000).toISOString(),
+      timestampMs: now - 23 * 3600 * 1000,
+      subject: 's', branches: ['main'], onMain: true,
+      files: [{ path: 'src/foo.js', added: 10, deleted: 0 }],
+      totalAdded: 10, totalDeleted: 0,
+    }],
+    commitCount: 1, commitsOnMain: 1, linesAdded: 10,
+    ...overrides,
+  });
+
+  // No history before this week → genuinely the first week
+  let m = computeMetrics([mkWeekSession()], [], {}, 90);
+  assert.ok(m.weeklyNarrative.headline.includes('first week of measured activity'));
+
+  // Months of intermittent history with a quiet prior week → not "first week"
+  const old = mkCorrelated({
+    sessionId: 'old',
+    startTime: new Date(now - 60 * 24 * 3600 * 1000).toISOString(),
+    endTime: new Date(now - 60 * 24 * 3600 * 1000 + 3600 * 1000).toISOString(),
+  });
+  m = computeMetrics([mkWeekSession({ sessionId: 'recent' }), old], [], {}, 90);
+  assert.ok(m.weeklyNarrative.headline.includes('no activity last week to compare'));
+  assert.ok(!m.weeklyNarrative.headline.includes('first week'));
+});
+
+test('daily timeline gap-fills zero rows between active days', () => {
+  const session = mkCorrelated({
+    dailyUsage: {
+      '2026-04-10': { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 2 },
+      '2026-04-14': { inputTokens: 200, outputTokens: 80, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 1 },
+    },
+  });
+  const m = computeMetrics([session], [], {}, 365);
+  assert.deepEqual(
+    m.daily.map(d => d.date),
+    ['2026-04-10', '2026-04-11', '2026-04-12', '2026-04-13', '2026-04-14'],
+    'dates should be contiguous across the gap'
+  );
+  // Gap rows carry the full row shape with zeroed values
+  assert.deepEqual(m.daily[1], {
+    date: '2026-04-11', cost: 0, sessions: 0, commits: 0,
+    linesAdded: 0, linesDeleted: 0, netLines: 0,
+    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0,
+  });
+  // Zero rows sum to nothing — totals are unchanged by the fill
+  assert.equal(m.daily.reduce((a, d) => a + d.cost, 0), 3);
+  assert.equal(m.daily.reduce((a, d) => a + d.sessions, 0), 1);
+  assert.equal(m.daily.reduce((a, d) => a + d.totalTokens, 0), 430);
+});
+
+test('daily timeline with a single active day is not gap-filled', () => {
+  const session = mkCorrelated({
+    dailyUsage: {
+      '2026-04-10': { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 2 },
+    },
+  });
+  const m = computeMetrics([session], [], {}, 365);
+  assert.equal(m.daily.length, 1);
+  assert.equal(m.daily[0].date, '2026-04-10');
+});

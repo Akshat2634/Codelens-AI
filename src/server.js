@@ -174,7 +174,12 @@ export function createServer(initialPayload, rebuildFn, opts = {}) {
     sessions = [...sessions].sort((a, b) => {
       const av = sortValue(a);
       const bv = sortValue(b);
-      if (typeof av === 'string') return order * av.localeCompare(String(bv));
+      // Coerce both sides when either is a string: a null model (→ 0 via ?? 0)
+      // compared against a string id would hit the numeric branch and yield
+      // NaN — an unstable, arbitrary order. String(0) groups nulls together.
+      if (typeof av === 'string' || typeof bv === 'string') {
+        return order * String(av).localeCompare(String(bv));
+      }
       return order * (av - bv);
     });
 
