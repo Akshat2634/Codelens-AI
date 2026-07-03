@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { resolveMovedRepoPaths } from '../../src/git-analyzer.js';
+import { analyzeGitRepo, resolveMovedRepoPaths } from '../../src/git-analyzer.js';
 
 function makeRepo(root, ...segments) {
   const dir = path.join(root, ...segments);
@@ -140,6 +140,79 @@ test('resolveMovedRepoPaths keeps the plain name match for chat-only sessions', 
 
     assert.equal(aliasMap.get(stale), current);
     assert.deepEqual(unresolved, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Commit with a fully controlled author identity + date, so squash-twin
+// scenarios (same change, different author date) can be reproduced.
+function gitCommit(dir, file, content, message, isoDate) {
+  writeFileSync(path.join(dir, file), content);
+  execSync('git add -A', { cwd: dir });
+  execSync(`git commit -q -m ${JSON.stringify(message)}`, {
+    cwd: dir,
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'A', GIT_AUTHOR_EMAIL: 'a@b.com',
+      GIT_COMMITTER_NAME: 'A', GIT_COMMITTER_EMAIL: 'a@b.com',
+      GIT_AUTHOR_DATE: isoDate, GIT_COMMITTER_DATE: isoDate,
+    },
+  });
+}
+
+test('analyzeGitRepo collapses a squash-merge twin, keeping the on-main copy', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'git-squash-'));
+  try {
+    const dir = path.join(root, 'repo');
+    mkdirSync(dir, { recursive: true });
+    execSync('git init -q -b main', { cwd: dir });
+    execSync('git config user.email a@b.com', { cwd: dir });
+    execSync('git config user.name A', { cwd: dir });
+    // Dates relative to now so they always fall inside the lookback window,
+    // regardless of the machine clock.
+    const base = new Date(Date.now() - 5 * 86400000);
+    const iso = (m) => new Date(base.getTime() + m * 60000).toISOString();
+
+    gitCommit(dir, 'base.txt', 'base\n', 'base', iso(0));
+    // Off-main feature-branch copy.
+    execSync('git checkout -q -b feature', { cwd: dir });
+    gitCommit(dir, 'shared.txt', 'hello\n', 'add shared feature', iso(60));
+    // Squash copy on main: identical diffstat (shared.txt +1/-0), subject gains a
+    // " (#123)" PR suffix, author date drifts 2 minutes — exactly what GitHub's
+    // "Squash and merge" produces. The exact-%aI first pass misses it.
+    execSync('git checkout -q main', { cwd: dir });
+    gitCommit(dir, 'shared.txt', 'hello\n', 'add shared feature (#123)', iso(62));
+
+    const { commits } = analyzeGitRepo(dir, 3650);
+    const twins = commits.filter(c => c.subject.startsWith('add shared feature'));
+    assert.equal(twins.length, 1, 'the squash twin should be deduped to a single commit');
+    assert.equal(twins[0].onMain, true, 'the surviving copy is the on-main one');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('analyzeGitRepo does NOT merge same-subject commits with different diffstats', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'git-squash-'));
+  try {
+    const dir = path.join(root, 'repo');
+    mkdirSync(dir, { recursive: true });
+    execSync('git init -q -b main', { cwd: dir });
+    execSync('git config user.email a@b.com', { cwd: dir });
+    execSync('git config user.name A', { cwd: dir });
+    const base = new Date(Date.now() - 5 * 86400000);
+    const iso = (m) => new Date(base.getTime() + m * 60000).toISOString();
+
+    gitCommit(dir, 'base.txt', 'base\n', 'base', iso(0));
+    execSync('git checkout -q -b feature', { cwd: dir });
+    gitCommit(dir, 'x.txt', 'a\nb\n', 'shared work', iso(60)); // +2 lines
+    execSync('git checkout -q main', { cwd: dir });
+    gitCommit(dir, 'x.txt', 'a\n', 'shared work (#9)', iso(62)); // +1 line — different diffstat
+
+    const { commits } = analyzeGitRepo(dir, 3650);
+    const both = commits.filter(c => c.subject.startsWith('shared work'));
+    assert.equal(both.length, 2, 'commits sharing a subject but with different diffstats must not be collapsed');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -2378,13 +2378,17 @@ function familyLabel(f) {
   return special[f] || f.charAt(0).toUpperCase() + f.slice(1);
 }
 // Normalize a model id to its base id: strip billing markers
-// ([fast]/[us]/[long]/[1m]), a trailing API date suffix, and '-latest' — the
-// same forms the pricing path strips — so ids that differ only by billing tier
-// or snapshot compare equal.
+// ([fast]/[us]/[long]/[1m]), a trailing API date snapshot suffix, and
+// '-latest' — so ids that differ only by billing tier or snapshot compare
+// equal. Two date forms occur: OpenAI's dashed '-YYYY-MM-DD' and Anthropic's
+// contiguous '-YYYYMMDD' (e.g. claude-haiku-4-5-20251001) — both must be
+// stripped, else a dated and undated snapshot of one model fail to collapse
+// (phantom '(sub)' duplicate; family label falls back to the generic bucket).
 function modelBaseId(id) {
   return String(id)
     .replace(/\[fast\]|\[us\]|\[long\]|\[1m\]/g, '')
     .replace(/-\d{4}-\d{2}-\d{2}$/, '')
+    .replace(/-\d{8}$/, '')
     .replace(/-latest$/, '');
 }
 // A family label ('GPT') is only useful when it's grouping more than one
@@ -3253,7 +3257,7 @@ function renderAutonomySection(am) {
             </div>
             <div class="metric-value" style="color: var(--accent-green);">${am.selfHealScore}%</div>
             <div class="metric-bar"><div class="fill" style="width: ${am.selfHealScore}%; background: var(--accent-green);"></div></div>
-            <div class="metric-sub">${am.totalVerificationCalls} of ${am.totalBashCalls} shell calls were tests/lints</div>
+            <div class="metric-sub">${am.totalVerificationCalls} of ${am.attemptedBashCalls} state-changing shell calls were tests/lints</div>
           </div>
           <div class="auto-metric">
             <div class="metric-header">
@@ -3347,7 +3351,7 @@ function renderSessionsTable(sessions) {
           <tr>
             <th onclick="sortTable('startTime')" class="${sortCol === 'startTime' ? 'sorted' : ''}">Date${thArrow('startTime')} <i class="info-tip" data-tip="Session start time in your local timezone. Multi-day sessions show an arrow (↳) with the end date below.">i</i></th>
             <th onclick="sortTable('projectName')" class="${sortCol === 'projectName' ? 'sorted' : ''}">Project${thArrow('projectName')}</th>
-            <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')} <i class="info-tip" data-tip="Primary model used in the session, then any additional models. For Claude Code these '(sub)' models are subagents spawned for background tasks; for OpenAI Codex they are mid-session model switches or long-context billing tiers.">i</i></th>
+            <th onclick="sortTable('model')" class="${sortCol === 'model' ? 'sorted' : ''}">Model${thArrow('model')} <i class="info-tip" data-tip="Primary model used in the session, then any additional models used. For Claude Code these are mid-session /model switches or subagents spawned for background tasks; for OpenAI Codex they are mid-session model switches or long-context billing tiers.">i</i></th>
             <th onclick="sortTable('msgCount')" class="${sortCol === 'msgCount' ? 'sorted' : ''}">Msgs${thArrow('msgCount')} <i class="info-tip" data-tip="Total messages in the session (your messages + agent responses).">i</i></th>
             <th onclick="sortTable('autopilotRatio')" class="${sortCol === 'autopilotRatio' ? 'sorted' : ''}">Autopilot${thArrow('autopilotRatio')} <i class="info-tip" data-tip="Agent responses per user message. Higher = more autonomous. 5x is excellent.">i</i></th>
             <th onclick="sortTable('cost.totalCost')" class="${sortCol === 'cost.totalCost' ? 'sorted' : ''}">Cost${thArrow('cost.totalCost')} <i class="info-tip" data-tip="Estimated cost from token usage at the provider's published API pricing (Anthropic for Claude, OpenAI for Codex). Includes input, output, and cache tokens at provider/model-specific rates, plus web search fees and premium billing markers where applicable. For sessions that started before the analyzed window, only in-window usage is counted.">i</i></th>
@@ -3377,11 +3381,13 @@ function renderSessionsTable(sessions) {
               .filter(m => m !== s.model && modelBaseId(m) !== primaryBase)
               .map(formatModelName)
               .filter(Boolean);
-            // For Claude, extra models are subagents; for Codex they're
-            // mid-session model switches (the TUI picker) — don't mislabel them.
-            const extraTag = (s.source || 'claude') === 'codex' ? '' : ' <span style="opacity:0.6;">(sub)</span>';
+            // Extra models can be subagents OR direct mid-session /model
+            // switches in the main transcript — the parser can't tell them
+            // apart (both land in modelBreakdown), so don't assert either. The
+            // leading "+ " already marks them as additional; no "(sub)" tag,
+            // which mislabeled main-transcript switches as subagents.
             const modelDisplay = subModels.length > 0
-              ? primaryName + ' <span style="color:var(--text-muted);font-size:0.75rem;">+ ' + subModels.join(', ') + extraTag + '</span>'
+              ? primaryName + ' <span style="color:var(--text-muted);font-size:0.75rem;">+ ' + subModels.join(', ') + '</span>'
               : primaryName;
             const rowClass = s.isOrphaned ? 'orphaned' : '';
             return `
