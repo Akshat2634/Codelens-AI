@@ -1325,6 +1325,14 @@
       overflow: hidden;
       position: relative;
     }
+    /* ROI headline row (AI Code Share / Value Leak): the cards carry
+       info-tips whose tooltip pops ABOVE the card — an overflow:hidden
+       container decapitates it. Lift the clip and do the corner masking
+       with per-card radii instead. */
+    .period-stats.roi-headlines { overflow: visible; grid-template-columns: repeat(2, 1fr); }
+    .period-stats.roi-headlines .period-card:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+    .period-stats.roi-headlines .period-card:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+
     .period-stats::before {
       content: '';
       position: absolute;
@@ -3195,7 +3203,7 @@ function renderRoiHeadlines(s) {
   if (s.aiCodeSharePct === null && !leak) return '';
   const share = s.aiCodeSharePct;
   const leakColor = leak && leak.pct >= 40 ? 'var(--accent-red)' : leak && leak.pct >= 15 ? 'var(--accent-orange)' : 'var(--accent-green)';
-  return `<div class="period-stats" style="margin-top:14px;">
+  return `<div class="period-stats roi-headlines" style="margin-top:14px;">
     <div class="period-card month">
       <div class="period-label">AI Code Share <i class="info-tip" data-tip="Share of every line merged in this window (across AI-matched and manual commits) that is attributable to an AI session via file-overlap correlation. The adoption metric usually quoted from surveys — here it's measured from your actual git history.">i</i></div>
       <div class="period-cost" style="color: var(--accent-purple);">${share !== null ? `${share}%` : '—'}</div>
