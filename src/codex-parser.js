@@ -250,7 +250,6 @@ function createEmptyCodexSession(sessionId) {
     modelBreakdown: {},
     toolCalls: {},
     filesWritten: [],
-    filesRead: [],
     userMessageCount: 0,
     assistantMessageCount: 0,
     bashCommands: [],
@@ -295,11 +294,14 @@ function commandFromArgs(args) {
 
 function trackShellCommand(session, command) {
   if (!command) return;
-  const isVerif = isVerificationCommand(command);
   session.totalBashCalls++;
-  if (isVerif) session.verificationBashCalls++;
+  // Only verification commands keep their text (for the "top tests" list) —
+  // nothing downstream reads non-verification entries.
+  if (isVerificationCommand(command)) {
+    session.verificationBashCalls++;
+    session.bashCommands.push({ command: command.slice(0, 200), isVerification: true });
+  }
   if (isReadOnlyCommand(command)) session.readOnlyBashCalls++;
-  session.bashCommands.push({ command: command.slice(0, 200), isVerification: isVerif });
 }
 
 // cutoffMs clips usage accumulation to the lookback window, mirroring

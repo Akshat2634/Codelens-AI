@@ -416,21 +416,6 @@ function computeLineSurvival(correlatedSessions) {
 }
 
 // ---- Autonomy metrics ----
-const KNOWN_TOOLS = [
-  'Bash', 'Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'LS',
-  'WebFetch', 'WebSearch', 'NotebookEdit', 'NotebookRead', 'TodoWrite', 'Agent',
-];
-const TOTAL_AVAILABLE_TOOLS = KNOWN_TOOLS.length; // 14
-// Codex CLI ships a much smaller toolbelt — measuring its sessions against the
-// Claude vocabulary structurally reads "narrow tool usage" for every session.
-const KNOWN_CODEX_TOOLS = [
-  'shell', 'apply_patch', 'update_plan', 'web_search', 'write_stdin',
-  'read_thread_terminal', 'request_user_input', 'view_image', 'tool_search',
-];
-// The shell tool's name has drifted across Codex CLI versions; collapse the
-// aliases so one logical tool can't count several times in the numerator.
-const CODEX_SHELL_ALIASES = new Set(['exec_command', 'container.exec', 'local_shell_call']);
-
 function computeAutonomyGrade(score) {
   if (score >= 80) return 'A';
   if (score >= 60) return 'B';
@@ -453,15 +438,6 @@ function computeAutonomyMetrics(correlatedSessions, cutoffMs = 0) {
       ? Math.round(Math.min(1, s.verificationBashCalls / attemptedBashCalls) * 100)
       : 0;
 
-    const isCodex = s.source === 'codex';
-    const uniqueTools = isCodex
-      ? new Set(Object.keys(s.toolCalls).map(t => (CODEX_SHELL_ALIASES.has(t) ? 'shell' : t))).size
-      : Object.keys(s.toolCalls).length;
-    const knownToolCount = isCodex ? KNOWN_CODEX_TOOLS.length : TOTAL_AVAILABLE_TOOLS;
-    // Descriptor only (not scored): clamp at 100 since sessions can use more
-    // distinct tools (MCP/custom/Task) than the fixed known-tool denominator.
-    const toolbeltCoverage = Math.min(100, Math.round((uniqueTools / knownToolCount) * 100));
-
     const totalToolCalls = Object.values(s.toolCalls).reduce((sum, c) => sum + c, 0);
     // Tool calls are whole-session while commitCount is window-clipped — for a
     // session that started before the window the ratio would divide steps it
@@ -470,7 +446,7 @@ function computeAutonomyMetrics(correlatedSessions, cutoffMs = 0) {
     const straddlesWindow = cutoffMs > 0 && s.startTime && new Date(s.startTime).getTime() < cutoffMs;
     const commitVelocity = !straddlesWindow && s.commitCount > 0 ? Math.round(totalToolCalls / s.commitCount) : null;
 
-    return { sessionId: s.sessionId, autopilotRatio, selfHealScore, toolbeltCoverage, commitVelocity };
+    return { sessionId: s.sessionId, autopilotRatio, selfHealScore, commitVelocity };
   });
 
   // Aggregates
@@ -487,20 +463,14 @@ function computeAutonomyMetrics(correlatedSessions, cutoffMs = 0) {
     ? Math.round(Math.min(1, totalVerif / Math.max(1, totalBash - totalReadOnly)) * 100)
     : 0;
 
-  const toolbeltCoverage = perSession.length > 0
-    ? Math.min(100, Math.round(perSession.reduce((s, a) => s + a.toolbeltCoverage, 0) / perSession.length))
-    : 0;
-
   const withCommits = perSession.filter(a => a.commitVelocity !== null);
   const commitVelocity = withCommits.length > 0
     ? Math.round(withCommits.reduce((s, a) => s + a.commitVelocity, 0) / withCommits.length)
     : null;
 
-  // Composite score (0-100): clamp and weight each component. Toolbelt coverage
-  // is deliberately NOT scored — it measures tool variety, not autonomy quality
-  // (a focused Edit+Bash session shouldn't grade "low"). It's reported as a
-  // descriptor only. Self-heal needs enough shell activity to mean anything;
-  // below the threshold it's neutral (50) rather than a punishing 0.
+  // Composite score (0-100): clamp and weight each component. Self-heal needs
+  // enough shell activity to mean anything; below the threshold it's neutral
+  // (50) rather than a punishing 0.
   const MIN_BASH_FOR_SELFHEAL = 5;
   const autopilotScore = Math.round(Math.min(autopilotRatio / 5, 1) * 100);
   const selfHealWeighted = totalBash >= MIN_BASH_FOR_SELFHEAL ? selfHealScore : 50;
@@ -539,7 +509,6 @@ function computeAutonomyMetrics(correlatedSessions, cutoffMs = 0) {
     overall: { score: overallScore, grade: computeAutonomyGrade(overallScore) },
     autopilotRatio,
     selfHealScore,
-    toolbeltCoverage,
     commitVelocity,
     totalBashCalls: totalBash,
     // Non-read-only ("state-changing") shell calls — the denominator the
@@ -624,9 +593,38 @@ function computeSessionGrade(session) {
 function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, _tokenAnalytics, autonomyMetrics) {
   // Insights are deliberately curated to avoid repeating what's already shown
   // on hero cards (cost/tokens/cache), the weekly narrative (best day, autopilot,
-  // dominant model), or the autonomy section (self-heal, toolbelt, bash counts).
+  // dominant model), or the autonomy section (self-heal, bash counts).
   // Lower priority number = higher urgency. Capped at 8 after sorting.
   const candidates = [];
+
+  // 0. Value leak — dollars that never reached a commit. The hero card shows
+  // the number; the insight adds the judgement call (is this level a problem?).
+  const leak = summary.valueLeak;
+  if (leak && summary.totalCost > 0.5) {
+    if (leak.pct >= 40) {
+      candidates.push({
+        priority: 1,
+        type: 'warning',
+        text: `$${leak.cost.toFixed(2)} (${leak.pct}% of spend) went to ${leak.sessionCount} session${leak.sessionCount === 1 ? '' : 's'} that produced no committed code.`,
+      });
+    } else if (leak.pct <= 10 && summary.totalCommits > 0) {
+      candidates.push({
+        priority: 3,
+        type: 'success',
+        text: `Only ${leak.pct}% of spend didn't reach a commit — very little value leak.`,
+      });
+    }
+  }
+
+  // 0b. Trailer-stamped organic commits — AI work whose session logs are gone.
+  const trailerOrganic = summary.reconciliation?.commits?.trailerStamped?.organic || 0;
+  if (trailerOrganic > 0) {
+    candidates.push({
+      priority: 3,
+      type: 'info',
+      text: `${trailerOrganic} commit${trailerOrganic === 1 ? ' carries' : 's carry'} an AI co-author trailer but matched no session — their spend is outside this window's logs.`,
+    });
+  }
 
   // 1. Orphaned session rate — critical if high
   const orphanedCount = correlatedSessions.filter(s => s.isOrphaned).length;
@@ -897,24 +895,6 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   }
   const daily = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));
 
-  // Best/worst days. When enough days have non-trivial spend, rank those by
-  // commits-per-dollar using their true cost (all are >= the floor, so no absurd
-  // ratios). When every day with commits is trivially cheap, $/commit is just
-  // noise — rank by raw productivity (commit count) instead of a floored ratio.
-  const RANK_MIN_COST = 0.5;
-  const daysWithCommits = daily.filter(d => d.commits > 0);
-  const rankPool = daysWithCommits.filter(d => d.cost >= RANK_MIN_COST);
-  let bestDay = null;
-  let worstDay = null;
-  if (rankPool.length > 0) {
-    const eff = (d) => d.commits / d.cost;
-    bestDay = rankPool.reduce((a, b) => eff(b) > eff(a) ? b : a);
-    worstDay = rankPool.reduce((a, b) => eff(b) < eff(a) ? b : a);
-  } else if (daysWithCommits.length > 0) {
-    bestDay = daysWithCommits.reduce((a, b) => b.commits > a.commits ? b : a);
-    worstDay = daysWithCommits.reduce((a, b) => b.commits < a.commits ? b : a);
-  }
-
   // ---- Model breakdown ----
   // Cost and tokens are split across families by ACTUAL usage (accurate for the
   // spend/usage charts). Sessions and commits are attributed in WHOLE numbers — a
@@ -1104,13 +1084,55 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   const aiCommitLinesTotal = correlatedSessions.reduce(
     (a, s) => a + s.commits.reduce((x, c) => x + (c.totalAdded || 0), 0), 0);
   const organicLines = organicCommits.reduce((a, c) => a + (c.totalAdded || 0), 0);
+  // Co-authored-by trailer evidence: matched = trailer-stamped commits claimed
+  // by a session of the stamping agent (ground-truth confirmations of the
+  // file-overlap matching); crossAgent = stamped commits claimed by a session
+  // of a DIFFERENT agent (possible mis-attribution worth surfacing);
+  // organic = trailer-stamped commits NO session claimed (AI work whose
+  // session logs are missing/aged out — a visible signal that the window's AI
+  // totals are a floor, not an exaggeration). Commits folded into a per-agent
+  // view's organic set because the OTHER agent claimed them
+  // (claimedByOtherAgent) are excluded — they did match a session and their
+  // spend is on the other agent's tab, so counting them as "no session"
+  // would make the audit lie.
+  const trailerMatched = correlatedSessions.reduce((a, s) => a + (s.trailerConfirmedCommits || 0), 0);
+  const trailerCrossAgent = correlatedSessions.reduce(
+    (a, s) => a + s.commits.filter(c => c.aiTrailer && c.aiTrailer !== (s.source || 'claude')).length, 0);
+  const trailerOrganic = organicCommits.filter(c => c.aiTrailer && !c.claimedByOtherAgent).length;
   const reconciliation = {
-    commits: { aiMatched: totalCommits, organic: organicCommits.length, byConfidence: confCommits },
+    commits: {
+      aiMatched: totalCommits,
+      organic: organicCommits.length,
+      byConfidence: confCommits,
+      trailerStamped: { matched: trailerMatched, crossAgent: trailerCrossAgent, organic: trailerOrganic },
+    },
     lines: {
       aiAttributed: totalLinesAdded,       // lines in AI-written files within AI-matched commits
       aiCommitsTotal: aiCommitLinesTotal,  // all lines in AI-matched commits (incl. files the AI didn't write)
       organic: organicLines,               // lines in commits with no matched session
     },
+  };
+
+  // AI code share — "% of the code you merged this window that the AI wrote".
+  // The single most-quoted adoption metric in the industry; here it's computed
+  // from actual session-to-commit attribution instead of survey self-reports.
+  // Denominator = every added line in the window (AI-matched commits' full
+  // diffs + organic commits); numerator = AI-attributed lines only.
+  const windowLinesTotal = aiCommitLinesTotal + organicLines;
+  const aiCodeSharePct = windowLinesTotal > 0
+    ? Math.round((totalLinesAdded / windowLinesTotal) * 100)
+    : null;
+
+  // Value leak — spend that produced no committed code. The cost of every
+  // session that claimed zero commits, as dollars and as a share of total
+  // spend. Some exploration is healthy; a high leak is the single clearest
+  // "where did the money go" signal a spend-only tracker cannot compute.
+  const zeroCommitSessions = correlatedSessions.filter(s => s.commitCount === 0);
+  const leakCost = zeroCommitSessions.reduce((a, s) => a + s.cost.totalCost, 0);
+  const valueLeak = {
+    cost: Math.round(leakCost * 100) / 100,
+    pct: totalCost > 0 ? Math.round((leakCost / totalCost) * 100) : 0,
+    sessionCount: zeroCommitSessions.length,
   };
 
   // Subscription "effective cost" mode (only when a plan is supplied). Reframes
@@ -1154,8 +1176,8 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     totalCommitsOnMain,
     mainBranchPct: totalCommits > 0 ? Math.round((totalCommitsOnMain / totalCommits) * 100) : 0,
     organicCommitCount: organicCommits.length,
-    bestDay,
-    worstDay,
+    aiCodeSharePct,
+    valueLeak,
     costByPeriod,
   };
 
@@ -1165,7 +1187,9 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   // ---- Autonomy metrics ----
   const autonomyMetrics = computeAutonomyMetrics(correlatedSessions, cutoffMs);
 
-  // Add grades + autonomy to sessions
+  // Add grades + autonomy to sessions. perSession is an internal join table —
+  // its values live on each session after this, so it's stripped from the
+  // payload rather than serialized once per session into every API response.
   const autonomyBySession = new Map(autonomyMetrics.perSession.map(a => [a.sessionId, a]));
   const sessionsWithGrades = correlatedSessions.map(s => {
     const a = autonomyBySession.get(s.sessionId);
@@ -1174,10 +1198,10 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
       grade: computeSessionGrade(s),
       autopilotRatio: a?.autopilotRatio ?? 0,
       selfHealScore: a?.selfHealScore ?? 0,
-      toolbeltCoverage: a?.toolbeltCoverage ?? 0,
       commitVelocity: a?.commitVelocity ?? null,
     };
   });
+  delete autonomyMetrics.perSession;
 
   const insights = generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics);
 

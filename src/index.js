@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Command } from 'commander';
-import { DEFAULT_CLAUDE_DIR, DEFAULT_CODEX_DIR, deleteCache, getCodexStaleFiles, getStaleFiles, loadCache, saveCache } from './cache.js';
+import { DEFAULT_CLAUDE_DIR, DEFAULT_CODEX_DIR, deleteCache, getCodexStaleFiles, getStaleFiles, loadCache, saveCache, saveQuickstats } from './cache.js';
 import { parseAllProjects } from './claude-parser.js';
 import { parseCodexSessions } from './codex-parser.js';
 import { correlateSessions } from './correlator.js';
 import { analyzeGitRepo, getGitUser, resolveMovedRepoPaths } from './git-analyzer.js';
 import { computeMetrics } from './metrics.js';
+import { renderReportHtml, renderReportMarkdown, renderReportText, reportModel } from './report.js';
 import { createServer } from './server.js';
+import { installStatusline, runStatusline } from './statusline.js';
 
 const { version: VERSION } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8')
@@ -215,8 +217,14 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   const payloads = { all: mkView(correlatedSessions, combinedPlan, sourceFilter || 'all', organicCommits) };
   if (sourceCounts.claude > 0 && sourceCounts.codex > 0) {
     const isClaude = s => (s.source || 'claude') === 'claude';
-    const codexClaimed = commitsClaimedBy(s => s.source === 'codex');
-    const claudeClaimed = commitsClaimedBy(isClaude);
+    // Flag the folded copies (shallow clones — the originals are shared with
+    // the other view's matched set) so metrics can tell "no session claimed
+    // this commit" from "the OTHER agent's session claimed it" — a
+    // trailer-stamped commit of the second kind must not be reported as
+    // missing session logs.
+    const claimedByOther = (c) => ({ ...c, claimedByOtherAgent: true });
+    const codexClaimed = commitsClaimedBy(s => s.source === 'codex').map(claimedByOther);
+    const claudeClaimed = commitsClaimedBy(isClaude).map(claimedByOther);
     payloads.claude = mkView(correlatedSessions.filter(isClaude), planConfigs.claude, 'claude', [...organicCommits, ...codexClaimed], codexClaimed.length);
     payloads.codex = mkView(correlatedSessions.filter(s => s.source === 'codex'), planConfigs.codex, 'codex', [...organicCommits, ...claudeClaimed], claudeClaimed.length);
   }
@@ -224,40 +232,28 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   return payloads;
 }
 
-async function main() {
-  const program = new Command();
-  program
-    .name('codelens-ai')
-    .description('Correlate AI coding agent token usage with git output to measure ROI')
-    .version(VERSION)
-    .option('-p, --port <number>', 'port to serve dashboard', '3457')
-    .option('-d, --days <number>', 'number of days to look back', '30')
-    .option('--no-open', 'do not auto-open browser')
-    .option('--json', 'output raw JSON to stdout instead of starting server')
-    .option('--project <name>', 'filter to specific project')
-    .option('--refresh', 'force full re-parse, ignore cache')
-    .option('--autonomy', 'print autonomy metrics table to stdout and exit')
-    .option('--claude-dir <path>', 'override path to Claude Code projects directory (for testing/CI)')
-    .option('--codex-dir <path>', 'override path to OpenAI Codex sessions directory (for testing/CI)')
-    .option('--source <agent>', 'analyze a single agent only: claude | codex | all')
-    .option('--plan <tier>', 'Claude subscription mode — effective $/commit vs your flat plan: pro | max5 | max20')
-    .option('--plan-cost <amount>', 'custom Claude monthly subscription cost in USD (overrides --plan)')
-    .option('--codex-plan <tier>', 'Codex/ChatGPT subscription mode: free | go | plus | pro100 | pro | team | business | business-annual')
-    .option('--codex-plan-cost <amount>', 'custom Codex monthly subscription cost in USD (overrides --codex-plan)');
+// Analysis flags shared by the dashboard (default) command and `report`.
+const addAnalysisOptions = (cmd) => cmd
+  .option('-d, --days <number>', 'number of days to look back', '30')
+  .option('--project <name>', 'filter to specific project')
+  .option('--refresh', 'force full re-parse, ignore cache')
+  .option('--claude-dir <path>', 'override path to Claude Code projects directory (for testing/CI)')
+  .option('--codex-dir <path>', 'override path to OpenAI Codex sessions directory (for testing/CI)')
+  .option('--source <agent>', 'analyze a single agent only: claude | codex | all')
+  .option('--plan <tier>', 'Claude subscription mode — effective $/commit vs your flat plan: pro | max5 | max20')
+  .option('--plan-cost <amount>', 'custom Claude monthly subscription cost in USD (overrides --plan)')
+  .option('--codex-plan <tier>', 'Codex/ChatGPT subscription mode: free | go | plus | pro100 | pro | team | business | business-annual')
+  .option('--codex-plan-cost <amount>', 'custom Codex monthly subscription cost in USD (overrides --codex-plan)');
 
-  program.parse();
-  const opts = program.opts();
-  if (opts.json) progress = console.error;
-  const port = parseInt(opts.port, 10);
+// Validate the shared flags, run the full pipeline, and handle the byproducts
+// every command shares (invokedAs stamping, statusline quickstats). Returns
+// everything the calling command needs to render or serve.
+async function runAnalysis(opts) {
   const days = parseInt(opts.days, 10);
   // Validate before any work: a bad --days would otherwise clobber the cache
   // with days:NaN and die later with a cryptic "Invalid time value".
   if (!/^\d+$/.test(String(opts.days)) || days < 1) {
     console.error(`  ${icon.err} ${c.red}--days must be a positive integer, got "${opts.days}".${c.reset}`);
-    process.exit(1);
-  }
-  if (!/^\d+$/.test(String(opts.port)) || port < 1 || port > 65535) {
-    console.error(`  ${icon.err} ${c.red}--port must be an integer between 1 and 65535, got "${opts.port}".${c.reset}`);
     process.exit(1);
   }
 
@@ -298,13 +294,6 @@ async function main() {
     process.exit(1);
   }
 
-  const invokedAs = path.basename(process.argv[1]);
-  if (invokedAs.includes('claude-roi')) {
-    progress(`  ${icon.warn} ${c.yellow}claude-roi has been renamed to codelens-ai${c.reset}`);
-    progress(`    Switch to: ${c.cyan}npx codelens-ai${c.reset}\n`);
-  }
-  progress(`${icon.dot} ${c.bold}${c.cyan}codelens-ai${c.reset} v${VERSION}\n`);
-
   // Defaults live in cache.js so custom-dir runs get their own cache file.
   // Codex CLI stores rollout files under $CODEX_HOME/sessions (~/.codex by default).
   const claudeDir = opts.claudeDir ? path.resolve(opts.claudeDir) : DEFAULT_CLAUDE_DIR;
@@ -320,19 +309,62 @@ async function main() {
 
   const payloads = await buildPayload(claudeDir, codexDir, days, opts.project, opts.refresh, planConfigs, sourceFilter);
   if (payloads) {
+    const invokedAs = path.basename(process.argv[1]);
     for (const p of Object.values(payloads)) {
       p.meta.invokedAs = invokedAs.includes('claude-roi') ? 'claude-roi' : 'codelens-ai';
     }
+    // Refresh the statusline's fast-path stats — but only from unfiltered
+    // default-dir runs: a --source/--project run computes a partial view whose
+    // numbers must not masquerade as global "today" stats, and custom-dir
+    // (test/CI) runs are skipped inside saveQuickstats.
+    if (!sourceFilter && !opts.project) {
+      const today = payloads.all.summary.costByPeriod?.today;
+      const now = new Date();
+      saveQuickstats({
+        day: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+        generatedAt: now.toISOString(),
+        todayCost: today?.cost ?? 0,
+        todayCommits: today?.commits ?? 0,
+        grade: payloads.all.summary.overallGrade,
+      }, { claudeDir, codexDir });
+    }
   }
+  return { payloads, days, claudeDir, codexDir, planConfigs, sourceFilter };
+}
+
+// The deprecation nudge for the legacy claude-roi alias plus the version line.
+function printBanner(commandLabel = '') {
+  const invokedAs = path.basename(process.argv[1]);
+  if (invokedAs.includes('claude-roi')) {
+    progress(`  ${icon.warn} ${c.yellow}claude-roi has been renamed to codelens-ai${c.reset}`);
+    progress(`    Switch to: ${c.cyan}npx codelens-ai${c.reset}\n`);
+  }
+  progress(`${icon.dot} ${c.bold}${c.cyan}codelens-ai${commandLabel}${c.reset} v${VERSION}\n`);
+}
+
+function printNoSessions(sourceFilter, days, claudeDir, codexDir) {
+  if (sourceFilter) {
+    progress(`  ${icon.warn} ${c.yellow}No ${sourceFilter} sessions found in the last ${days} days.${c.reset}`);
+    progress(`    Drop --source to analyze every agent, or check ${sourceFilter === 'claude' ? claudeDir : codexDir}`);
+  } else {
+    progress(`  ${icon.warn} ${c.yellow}No AI coding agent sessions found.${c.reset}`);
+    progress(`    Claude Code sessions are read from ${claudeDir} and OpenAI Codex sessions from ${codexDir}`);
+  }
+}
+
+async function runDashboard(opts) {
+  if (opts.json) progress = console.error;
+  const port = parseInt(opts.port, 10);
+  if (!/^\d+$/.test(String(opts.port)) || port < 1 || port > 65535) {
+    console.error(`  ${icon.err} ${c.red}--port must be an integer between 1 and 65535, got "${opts.port}".${c.reset}`);
+    process.exit(1);
+  }
+  printBanner();
+
+  const { payloads, days, claudeDir, codexDir, planConfigs, sourceFilter } = await runAnalysis(opts);
 
   if (!payloads) {
-    if (sourceFilter) {
-      progress(`  ${icon.warn} ${c.yellow}No ${sourceFilter} sessions found in the last ${days} days.${c.reset}`);
-      progress(`    Drop --source to analyze every agent, or check ${sourceFilter === 'claude' ? claudeDir : codexDir}`);
-    } else {
-      progress(`  ${icon.warn} ${c.yellow}No AI coding agent sessions found.${c.reset}`);
-      progress(`    Claude Code sessions are read from ${claudeDir} and OpenAI Codex sessions from ${codexDir}`);
-    }
+    printNoSessions(sourceFilter, days, claudeDir, codexDir);
     if (opts.json) {
       // Still emit a parseable document: the warning went to stderr above.
       process.stdout.write('null', () => process.exit(0));
@@ -350,30 +382,6 @@ async function main() {
     return;
   }
 
-  if (opts.autonomy) {
-    const am = payload.autonomyMetrics;
-    const GRADE_COLOR = { A: '\x1b[32m', B: '\x1b[36m', C: '\x1b[33m', D: '\x1b[33m', F: '\x1b[31m' };
-    const gc = GRADE_COLOR[am.overall.grade] || '\x1b[0m';
-    const line = '\u2500'.repeat(35);
-    console.log('');
-    console.log(`  ${gc}Autonomy Score: ${am.overall.grade}\x1b[0m (${am.overall.score}/100)`);
-    console.log(`  ${line}`);
-    console.log(`  Autopilot Ratio     ${am.autopilotRatio}x`);
-    console.log(`  Self-Heal Score     ${am.selfHealScore}%`);
-    console.log(`  Toolbelt Coverage   ${am.toolbeltCoverage}%`);
-    console.log(`  Commit Velocity     ${am.commitVelocity !== null ? am.commitVelocity + ' steps/commit' : 'N/A'}`);
-    console.log(`  ${line}`);
-    if (am.topVerificationCommands.length > 0) {
-      const top3 = am.topVerificationCommands.slice(0, 3)
-        .map(cmd => `${cmd.command} (${cmd.count})`).join(', ');
-      console.log(`  Top Tests: ${top3}`);
-    }
-    // Same flush-before-exit as --json: stdout writes are queued in order, so
-    // this final write's callback fires after every line above has flushed.
-    process.stdout.write('\n', () => process.exit(0));
-    return;
-  }
-
   // Start server — pass a rebuild function so /api/refresh can re-run the pipeline
   const rebuild = async () => {
     const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter);
@@ -383,9 +391,16 @@ async function main() {
     return fresh;
   };
   const app = createServer(payloads, rebuild);
-  const server = app.listen(port, () => {
-    const url = `http://localhost:${port}`;
+  // Bind localhost by default: the dashboard exposes repo paths, commit
+  // messages, and per-session costs — "all data stays local" must include the
+  // LAN. --host 0.0.0.0 opts in to network exposure explicitly.
+  const host = opts.host || '127.0.0.1';
+  const server = app.listen(port, host, () => {
+    const url = `http://${host === '0.0.0.0' || host === '::' ? 'localhost' : host}:${port}`;
     console.log(`\n  ${icon.ok} ${c.green}Dashboard:${c.reset} ${c.bold}${url}${c.reset}`);
+    if (host === '0.0.0.0' || host === '::') {
+      console.log(`  ${icon.warn} ${c.yellow}Serving on all interfaces — anyone on your network can open this dashboard.${c.reset}`);
+    }
 
     if (opts.open !== false) {
       import('open').then(mod => mod.default(url)).catch(() => {
@@ -401,6 +416,98 @@ async function main() {
     }
     throw err;
   });
+}
+
+async function runReport(opts) {
+  // Progress goes to stderr so `codelens-ai report > roi.txt` captures only
+  // the report itself.
+  progress = console.error;
+  printBanner(' report');
+
+  const { payloads, days, claudeDir, codexDir, sourceFilter } = await runAnalysis(opts);
+  if (!payloads) {
+    printNoSessions(sourceFilter, days, claudeDir, codexDir);
+    process.exit(0);
+  }
+
+  const model = reportModel(payloads.all, payloads);
+  const wrote = [];
+  if (opts.md !== undefined) {
+    const mdPath = typeof opts.md === 'string' ? opts.md : 'codelens-report.md';
+    writeFileSync(mdPath, renderReportMarkdown(model));
+    wrote.push(mdPath);
+  }
+  if (opts.html !== undefined) {
+    const htmlPath = typeof opts.html === 'string' ? opts.html : 'codelens-report.html';
+    writeFileSync(htmlPath, renderReportHtml(model));
+    wrote.push(htmlPath);
+  }
+  if (wrote.length > 0) {
+    for (const f of wrote) progress(`  ${icon.ok} ${c.green}Report written:${c.reset} ${path.resolve(f)}`);
+    process.exit(0);
+  }
+  // Same flush-before-exit as --json: exit only once stdout has drained.
+  process.stdout.write(`${renderReportText(model)}\n`, () => process.exit(0));
+}
+
+async function main() {
+  const program = new Command();
+  program
+    .name('codelens-ai')
+    .description('Correlate AI coding agent token usage with git output to measure ROI')
+    .version(VERSION)
+    // Options after a subcommand name belong to that subcommand — without
+    // this, the parent's identically-named analysis flags (--days, --source,
+    // ...) swallow the values and `report`/`statusline` see only defaults.
+    .enablePositionalOptions()
+    .option('-p, --port <number>', 'port to serve dashboard', '3457')
+    .option('--host <address>', 'interface to bind the dashboard to (0.0.0.0 exposes it to your network)', '127.0.0.1')
+    .option('--no-open', 'do not auto-open browser')
+    .option('--json', 'output raw JSON to stdout instead of starting server');
+  addAnalysisOptions(program);
+  program.action(async (opts) => runDashboard(opts));
+
+  const reportCmd = program
+    .command('report')
+    .description('print an ROI scorecard to the terminal, or export it with --md / --html')
+    .option('--md [path]', 'write a Markdown report (default: codelens-report.md)')
+    .option('--html [path]', 'write a self-contained HTML report (default: codelens-report.html)');
+  addAnalysisOptions(reportCmd);
+  reportCmd.action(async (opts) => runReport(opts));
+
+  // `codelens-ai --days 90 report` places analysis flags on the PARENT (with
+  // positional options, they'd otherwise be parsed there and silently ignored
+  // while report runs with defaults). Forward parent CLI values into the
+  // subcommand before it parses its own flags — its own flags still win.
+  program.hook('preSubcommand', (thisCommand, subcommand) => {
+    if (subcommand.name() !== 'report') return;
+    for (const key of ['days', 'project', 'refresh', 'claudeDir', 'codexDir', 'source', 'plan', 'planCost', 'codexPlan', 'codexPlanCost']) {
+      if (thisCommand.getOptionValueSource(key) === 'cli') {
+        subcommand.setOptionValueWithSource(key, thisCommand.getOptionValue(key), 'cli');
+      }
+    }
+  });
+
+  program
+    .command('statusline')
+    .description("Claude Code statusline: session cost, official rate limits, and today's $/commit (reads statusline JSON on stdin)")
+    .option('--install', 'configure this statusline in ~/.claude/settings.json (backs up the file first)')
+    .option('--force', 'with --install: replace an existing statusline configuration')
+    .option('--command <cmd>', 'with --install: the command to configure', 'npx -y codelens-ai statusline')
+    .action(async (opts) => {
+      if (opts.install) {
+        const result = installStatusline({ command: opts.command, force: opts.force });
+        console.log(`  ${result.changed ? icon.ok : icon.warn} ${result.message}`);
+        if (result.changed) {
+          console.log('    Restart Claude Code (or open a new session) to see it.');
+          console.log(`    Run ${c.cyan}npx codelens-ai${c.reset} or ${c.cyan}npx codelens-ai report${c.reset} periodically to refresh today's ROI stats.`);
+        }
+        return;
+      }
+      await runStatusline();
+    });
+
+  await program.parseAsync();
 }
 
 main().catch(err => {

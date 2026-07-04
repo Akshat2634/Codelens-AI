@@ -526,30 +526,6 @@
       -webkit-mask-composite: xor;
       mask-composite: exclude;
     }
-    .hero-legend, .cost-legend, .token-legend {
-      display: flex;
-      gap: 24px;
-      margin-top: 16px;
-      padding: 12px 20px;
-      background: var(--overlay-light);
-      border: 1px solid var(--overlay-medium);
-      border-radius: var(--radius-sm);
-    }
-    .hero-legend span, .cost-legend span, .token-legend span {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 0.75rem;
-      color: var(--text-secondary);
-    }
-    .hero-legend .dot, .cost-legend .dot, .token-legend .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      display: inline-block;
-      flex-shrink: 0;
-    }
-
     /* Insights */
     .insights {
       margin-bottom: 48px;
@@ -1522,7 +1498,6 @@
       .period-stats { grid-template-columns: repeat(2, 1fr); }
       .container { padding: 16px; }
       header h1 { font-size: 1.8rem; }
-      .hero-legend, .cost-legend, .token-legend { flex-wrap: wrap; }
       .share-modal { padding: 20px; }
       .share-actions { flex-direction: column; }
     }
@@ -2727,7 +2702,7 @@ function render() {
     <div class="charts-grid scroll-reveal">
       <div class="chart-card full-width">
         <div class="chart-header">
-          <h3>Token Burn Rate <i class="info-tip" data-tip="Daily token consumption stacked by type (input/output/cache). Dashed orange line shows cumulative total — watch it climb.">i</i></h3>
+          <h3>Token Burn Rate <i class="info-tip" data-tip="Daily token consumption stacked by type (input/output/cache). Split view draws each type as its own line on a log axis, so small series (fresh input/output) stay readable next to cache reads.">i</i></h3>
           <button class="scale-toggle" onclick="toggleTokenBurnPercent()">Split view</button>
         </div>
         <div class="chart-container"><canvas id="chart-token-burn"></canvas></div>
@@ -2875,11 +2850,28 @@ function renderHeroStats(s) {
         <div class="sub">${s.orphanedSessionRate}% sessions orphaned</div>
       </div>
     </div>
-    <div class="hero-legend">
-      <span><span class="dot" style="background: var(--accent-orange);"></span>Cost</span>
-      <span><span class="dot" style="background: var(--accent-green);"></span>Output</span>
-      <span><span class="dot" style="background: var(--accent-blue);"></span>Efficiency</span>
-      <span><span class="dot" style="background: ${sColor};"></span>Score: ${es.score} · ${es.tier}</span>
+    ${renderRoiHeadlines(s)}
+  </div>`;
+}
+
+// The two headline numbers a spend-only tracker can't compute: how much of
+// the merged code the AI actually wrote, and how much spend never reached a
+// commit. Both come straight from the session-to-commit correlation.
+function renderRoiHeadlines(s) {
+  const leak = s.valueLeak;
+  if (s.aiCodeSharePct === null && !leak) return '';
+  const share = s.aiCodeSharePct;
+  const leakColor = leak && leak.pct >= 40 ? 'var(--accent-red)' : leak && leak.pct >= 15 ? 'var(--accent-orange)' : 'var(--accent-green)';
+  return `<div class="period-stats" style="margin-top:14px;">
+    <div class="period-card month">
+      <div class="period-label">AI Code Share <i class="info-tip" data-tip="Share of every line merged in this window (across AI-matched and manual commits) that is attributable to an AI session via file-overlap correlation. The adoption metric usually quoted from surveys — here it's measured from your actual git history.">i</i></div>
+      <div class="period-cost" style="color: var(--accent-purple);">${share !== null ? `${share}%` : '—'}</div>
+      <div class="period-meta">of merged lines written by AI${share === null ? ' (no commits in window yet)' : ''}</div>
+    </div>
+    <div class="period-card today">
+      <div class="period-label">Value Leak <i class="info-tip" data-tip="Spend from sessions that produced no committed code. Some exploration and Q&amp;A is healthy — but a high leak means most of the budget never became shipped work.">i</i></div>
+      <div class="period-cost" style="color: ${leakColor};">${leak ? fmtMoney(leak.cost) : '—'}</div>
+      <div class="period-meta">${leak ? `${leak.pct}% of spend · ${plural(leak.sessionCount, 'session')} with no commits` : ''}</div>
     </div>
   </div>`;
 }
@@ -2913,12 +2905,6 @@ function renderCostByPeriod(p) {
         <div class="period-meta">${plural(p.allTime.sessions, 'session')} &middot; ${plural(p.allTime.commits, 'commit')}</div>
         <div class="period-tokens">${formatTokens(p.allTime.tokens)} tokens</div>
       </div>
-    </div>
-    <div class="cost-legend">
-      <span><span class="dot" style="background: var(--accent-green);"></span>Today</span>
-      <span><span class="dot" style="background: var(--accent-blue);"></span>Last 7 Days</span>
-      <span><span class="dot" style="background: var(--accent-purple);"></span>This Month</span>
-      <span><span class="dot" style="background: var(--accent-orange);"></span>Full analyzed window</span>
     </div>
   </div>`;
 }
@@ -2954,6 +2940,20 @@ function renderAttribution(s) {
       <div class="breakdown-label">Commit attribution — ${totalCommits} commit${totalCommits === 1 ? '' : 's'} in window</div>
       <div class="breakdown-bar">${segHtml}</div>
       <div class="breakdown-legend">${legendHtml}</div>
+      ${(() => {
+        const ts = c.trailerStamped;
+        if (!ts) return '';
+        const total = ts.matched + (ts.crossAgent || 0) + ts.organic;
+        if (total === 0) return '';
+        const parts = [];
+        if (ts.matched > 0) parts.push(`${ts.matched} confirmed against session logs`);
+        if (ts.crossAgent > 0) parts.push(`${ts.crossAgent} claimed by a different agent's session`);
+        if (ts.organic > 0) parts.push(`${ts.organic} with no session in this window`);
+        return `
+      <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:8px;">
+        <span style="color:var(--accent-green);">◆</span> ${total} commit${total === 1 ? ' carries' : 's carry'} an agent <code style="font-size:0.72rem;">Co-authored-by</code> trailer — ${parts.join(', ')}.
+      </div>`;
+      })()}
     </div>
     <div class="period-stats">
       <div class="period-card today">
@@ -3027,7 +3027,7 @@ function renderInsights(insights) {
       ${insights.map(i => `
         <div class="insight ${i.type}">
           <span class="icon">${INSIGHT_ICONS[i.type] || 'i'}</span>
-          <span>${i.text}</span>
+          <span>${escapeHtml(i.text)}</span>
         </div>
       `).join('')}
     </div>
@@ -3123,12 +3123,6 @@ function renderTokenHeroStats(t) {
         <div class="commit-bar-row"><span class="bar-label">/ line</span><div class="bar-track"><div class="bar-fill" style="width: ${lineBarPct}%; background: var(--accent-purple);"></div></div><span class="bar-val">${formatTokens(t.tokensPerLineAdded)}</span></div>
       </div>
     </div>
-    <div class="token-legend">
-      <span><span class="dot" style="background: var(--accent-orange);"></span>Total Burned</span>
-      <span><span class="dot" style="background: var(--accent-red);"></span>Wasted</span>
-      <span><span class="dot" style="background: var(--accent-green);"></span>Efficient</span>
-      <span><span class="dot" style="background: var(--accent-cyan);"></span>Per Commit</span>
-    </div>
   </div>`;
 }
 
@@ -3214,8 +3208,7 @@ function renderAutonomySection(am) {
     : 'N/A';
 
   // Score composition: each component's contribution to the final score
-  // (component score × weight) as integer percentages summing to 100. Toolbelt
-  // coverage is intentionally excluded — it's a descriptor, not a scored input.
+  // (component score × weight) as integer percentages summing to 100.
   const bd = am.breakdown;
   const [bAuto, bHeal, bVel] = pctTo100([
     bd.autopilotScore * 0.30,
@@ -3223,16 +3216,8 @@ function renderAutonomySection(am) {
     bd.velocityScore * 0.35,
   ]);
 
-  // Each agent has its own tool vocabulary — name the right one per tab, and
-  // on the mixed view say each agent is measured against its own tool set.
-  const toolbeltTip = {
-    claude: 'How many distinct tools (Read, Write, Edit, Bash, Grep, Glob, etc.) the agent uses, as a share of the common tool set.',
-    codex: 'How many distinct tools (shell, apply_patch, web_search, update_plan, write_stdin, etc.) the agent uses, as a share of the common tool set.',
-    all: 'How many distinct tools the agents use — each agent is measured against its own tool set (Claude Code: Read, Write, Edit, Bash… OpenAI Codex: shell, apply_patch, web_search…).',
-  }[(DATA.meta.source || 'all')] + ' A descriptor of tool variety — not part of the autonomy score, since a focused session that needs few tools isn\'t less autonomous.';
-
   return `<div class="autonomy-section">
-    <h2>Agent Autonomy <i class="info-tip" data-tip="How independently your AI agent works. The score blends autopilot ratio (actions per prompt), self-healing (test/lint usage), and commit efficiency. Toolbelt coverage is shown for context but is not part of the score.">i</i></h2>
+    <h2>Agent Autonomy <i class="info-tip" data-tip="How independently your AI agent works. The score blends autopilot ratio (actions per prompt), self-healing (test/lint usage), and commit efficiency.">i</i></h2>
     <div class="autonomy-layout">
       <div class="autonomy-score-hub" style="--auto-glow: ${glowMap[g] || glowMap.F};">
         <div class="autonomy-ring" style="--auto-color: ${gradeColor}; --auto-deg: ${deg}deg;">
@@ -3258,14 +3243,6 @@ function renderAutonomySection(am) {
             <div class="metric-value" style="color: var(--accent-green);">${am.selfHealScore}%</div>
             <div class="metric-bar"><div class="fill" style="width: ${am.selfHealScore}%; background: var(--accent-green);"></div></div>
             <div class="metric-sub">${am.totalVerificationCalls} of ${am.attemptedBashCalls} state-changing shell calls were tests/lints</div>
-          </div>
-          <div class="auto-metric">
-            <div class="metric-header">
-              <span class="metric-name">Toolbelt Coverage <i class="info-tip" data-tip="${toolbeltTip}">i</i></span>
-            </div>
-            <div class="metric-value" style="color: var(--accent-purple);">${am.toolbeltCoverage}%</div>
-            <div class="metric-bar"><div class="fill" style="width: ${am.toolbeltCoverage}%; background: var(--accent-purple);"></div></div>
-            <div class="metric-sub">${am.toolbeltCoverage >= 70 ? 'Full toolbelt utilization' : am.toolbeltCoverage >= 40 ? 'Moderate diversity' : 'Narrow tool usage'}</div>
           </div>
           <div class="auto-metric">
             <div class="metric-header">
@@ -3393,7 +3370,7 @@ function renderSessionsTable(sessions) {
             return `
               <tr class="${rowClass}" style="cursor:pointer;" onclick="toggleExpand(${idx}, this)">
                 <td><span class="expand-chevron">&#9654;</span>${formatDateRange(s.startTime, s.endTime)}</td>
-                <td>${s.projectName || '—'}</td>
+                <td>${escapeHtml(s.projectName || '—')}</td>
                 <td>${sourceDot}${modelDisplay}</td>
                 <td>${s.userMessageCount + s.assistantMessageCount}</td>
                 <td><span class="autopilot-badge">${s.autopilotRatio > 0 ? s.autopilotRatio + 'x' : '—'}</span></td>
@@ -3408,7 +3385,7 @@ function renderSessionsTable(sessions) {
                     ${s.commits.length > 0 ? s.commits.map(c => `
                       <div class="commit-item">
                         <span class="commit-hash">${c.hash.slice(0, 7)}</span>
-                        <span class="commit-branch ${c.onMain ? 'main-badge' : ''}">${escapeHtml(c.onMain ? 'main' : c.branches[0] || 'branch')}</span>
+                        <span class="commit-branch ${c.onMain ? 'main-badge' : ''}">${c.onMain ? 'main' : 'branch'}</span>${c.aiTrailer ? '<span class="commit-branch" title="This commit carries an agent Co-authored-by trailer" style="color:var(--accent-green);">✓ AI-stamped</span>' : ''}
                         <span class="commit-subject">${escapeHtml(c.subject)}</span>
                         <span style="margin-left:auto;color:var(--text-muted);white-space:nowrap;flex-shrink:0;">+${c.totalAdded}/-${c.totalDeleted}</span>
                       </div>

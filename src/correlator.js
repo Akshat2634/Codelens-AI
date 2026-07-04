@@ -95,6 +95,7 @@ export function correlateSessions(sessions, commitsByRepo, cutoffMs = 0) {
     const sessionEndMs = new Date(session.endTime).getTime();
     const sessionFiles = new Set(session.filesWritten || []);
     const windowEnd = sessionEndMs + FALLBACK_BUFFER_MS;
+    const sessionSource = session.source || 'claude';
 
     for (const commit of repoCommits) {
       // Time constraint: commit must fall within [sessionStart, sessionEnd + 2h]
@@ -109,24 +110,28 @@ export function correlateSessions(sessions, commitsByRepo, cutoffMs = 0) {
       // (time-based fallback)
       if (!hasFileOverlap && !chatOnlyEligible) continue;
 
+      // A Co-authored-by trailer names the agent that stamped the commit —
+      // near-ground-truth for WHICH agent's session should claim it.
+      const trailerMatch = !!commit.aiTrailer && commit.aiTrailer === sessionSource;
       const distance = temporalDistance(commit.timestampMs, sessionStartMs, sessionEndMs);
       const existing = commitAssignment.get(commit.hash);
 
       if (!existing) {
-        commitAssignment.set(commit.hash, { session, hasFileOverlap, distance });
+        commitAssignment.set(commit.hash, { session, hasFileOverlap, trailerMatch, distance });
       } else {
-        // Prefer file-based match over time-only match
-        if (hasFileOverlap && !existing.hasFileOverlap) {
-          commitAssignment.set(commit.hash, { session, hasFileOverlap, distance });
-        } else if (hasFileOverlap === existing.hasFileOverlap) {
-          // Same match type — prefer the temporally closer session; break exact
-          // ties by the more recent session start so attribution is deterministic
-          // (not dependent on session iteration order).
-          const tieToNewer = distance === existing.distance &&
-            new Date(session.startTime).getTime() > new Date(existing.session.startTime).getTime();
-          if (distance < existing.distance || tieToNewer) {
-            commitAssignment.set(commit.hash, { session, hasFileOverlap, distance });
-          }
+        // Preference order: file-based match beats time-only match; within the
+        // same match type, a session from the agent named in the commit's
+        // co-author trailer beats one from another agent; then the temporally
+        // closer session wins, with exact ties broken by the more recent
+        // session start so attribution is deterministic (not dependent on
+        // session iteration order).
+        const better =
+          hasFileOverlap !== existing.hasFileOverlap ? hasFileOverlap :
+          trailerMatch !== existing.trailerMatch ? trailerMatch :
+          distance !== existing.distance ? distance < existing.distance :
+          new Date(session.startTime).getTime() > new Date(existing.session.startTime).getTime();
+        if (better) {
+          commitAssignment.set(commit.hash, { session, hasFileOverlap, trailerMatch, distance });
         }
       }
     }
@@ -170,21 +175,25 @@ export function correlateSessions(sessions, commitsByRepo, cutoffMs = 0) {
     const messageCount = session.userMessageCount + session.assistantMessageCount;
     const isOrphaned = messageCount > 10 && matched.length === 0;
 
-    const committedFiles = new Set(matched.flatMap(c => c.files.map(f => f.path)));
-    const uncommittedFiles = [...sessionFiles].filter(f => !committedFiles.has(f));
-
     // Attribution confidence: how sure are we these commits are THIS session's
-    // work? Two signals, both already computed during matching:
+    // work? Three signals, all already computed during matching:
+    //   - trailerFrac: share of matched commits whose Co-authored-by trailer
+    //     names this session's agent — near-ground-truth (the agent stamped
+    //     the commit itself), so a majority of stamped commits is high
+    //     confidence outright.
     //   - overlapFrac: share of the matched commits' added lines that landed in
     //     files the session actually wrote (filesWritten ∩ commit.files).
     //   - inWindowFrac: share of commits made inside the session window
     //     (distance 0) vs. claimed via the 2h post-session buffer.
-    // File evidence dominates: agents don't run `git commit` for the user, so
-    // commits routinely land minutes AFTER the session ends — a low
+    // File evidence dominates timing: agents don't run `git commit` for the
+    // user, so commits routinely land minutes AFTER the session ends — a low
     // inWindowFrac only downgrades a strong file match to medium, never low.
     // Weak file overlap (< 20% of added lines) is low regardless of timing.
-    // Chat-only (time-only) matches have no file evidence → low.
+    // Chat-only (time-only) matches have no file evidence → low, unless the
+    // commits carry this agent's trailer.
     let attributionConfidence = null;
+    let trailerConfirmedCommits = 0;
+    const sessionSource = session.source || 'claude';
     if (matched.length > 0) {
       let inWindow = 0;
       let overlapAdded = 0;
@@ -193,13 +202,16 @@ export function correlateSessions(sessions, commitsByRepo, cutoffMs = 0) {
         const a = commitAssignment.get(c.hash);
         if (a && a.distance === 0) inWindow++;
         totalAddedAll += c.totalAdded || 0;
+        if (c.aiTrailer && c.aiTrailer === sessionSource) trailerConfirmedCommits++;
         if (sessionFiles.size > 0) {
           overlapAdded += c.files.filter(f => sessionFiles.has(f.path)).reduce((x, f) => x + f.added, 0);
         }
       }
       const overlapFrac = sessionFiles.size === 0 ? 0 : (totalAddedAll > 0 ? overlapAdded / totalAddedAll : 1);
       const inWindowFrac = inWindow / matched.length;
-      if (sessionFiles.size === 0) attributionConfidence = 'low';
+      const trailerFrac = trailerConfirmedCommits / matched.length;
+      if (trailerFrac >= 0.5) attributionConfidence = 'high';
+      else if (sessionFiles.size === 0) attributionConfidence = 'low';
       else if (overlapFrac >= 0.5) attributionConfidence = inWindowFrac >= 0.5 ? 'high' : 'medium';
       else if (overlapFrac < 0.2) attributionConfidence = 'low';
       else attributionConfidence = 'medium';
@@ -216,11 +228,8 @@ export function correlateSessions(sessions, commitsByRepo, cutoffMs = 0) {
       filesChanged,
       isOrphaned,
       attributionConfidence,
-      matchedByFiles: sessionFiles.size > 0,
-      uncommittedFiles,
+      trailerConfirmedCommits,
       costPerCommit: matched.length > 0 ? session.cost.totalCost / matched.length : null,
-      costPerLine: linesAdded > 0 ? session.cost.totalCost / linesAdded : null,
-      costPerNetLine: netLines > 0 ? session.cost.totalCost / netLines : null,
     });
   }
 

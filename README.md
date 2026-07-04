@@ -78,9 +78,12 @@ This parses your `~/.claude/projects/` and `~/.codex/sessions/` data, analyzes y
 | Metric                | Description                                                     |
 | --------------------- | --------------------------------------------------------------- |
 | **Cost per Commit**   | How much each AI-assisted commit costs in tokens                |
+| **AI Code Share**     | % of all merged lines this window written by AI — measured from git, not surveys |
+| **Value Leak**        | $ and % of spend from sessions that produced zero committed code |
 | **Line Survival Rate**| % of AI-written lines that survive 24h without being rewritten  |
 | **Orphaned Sessions** | Sessions with 10+ messages that produced zero commits           |
 | **ROI Grade (A-F)**   | Composite score based on tokens-per-commit and survival rate    |
+| **Trailer Attribution** | `Co-authored-by` agent trailers confirm commit attribution (near-ground-truth) |
 | **Model Comparison**  | Efficiency across Opus, Sonnet, Haiku, GPT-5 Codex, and more    |
 | **Agent Comparison**  | Per-agent dashboard tabs (All / Claude Code / OpenAI Codex)     |
 | **Branch Awareness**  | What % of AI commits landed on production                       |
@@ -88,7 +91,6 @@ This parses your `~/.claude/projects/` and `~/.codex/sessions/` data, analyzes y
 | **Autonomy Score**    | Composite A-F grade measuring how independently the agent works |
 | **Autopilot Ratio**   | Assistant messages per user prompt (higher = more autonomous)   |
 | **Self-Heal Score**   | % of bash calls that are test/lint commands (self-verification) |
-| **Toolbelt Coverage** | % of available tools used per session (workflow breadth)        |
 | **Commit Velocity**   | Tool calls per commit (lower = more efficient)                  |
 
 ## CLI Options
@@ -97,11 +99,11 @@ This parses your `~/.claude/projects/` and `~/.codex/sessions/` data, analyzes y
 codelens-ai                        # default: last 30 days, port 3457
 codelens-ai --days 90              # look back 90 days
 codelens-ai --port 8080            # custom port
+codelens-ai --host 0.0.0.0         # expose the dashboard beyond localhost (off by default)
 codelens-ai --no-open              # don't auto-open browser
 codelens-ai --json                 # dump all metrics as JSON to stdout
 codelens-ai --project techops      # filter to a specific project
 codelens-ai --refresh              # force full re-parse (ignore cache)
-codelens-ai --autonomy             # print autonomy score to terminal and exit
 codelens-ai --source codex         # analyze a single agent only: claude | codex
 codelens-ai --plan max20           # Claude subscription mode: effective $/commit vs your flat plan
 codelens-ai --plan-cost 150        # custom Claude monthly subscription cost (USD)
@@ -109,7 +111,49 @@ codelens-ai --codex-plan plus      # ChatGPT/Codex subscription: free | go | plu
 codelens-ai --codex-plan-cost 40   # custom Codex monthly subscription cost (USD)
 codelens-ai --claude-dir <path>    # override ~/.claude/projects (testing/CI)
 codelens-ai --codex-dir <path>     # override ~/.codex/sessions (testing/CI)
+
+codelens-ai report                 # print an ROI scorecard to the terminal
+codelens-ai report --md            # export codelens-report.md (or --md <path>)
+codelens-ai report --html          # export a self-contained codelens-report.html
+codelens-ai statusline --install   # add the ROI statusline to Claude Code
 ```
+
+### ROI report (`codelens-ai report`)
+
+One command produces the "is my AI subscription paying for itself" artifact — in the terminal, or as
+a self-contained Markdown/HTML one-pager you can hand to a manager to justify a Claude Max or
+ChatGPT Pro seat:
+
+- Spend (API-equivalent, with the estimated-pricing share flagged), plan utilization when `--plan`/`--codex-plan` is set
+- Commits shipped, cost per commit (and effective $/commit on your flat plan), line survival
+- **AI code share** — % of all merged lines this window that the AI wrote, measured from git
+- **Value leak** — how much spend never became committed code
+- Per-agent and per-model breakdowns, the attribution audit, and top insights
+
+All analysis flags (`--days`, `--source`, `--plan`, `--project`, ...) work on `report` too.
+
+### Claude Code statusline (`codelens-ai statusline`)
+
+A one-line always-on HUD inside Claude Code, and the only statusline that can show **ROI**, not just burn:
+
+```text
+$4.20 session │ today $12.40 · 3 commits · $4.13/commit · A │ 5h 84% (resets 1h15m) · wk 41% │ ctx 23%
+```
+
+- **Session cost** straight from Claude Code (exact, not estimated)
+- **Today's spend, commits, and $/commit** from your last pipeline run
+- **Official 5-hour and weekly rate-limit usage** with a reset countdown when you're close — the
+  numbers Anthropic's limiter actually enforces, not token-math estimates
+- **Context-window pressure**
+
+Install it with one command (backs up your settings file first, refuses to clobber an existing
+statusline unless you pass `--force`):
+
+```bash
+npx codelens-ai statusline --install
+```
+
+Then run `npx codelens-ai` (or `codelens-ai report`) whenever you want the "today" ROI numbers refreshed.
 
 ### Effective cost (subscription mode)
 
@@ -123,21 +167,21 @@ By default costs are **API-equivalent** — what your usage *would* cost at pay-
 The dashboard includes:
 
 - **Agent source tabs** — when both Claude Code and Codex sessions exist, switch between **All Agents**, **Claude Code**, and **OpenAI Codex** views; every section recomputes for the selected agent
-- **Hero stats** — total cost, commits shipped, cost per commit, ROI grade
-- **Attribution & Coverage** — per-commit confidence (high/medium/low) that a commit was really the AI's, plus a reconciliation of AI-attributed vs co-authored vs organic (manual) lines, so the ROI numbers are auditable rather than a black box
+- **Hero stats** — total cost, commits shipped, cost per commit, ROI grade, **AI code share**, and **value leak**
+- **Attribution & Coverage** — per-commit confidence (high/medium/low) that a commit was really the AI's, `Co-authored-by` trailer confirmations, plus a reconciliation of AI-attributed vs co-authored vs organic (manual) lines, so the ROI numbers are auditable rather than a black box
 - **Smart insights** — auto-generated observations about your usage patterns
 - **Cost vs Output timeline** — dual-axis chart of daily cost and lines added
 - **Model comparison** — cost breakdown by Claude model
 - **Session length analysis** — which session sizes have the best ROI
 - **Productivity heatmap** — GitHub-style grid showing when you're most productive
-- **Agent Autonomy** — autonomy score badge, autopilot ratio, self-heal score, toolbelt coverage, commit velocity, and top verification commands
+- **Agent Autonomy** — autonomy score badge, autopilot ratio, self-heal score, commit velocity, and top verification commands
 - **Sessions table** — sortable, expandable table with per-session metrics, matched commits, and autopilot ratio
 
 ## How It Works
 
 1. **Parses** JSONL session files from `~/.claude/projects/` (Claude Code) and rollout files from `~/.codex/sessions/` (OpenAI Codex CLI — including `.jsonl.zst` archives on Node >= 22.15)
-2. **Analyzes** git history from each repo you've worked in with either agent
-3. **Correlates** sessions to commits by file overlap and timing — all agents correlate together, so a commit is attributed to at most one session
+2. **Analyzes** git history from each repo you've worked in with either agent, including `Co-authored-by` agent trailers on each commit
+3. **Correlates** sessions to commits by file overlap and timing — all agents correlate together, so a commit is attributed to at most one session; a commit stamped `Co-authored-by: Claude/Codex` is routed to the matching agent and counts as high-confidence attribution
 4. **Calculates** cost using each provider's published API pricing (input, output, cache, and server-side web search when logged)
 5. **Serves** an interactive dashboard on localhost with per-agent views
 
@@ -217,8 +261,10 @@ Codelens-AI/
     ├── codex-parser.js   # Parse OpenAI Codex CLI rollout files
     ├── cache.js          # Parsed data caching layer (per-source staleness)
     ├── git-analyzer.js   # Parse git log with branch awareness
-    ├── correlator.js     # Match sessions to commits by file overlap + timing
+    ├── correlator.js     # Match sessions to commits by file overlap + timing + trailers
     ├── metrics.js        # Calculate ROI metrics and insights
+    ├── report.js         # `codelens-ai report` — terminal / Markdown / HTML ROI scorecard
+    ├── statusline.js     # `codelens-ai statusline` — Claude Code statusline integration
     ├── server.js         # Express server + API routes (?source= views)
     └── dashboard.html    # Single-file dashboard (inline CSS/JS)
 ```
@@ -242,7 +288,7 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for dev
 
 ## Privacy
 
-All data stays on your machine. The only network requests are for Chart.js and Inter font from CDNs. No telemetry, no data collection.
+All data stays on your machine, and the dashboard binds to `127.0.0.1` by default so it is not visible to your network (pass `--host 0.0.0.0` to opt in). Chart.js is bundled and served locally; the only external request the dashboard makes is loading webfonts from Google Fonts (it falls back to system fonts offline). No telemetry, no data collection.
 
 ## License
 

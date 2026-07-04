@@ -190,43 +190,6 @@ test('model breakdown attributes whole commits to the dominant family', () => {
   assert.ok(Number.isInteger(m.modelBreakdown.opus.commits));
 });
 
-test('bestDay/worstDay rank by commits-per-dollar when spend is non-trivial', () => {
-  const mk = (d) => ({ hash: 'h' + d, timestamp: d + 'T10:00:00.000Z', timestampMs: new Date(d + 'T10:00:00.000Z').getTime(), subject: 's', branches: ['main'], onMain: true, files: [{ path: 'src/foo.js', added: 5, deleted: 0 }], totalAdded: 5, totalDeleted: 0 });
-  const session = mkCorrelated({
-    filesWritten: ['src/foo.js'],
-    dailyUsage: {
-      '2026-04-10': { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 10 },
-      '2026-04-11': { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 1 },
-    },
-    commits: [mk('2026-04-10'), mk('2026-04-11')],
-    commitCount: 2, commitsOnMain: 2, linesAdded: 10,
-  });
-  const m = computeMetrics([session], [], { '/repo': { commits: session.commits, defaultBranch: 'main' } }, 365);
-  // 04-11 ($1, 1 commit = 1.0/$) beats 04-10 ($10, 1 commit = 0.1/$)
-  assert.equal(m.summary.bestDay.date, '2026-04-11');
-  assert.equal(m.summary.worstDay.date, '2026-04-10');
-});
-
-test('bestDay falls back to commit count when all days are trivially cheap', () => {
-  const session = mkCorrelated({
-    filesWritten: ['src/foo.js'],
-    dailyUsage: {
-      '2026-04-10': { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 0.10 },
-      '2026-04-11': { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 0.05 },
-    },
-    // both days below the $0.50 floor → rank by commit count, not the noisy ratio
-    commits: [
-      { hash: 'a', timestamp: '2026-04-10T10:00:00.000Z', timestampMs: new Date('2026-04-10T10:00:00.000Z').getTime(), subject: 's', branches: ['main'], onMain: true, files: [{ path: 'src/foo.js', added: 5, deleted: 0 }], totalAdded: 5, totalDeleted: 0 },
-      { hash: 'b', timestamp: '2026-04-10T11:00:00.000Z', timestampMs: new Date('2026-04-10T11:00:00.000Z').getTime(), subject: 's', branches: ['main'], onMain: true, files: [{ path: 'src/foo.js', added: 5, deleted: 0 }], totalAdded: 5, totalDeleted: 0 },
-      { hash: 'c', timestamp: '2026-04-11T10:00:00.000Z', timestampMs: new Date('2026-04-11T10:00:00.000Z').getTime(), subject: 's', branches: ['main'], onMain: true, files: [{ path: 'src/foo.js', added: 5, deleted: 0 }], totalAdded: 5, totalDeleted: 0 },
-    ],
-    commitCount: 3, commitsOnMain: 3, linesAdded: 15,
-  });
-  const m = computeMetrics([session], [], { '/repo': { commits: session.commits, defaultBranch: 'main' } }, 365);
-  assert.equal(m.summary.bestDay.date, '2026-04-10'); // 2 commits
-  assert.equal(m.summary.worstDay.date, '2026-04-11'); // 1 commit
-});
-
 test('reconciliation aggregates commit confidence and line populations', () => {
   const sessionHigh = mkCorrelated({
     sessionId: 'h', attributionConfidence: 'high',
@@ -308,40 +271,6 @@ test('weeklyNarrative populated when this-week sessions exist', () => {
   assert.ok(labels.includes('Spend'));
 });
 
-test('toolbelt coverage uses per-source vocabulary and collapses codex shell aliases', () => {
-  const claude = mkCorrelated({
-    sessionId: 'cl',
-    source: 'claude',
-    toolCalls: { Read: 5, Edit: 3, Bash: 2 },
-  });
-  const codex = mkCorrelated({
-    sessionId: 'cx',
-    source: 'codex',
-    toolCalls: { shell: 4, exec_command: 2, local_shell_call: 1, apply_patch: 3, update_plan: 1 },
-  });
-  const m = computeMetrics([claude, codex], [], {}, 30);
-  const bySession = Object.fromEntries(m.autonomyMetrics.perSession.map(a => [a.sessionId, a]));
-  // Claude: 3 unique of the 14-tool Claude vocabulary
-  assert.equal(bySession.cl.toolbeltCoverage, Math.round((3 / 14) * 100));
-  // Codex: shell/exec_command/local_shell_call collapse to one logical tool →
-  // 3 unique (shell, apply_patch, update_plan) of the 9-tool codex vocabulary
-  assert.equal(bySession.cx.toolbeltCoverage, Math.round((3 / 9) * 100));
-});
-
-test('toolbelt coverage caps at 100 when tools exceed the known vocabulary', () => {
-  const wide = mkCorrelated({
-    sessionId: 'w',
-    source: 'codex',
-    toolCalls: {
-      shell: 1, apply_patch: 1, update_plan: 1, web_search: 1, write_stdin: 1,
-      read_thread_terminal: 1, request_user_input: 1, view_image: 1,
-      tool_search: 1, 'mcp.custom': 1, 'mcp.other': 1,
-    },
-  });
-  const m = computeMetrics([wide], [], {}, 30);
-  assert.equal(m.autonomyMetrics.perSession[0].toolbeltCoverage, 100);
-});
-
 test('selfHealScore excludes read-only shell calls from the denominator', () => {
   // Codex routes file reading through the shell — 62 of 100 calls being
   // sed/rg/ls must not deflate the verification share of actual work
@@ -352,7 +281,9 @@ test('selfHealScore excludes read-only shell calls from the denominator', () => 
   });
   const m = computeMetrics([codex], [], {}, 30);
   assert.equal(m.autonomyMetrics.selfHealScore, 50); // 19 / (100 - 62)
-  assert.equal(m.autonomyMetrics.perSession[0].selfHealScore, 50);
+  assert.equal(m.sessions[0].selfHealScore, 50);
+  // perSession is an internal join table — it must not ship in the payload
+  assert.equal('perSession' in m.autonomyMetrics, false);
   // Displayed raw counts stay untouched
   assert.equal(m.autonomyMetrics.totalBashCalls, 100);
   assert.equal(m.autonomyMetrics.totalVerificationCalls, 19);
@@ -469,4 +400,89 @@ test('daily timeline with a single active day is not gap-filled', () => {
   const m = computeMetrics([session], [], {}, 365);
   assert.equal(m.daily.length, 1);
   assert.equal(m.daily[0].date, '2026-04-10');
+});
+
+test('valueLeak sums the cost of zero-commit sessions', () => {
+  const ts = '2026-04-20T10:30:00.000Z';
+  const commit = { hash: 'v1', timestamp: ts, timestampMs: new Date(ts).getTime(), subject: 's', onMain: true, files: [{ path: 'src/foo.js', added: 10, deleted: 0 }], totalAdded: 10, totalDeleted: 0 };
+  const shipped = mkCorrelated({
+    sessionId: 'ship', commits: [commit], commitCount: 1, commitsOnMain: 1, linesAdded: 10,
+    cost: { totalCost: 6, inputCost: 3, outputCost: 3, cacheReadCost: 0, cacheCreationCost: 0 },
+  });
+  const leaked1 = mkCorrelated({ sessionId: 'l1', cost: { totalCost: 3, inputCost: 2, outputCost: 1, cacheReadCost: 0, cacheCreationCost: 0 } });
+  const leaked2 = mkCorrelated({ sessionId: 'l2', cost: { totalCost: 1, inputCost: 1, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0 } });
+  const m = computeMetrics([shipped, leaked1, leaked2], [], { '/repo': { commits: [commit], defaultBranch: 'main' } }, 30);
+  assert.equal(m.summary.valueLeak.cost, 4);
+  assert.equal(m.summary.valueLeak.pct, 40); // 4 of 10 total
+  assert.equal(m.summary.valueLeak.sessionCount, 2);
+});
+
+test('aiCodeSharePct divides AI-attributed lines by all lines merged in the window', () => {
+  const ts = '2026-04-20T10:30:00.000Z';
+  // AI commit: 40 added lines total, 30 in the file the session wrote
+  const aiCommit = {
+    hash: 'ai1', timestamp: ts, timestampMs: new Date(ts).getTime(), subject: 's', onMain: true,
+    files: [{ path: 'src/foo.js', added: 30, deleted: 0 }, { path: 'manual.md', added: 10, deleted: 0 }],
+    totalAdded: 40, totalDeleted: 0,
+  };
+  const session = mkCorrelated({ commits: [aiCommit], commitCount: 1, commitsOnMain: 1, linesAdded: 30 });
+  // Organic commit adds another 60 lines
+  const organic = { hash: 'org1', timestamp: ts, timestampMs: new Date(ts).getTime(), subject: 'manual', onMain: true, files: [{ path: 'x.js', added: 60, deleted: 0 }], totalAdded: 60, totalDeleted: 0 };
+  const m = computeMetrics([session], [organic], { '/repo': { commits: [aiCommit, organic], defaultBranch: 'main' } }, 30);
+  // 30 AI-attributed of (40 + 60) window lines = 30%
+  assert.equal(m.summary.aiCodeSharePct, 30);
+});
+
+test('aiCodeSharePct is null when the window has no added lines', () => {
+  const m = computeMetrics([mkCorrelated()], [], {}, 30);
+  assert.equal(m.summary.aiCodeSharePct, null);
+});
+
+test('reconciliation counts trailer-stamped commits, matched and organic', () => {
+  const ts = '2026-04-20T10:30:00.000Z';
+  const stamped = {
+    hash: 't1', timestamp: ts, timestampMs: new Date(ts).getTime(), subject: 's', onMain: true, aiTrailer: 'claude',
+    files: [{ path: 'src/foo.js', added: 5, deleted: 0 }], totalAdded: 5, totalDeleted: 0,
+  };
+  const session = mkCorrelated({
+    source: 'claude',
+    commits: [stamped], commitCount: 1, commitsOnMain: 1, linesAdded: 5,
+    trailerConfirmedCommits: 1, attributionConfidence: 'high',
+  });
+  const organicStamped = { hash: 't2', timestamp: ts, timestampMs: new Date(ts).getTime(), subject: 'o', onMain: true, aiTrailer: 'codex', files: [{ path: 'y.js', added: 3, deleted: 0 }], totalAdded: 3, totalDeleted: 0 };
+  const organicPlain = { hash: 't3', timestamp: ts, timestampMs: new Date(ts).getTime(), subject: 'p', onMain: true, files: [{ path: 'z.js', added: 2, deleted: 0 }], totalAdded: 2, totalDeleted: 0 };
+  const m = computeMetrics([session], [organicStamped, organicPlain], { '/repo': { commits: [stamped, organicStamped, organicPlain], defaultBranch: 'main' } }, 30);
+  assert.deepEqual(m.summary.reconciliation.commits.trailerStamped, { matched: 1, crossAgent: 0, organic: 1 });
+});
+
+test('trailer-stamped commits claimed by a DIFFERENT agent land in the crossAgent bucket', () => {
+  const ts = '2026-04-20T10:30:00.000Z';
+  // A claude-stamped commit claimed by a codex session (e.g. the claude
+  // session log aged out) — neither confirmed nor organic, but still stamped.
+  const stamped = {
+    hash: 'x1', timestamp: ts, timestampMs: new Date(ts).getTime(), subject: 's', onMain: true, aiTrailer: 'claude',
+    files: [{ path: 'src/foo.js', added: 5, deleted: 0 }], totalAdded: 5, totalDeleted: 0,
+  };
+  const codexSession = mkCorrelated({
+    source: 'codex',
+    commits: [stamped], commitCount: 1, commitsOnMain: 1, linesAdded: 5,
+    trailerConfirmedCommits: 0,
+  });
+  const m = computeMetrics([codexSession], [], { '/repo': { commits: [stamped], defaultBranch: 'main' } }, 30);
+  assert.deepEqual(m.summary.reconciliation.commits.trailerStamped, { matched: 0, crossAgent: 1, organic: 0 });
+});
+
+test('per-agent views do not report the other agent\'s claimed commits as trailer-organic', () => {
+  const ts = '2026-04-20T10:30:00.000Z';
+  // index.js folds the OTHER agent's claimed commits into a per-agent view's
+  // organic set with claimedByOtherAgent — they matched a session, so the
+  // "no session in this window" audit line must not count them.
+  const otherAgentCommit = {
+    hash: 'o1', timestamp: ts, timestampMs: new Date(ts).getTime(), subject: 's', onMain: true, aiTrailer: 'codex',
+    claimedByOtherAgent: true,
+    files: [{ path: 'x.js', added: 4, deleted: 0 }], totalAdded: 4, totalDeleted: 0,
+  };
+  const m = computeMetrics([mkCorrelated()], [otherAgentCommit], {}, 30);
+  assert.equal(m.summary.reconciliation.commits.trailerStamped.organic, 0);
+  assert.ok(!m.insights.some(i => i.text.includes('co-author trailer')), 'no false missing-logs insight');
 });

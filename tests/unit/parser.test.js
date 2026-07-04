@@ -338,7 +338,6 @@ test('MultiEdit and NotebookEdit populate filesWritten (not just Write/Edit)', a
     assert.ok(s.filesWritten.includes('b.js'), 'MultiEdit recorded');
     assert.ok(s.filesWritten.includes('nb.ipynb'), 'NotebookEdit recorded');
     assert.ok(!s.filesWritten.includes('c.js'), 'Read must not land in filesWritten');
-    assert.ok(s.filesRead.includes('c.js'), 'Read recorded in filesRead');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
