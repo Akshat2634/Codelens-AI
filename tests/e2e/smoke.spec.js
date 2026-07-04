@@ -135,8 +135,11 @@ test.describe('UI modernization (brand marks, face-off, command bar)', () => {
   test('agent face-off renders on All Agents and hides on a per-agent tab', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('.faceoff-section', { timeout: 15_000 });
-    // Two cards with brand marks and grade badges, one VS divider.
+    // Two cards with brand marks and grade badges, one VS divider. The Claude
+    // card wears the mascot (head + watermark); the Codex card keeps the knot.
     await expect(page.locator('.faceoff-card')).toHaveCount(2);
+    await expect(page.locator('.faceoff-card svg[data-agent-mascot="claude"]')).toHaveCount(2);
+    await expect(page.locator('.faceoff-card svg[data-agent-logo="codex"]')).toHaveCount(2);
     await expect(page.locator('.faceoff-card .grade-badge')).toHaveCount(2);
     await expect(page.locator('.faceoff-vs')).toHaveText('VS');
     const spendRows = page.locator('.faceoff-card .fo-row', { hasText: 'Spend' });
