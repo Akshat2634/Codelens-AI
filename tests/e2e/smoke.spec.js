@@ -177,6 +177,28 @@ test.describe('UI modernization (brand marks, face-off, command bar)', () => {
     expect(hidden).toBe(0);
   });
 
+  test('ROI headline tooltips are not clipped by their container', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.roi-headlines');
+    // The row must not clip upward-popping tooltips (regression: overflow:
+    // hidden on .period-stats decapitated the Value Leak info-tip).
+    const overflow = await page.locator('.roi-headlines').evaluate(el => getComputedStyle(el).overflow);
+    expect(overflow).toBe('visible');
+    // Hover the Value Leak tip and confirm the tooltip's full height fits
+    // inside the viewport-visible area above the icon.
+    const tip = page.locator('.roi-headlines .info-tip').last();
+    await tip.scrollIntoViewIfNeeded();
+    await page.evaluate(() => window.scrollBy(0, -180));
+    await tip.hover();
+    await page.waitForTimeout(400);
+    const visibleTop = await tip.evaluate((el) => {
+      const cs = getComputedStyle(el, '::after');
+      const h = parseFloat(cs.height) || 0;
+      return el.getBoundingClientRect().top - 10 - h; // tooltip top edge
+    });
+    expect(visibleTop).toBeGreaterThan(0);
+  });
+
   test('share card renders with brand marks and no JS errors', async ({ page }) => {
     const errors = [];
     page.on('pageerror', (err) => errors.push(err.message));
