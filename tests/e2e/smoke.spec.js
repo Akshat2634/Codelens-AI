@@ -98,12 +98,12 @@ test.describe('Dashboard smoke (fixtures)', () => {
     // Fixtures contain both Claude and Codex sessions, so tabs must show
     await page.goto('/');
     await page.waitForSelector('.source-tabs .source-tab');
-    const tabs = page.locator('.source-tab');
+    const tabs = page.locator('.source-tabs .source-tab');
     await expect(tabs).toHaveCount(3);
-    await expect(page.locator('.source-tab.active')).toContainText(/All Agents/i);
+    await expect(page.locator('.source-tabs .source-tab.active')).toContainText(/All Agents/i);
 
-    await page.locator('.source-tab', { hasText: 'OpenAI Codex' }).click();
-    await expect(page.locator('.source-tab.active')).toContainText(/OpenAI Codex/i, { timeout: 10_000 });
+    await page.locator('.source-tabs .source-tab', { hasText: 'OpenAI Codex' }).click();
+    await expect(page.locator('.source-tabs .source-tab.active')).toContainText(/OpenAI Codex/i, { timeout: 10_000 });
     // Sessions table now shows only Codex sessions (GPT models)
     await page.waitForSelector('.sessions-section tbody tr');
     const modelCells = await page.locator('.sessions-section tbody tr:not(.expand-row) td:nth-child(3)').allTextContents();
@@ -112,5 +112,79 @@ test.describe('Dashboard smoke (fixtures)', () => {
       expect(cell).toMatch(/GPT|Codex|o\d/i);
     }
     expect(errors, 'JS errors during source switch: ' + errors.join(' | ')).toEqual([]);
+  });
+});
+
+test.describe('UI modernization (brand marks, face-off, command bar)', () => {
+  test('agent brand marks render on tabs, sessions table, and footer', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.source-tabs .source-tab');
+    // Tabs: Claude tab carries the starburst, Codex tab the knot, All both.
+    await expect(page.locator('.source-tabs .source-tab', { hasText: 'Claude Code' }).locator('svg[data-agent-logo="claude"]')).toHaveCount(1);
+    await expect(page.locator('.source-tabs .source-tab', { hasText: 'OpenAI Codex' }).locator('svg[data-agent-logo="codex"]')).toHaveCount(1);
+    await expect(page.locator('.source-tabs .source-tab', { hasText: 'All Agents' }).locator('svg[data-agent-logo]')).toHaveCount(2);
+    // Sessions table: every row is stamped with its agent's mark on the mixed view.
+    await page.waitForSelector('.sessions-section tbody tr');
+    const rows = await page.locator('.sessions-section tbody tr:not(.expand-row)').count();
+    const rowMarks = await page.locator('.sessions-section tbody svg[data-agent-logo]').count();
+    expect(rowMarks).toBe(rows);
+    // Footer carries both marks.
+    await expect(page.locator('#footer-agents svg[data-agent-logo]')).toHaveCount(2);
+  });
+
+  test('agent face-off renders on All Agents and hides on a per-agent tab', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.faceoff-section', { timeout: 15_000 });
+    // Two cards with brand marks and grade badges, one VS divider.
+    await expect(page.locator('.faceoff-card')).toHaveCount(2);
+    await expect(page.locator('.faceoff-card .grade-badge')).toHaveCount(2);
+    await expect(page.locator('.faceoff-vs')).toHaveText('VS');
+    const spendRows = page.locator('.faceoff-card .fo-row', { hasText: 'Spend' });
+    await expect(spendRows).toHaveCount(2);
+    for (const text of await spendRows.allTextContents()) {
+      expect(text).toMatch(/\$\d/);
+    }
+    // Per-agent view: the head-to-head disappears (there is no opponent).
+    await page.locator('.source-tabs .source-tab', { hasText: 'Claude Code' }).click();
+    await expect(page.locator('.source-tabs .source-tab.active')).toContainText(/Claude Code/i, { timeout: 10_000 });
+    await expect(page.locator('.faceoff-section')).toHaveCount(0);
+  });
+
+  test('sticky command bar appears on scroll with mirrored tabs and hides at top', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.source-tabs .source-tab');
+    const bar = page.locator('#command-bar');
+    await expect(bar).not.toHaveClass(/visible/);
+    await page.evaluate(() => window.scrollTo(0, 1600));
+    await expect(bar).toHaveClass(/visible/, { timeout: 5_000 });
+    await expect(page.locator('#command-tabs .source-tab')).toHaveCount(3);
+    await expect(page.locator('#command-tabs svg[data-agent-logo]')).toHaveCount(4);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(bar).not.toHaveClass(/visible/, { timeout: 5_000 });
+  });
+
+  test('scroll-reveal never leaves sections permanently hidden', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.scroll-reveal');
+    // Instant jump to the bottom — the worst case for IntersectionObserver.
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    // The safety net reveals everything within ~4s even if observation missed.
+    await page.waitForTimeout(4_600);
+    const hidden = await page.locator('.scroll-reveal:not(.revealed)').count();
+    expect(hidden).toBe(0);
+  });
+
+  test('share card renders with brand marks and no JS errors', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+    await page.goto('/');
+    await page.waitForSelector('#share-btn');
+    await page.click('#share-btn');
+    await page.waitForSelector('.share-modal', { state: 'visible' });
+    await page.waitForTimeout(1_500); // fonts + canvas draw
+    const size = await page.locator('#share-canvas').evaluate(c => ({ w: c.width, h: c.height }));
+    expect(size.w).toBeGreaterThan(0);
+    expect(size.h).toBeGreaterThan(0);
+    expect(errors, 'share card JS errors: ' + errors.join(' | ')).toEqual([]);
   });
 });

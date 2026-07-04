@@ -335,6 +335,155 @@
     }
     .source-tab:disabled { opacity: 0.6; cursor: wait; }
 
+    /* ── Agent brand marks — inline SVG, offline-safe ─────── */
+    .agent-mark { display: inline-block; vertical-align: -0.18em; flex-shrink: 0; }
+    .agent-mark.mark-claude { color: #D97757; }
+    .agent-mark.mark-codex { color: var(--text-primary); }
+    .mark-pair { display: inline-flex; gap: 4px; align-items: center; flex-shrink: 0; }
+    .source-tab .agent-mark { opacity: 0.6; transition: opacity 0.2s; }
+    .source-tab.active .agent-mark,
+    .source-tab:hover .agent-mark { opacity: 1; }
+
+    /* ── Sticky command bar — appears once the header scrolls away ─────── */
+    .command-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 200;
+      transform: translateY(-110%);
+      transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+      background: color-mix(in srgb, var(--bg-primary) 84%, transparent);
+      -webkit-backdrop-filter: blur(16px) saturate(1.35);
+      backdrop-filter: blur(16px) saturate(1.35);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .command-bar.visible { transform: translateY(0); }
+    .command-bar-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 9px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .cb-wordmark {
+      font-family: var(--font-head);
+      font-weight: 700;
+      font-size: 0.98rem;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      white-space: nowrap;
+    }
+    .cb-wordmark em { font-style: normal; color: var(--accent-orange-bright); }
+    .cb-bars { display: inline-flex; align-items: flex-end; gap: 2.5px; height: 14px; }
+    .cb-bars span { width: 3.5px; border-radius: 1.5px; }
+    .cb-bars span:nth-child(1) { height: 8px;  background: var(--accent-orange); }
+    .cb-bars span:nth-child(2) { height: 14px; background: var(--accent-green); }
+    .cb-bars span:nth-child(3) { height: 11px; background: var(--accent-blue); }
+    .cb-tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+    .cb-tabs::-webkit-scrollbar { display: none; }
+    .cb-tabs .source-tab { padding: 5px 12px; font-size: 0.62rem; }
+    .cb-tabs .source-tab .tab-count { display: none; }
+    .cb-actions { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
+    .cb-actions button {
+      width: 30px; height: 30px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
+      background: var(--overlay-light);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .cb-actions button:hover { color: var(--text-primary); border-color: var(--glass-border-hover); }
+    .cb-actions button svg { width: 14px; height: 14px; }
+    @media (max-width: 720px) {
+      .cb-wordmark .cb-label { display: none; }
+      .command-bar-inner { padding: 9px 14px; gap: 10px; }
+    }
+
+    /* ── Agent face-off — side-by-side scoreboard (both-agent views) ─────── */
+    .faceoff-grid {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+    .faceoff-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      padding: 20px 22px;
+      background: linear-gradient(135deg, color-mix(in srgb, var(--fo-accent) 6%, transparent), var(--overlay-light) 55%);
+    }
+    .faceoff-card::before {
+      content: '';
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--fo-accent), transparent 85%);
+    }
+    .fo-watermark {
+      position: absolute;
+      right: -26px;
+      bottom: -30px;
+      opacity: 0.055;
+      pointer-events: none;
+      color: var(--fo-accent);
+    }
+    .faceoff-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: var(--font-head);
+      font-weight: 700;
+      font-size: 1.05rem;
+      color: var(--text-primary);
+    }
+    .faceoff-head .grade-badge { margin-left: auto; }
+    .fo-rows { margin-top: 16px; display: grid; gap: 9px; position: relative; }
+    .fo-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 0.85rem; }
+    .fo-row .k {
+      color: var(--text-muted);
+      font-family: var(--font-display);
+      font-size: 0.66rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .fo-row .v { font-family: var(--font-display); color: var(--text-primary); font-weight: 600; }
+    .fo-row .v.win { color: var(--accent-green); }
+    .fo-row .v.win::after { content: ' ▲'; font-size: 0.6em; vertical-align: 0.25em; }
+    .faceoff-vs {
+      align-self: center;
+      font-family: var(--font-display);
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      color: var(--text-muted);
+      border: 1px solid var(--border-subtle);
+      background: var(--overlay-light);
+      border-radius: 999px;
+      padding: 8px 10px;
+    }
+    @media (max-width: 860px) {
+      .faceoff-grid { grid-template-columns: 1fr; }
+      .faceoff-vs { justify-self: center; }
+    }
+
+    /* ── Keyboard focus — visible rings on every interactive control ─────── */
+    .source-tab:focus-visible,
+    .scale-toggle:focus-visible,
+    .header-action-btn:focus-visible,
+    .theme-switcher button:focus-visible,
+    .cb-actions button:focus-visible,
+    .sessions-table th:focus-visible,
+    .pagination button:focus-visible {
+      outline: 2px solid var(--accent-orange-bright);
+      outline-offset: 2px;
+    }
+
     /* Shared section heading style — numbered drafting-sheet kickers */
     #app { counter-reset: section; }
     .stats-section {
@@ -2088,6 +2237,23 @@
       <div class="source-tabs" id="source-tabs" style="display:none;" role="tablist" aria-label="Agent source"></div>
     </header>
 
+    <!-- Sticky command bar: slides in once the header scrolls away, keeping the
+         wordmark, agent tabs, and actions reachable on a long page. -->
+    <div class="command-bar" id="command-bar" aria-hidden="true">
+      <div class="command-bar-inner">
+        <span class="cb-wordmark"><span class="cb-bars"><span></span><span></span><span></span></span><span class="cb-label">Codelens <em>AI</em></span></span>
+        <div class="cb-tabs" id="command-tabs" role="tablist" aria-label="Agent source"></div>
+        <div class="cb-actions">
+          <button onclick="document.getElementById('share-btn')?.click()" aria-label="Share report card" title="Share AI Report Card">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+          </button>
+          <button onclick="window.scrollTo({ top: 0, behavior: 'smooth' })" aria-label="Back to top" title="Back to top">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <style>
       @keyframes dep-in {
         0%   { opacity: 0; transform: translateX(32px) scale(0.96); }
@@ -2296,7 +2462,8 @@
       <div class="footer-stamp">Designed &amp; built in the Bay Area &middot; California <span class="footer-stamp-mark">◆</span></div>
       Made by <a href="https://www.linkedin.com/in/akshat2634/">Akshat</a> &middot; Powered by <a href="https://code.claude.com/docs/en/overview">Claude Code</a> &middot; <a href="https://github.com/Akshat2634/Codelens-AI">GitHub</a> &middot; <a href="https://codelensai-dev.vercel.app/">Website</a>
       <div style="margin-top:6px;font-size:0.75rem;opacity:0.7;">Open source — contributions, ideas, and feedback welcome! <a href="https://github.com/Akshat2634/Codelens-AI" style="color:var(--accent-blue);">Star the repo</a> if you find it useful.</div>
-      <div style="margin-top:6px;font-size:0.7rem;opacity:0.4;">Cost estimates are approximate — based on Anthropic's and OpenAI's published per-token API pricing and may vary from actual billing (subscription plans pay a flat fee). Supports Claude Code and OpenAI Codex. Cursor, Gemini CLI, and more coming soon.</div>
+      <div id="footer-agents" style="margin-top:10px;font-size:0.75rem;opacity:0.75;display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap;"></div>
+      <div style="margin-top:6px;font-size:0.7rem;opacity:0.4;">Cost estimates are approximate — based on Anthropic's and OpenAI's published per-token API pricing and may vary from actual billing (subscription plans pay a flat fee). Cursor, Gemini CLI, and more coming soon.</div>
     </footer>
 
     <!-- Share Report Card Modal -->
@@ -2388,6 +2555,20 @@ const SOURCE_META = {
   claude: { label: 'Claude Code', accent: '--accent-orange' },
   codex: { label: 'OpenAI Codex', accent: '--accent-cyan' },
 };
+
+/* ── Agent brand marks ──
+   Official vector paths (Claude starburst / OpenAI knot) from the CC0
+   simple-icons set, inlined so the dashboard stays fully offline. Rendered
+   with currentColor by default; .mark-claude carries Anthropic's #D97757. */
+const AGENT_MARK_PATHS = {
+  claude: 'm4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z',
+  codex: 'M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z',
+};
+function agentMark(agent, size = 14, extraClass = '') {
+  const path = AGENT_MARK_PATHS[agent];
+  if (!path) return '';
+  return `<svg class="agent-mark mark-${agent} ${extraClass}" data-agent-logo="${agent}" viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor" role="img" aria-label="${SOURCE_META[agent] ? SOURCE_META[agent].label : agent}"><path d="${path}"/></svg>`;
+}
 // Deep links win over the remembered choice: ?source=claude|codex|all selects
 // the tab directly (anything else falls through to localStorage, then 'all').
 const urlSource = new URLSearchParams(location.search).get('source');
@@ -2402,25 +2583,35 @@ function hasMultipleSources() {
 
 function renderSourceTabs() {
   const bar = document.getElementById('source-tabs');
+  const cbTabs = document.getElementById('command-tabs');
   if (!bar) return;
   if (!hasMultipleSources()) {
     bar.style.display = 'none';
     bar.innerHTML = '';
+    if (cbTabs) cbTabs.innerHTML = '';
     return;
   }
   const counts = DATA.meta.sources;
   const tabs = ['all', 'claude', 'codex'].filter(k => k === 'all' || counts[k] > 0);
   bar.style.display = 'flex';
-  bar.innerHTML = tabs.map(k => {
+  const html = tabs.map(k => {
     const m = SOURCE_META[k];
     const count = k === 'all'
       ? Object.values(counts).reduce((a, b) => a + b, 0)
       : counts[k];
     const active = (DATA.meta.source || 'all') === k;
+    // Each agent tab wears its real brand mark; the combined tab shows both.
+    const mark = k === 'all'
+      ? `<span class="mark-pair">${agentMark('claude', 12)}${agentMark('codex', 12)}</span>`
+      : agentMark(k, 13);
     return `<button class="source-tab ${active ? 'active' : ''}" role="tab" aria-selected="${active}"
       style="--tab-accent: var(${m.accent}); --tab-accent-bg: color-mix(in srgb, var(${m.accent}) 12%, transparent);"
-      onclick="switchSource('${k}')"><span class="tab-dot"></span>${m.label}<span class="tab-count">${plural(count, 'session')}</span></button>`;
+      onclick="switchSource('${k}')">${mark}${m.label}<span class="tab-count">${plural(count, 'session')}</span></button>`;
   }).join('');
+  bar.innerHTML = html;
+  // Mirror the tabs into the sticky command bar so switching agents never
+  // requires scrolling back to the top of the page.
+  if (cbTabs) cbTabs.innerHTML = html;
 }
 
 window.switchSource = async function(source) {
@@ -2545,6 +2736,7 @@ async function refreshData() {
   btn.classList.add('refreshing');
   try {
     // Trigger server-side re-parse: clears cache, re-reads sessions, re-analyzes git, recomputes metrics
+    faceoffCache = null; // per-agent numbers are about to change
     const refreshRes = await fetch('/api/refresh', { method: 'POST' });
     if (!refreshRes.ok) {
       const err = await refreshRes.json().catch(() => ({}));
@@ -2629,6 +2821,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   initTheme();
   const refreshBtn = document.getElementById('refresh-btn');
   if (refreshBtn) refreshBtn.addEventListener('click', refreshData);
+
+  // Sticky command bar: slide in once the page header has scrolled away.
+  const commandBar = document.getElementById('command-bar');
+  const pageHeader = document.querySelector('header');
+  if (commandBar && pageHeader) {
+    let cbVisible = false;
+    const updateCommandBar = () => {
+      const show = window.scrollY > pageHeader.offsetHeight + 40;
+      if (show !== cbVisible) {
+        cbVisible = show;
+        commandBar.classList.toggle('visible', show);
+        commandBar.setAttribute('aria-hidden', String(!show));
+      }
+    };
+    window.addEventListener('scroll', updateCommandBar, { passive: true });
+    updateCommandBar();
+  }
+
+  // Footer: supported agents with their real marks (static — needs no data).
+  const footerAgents = document.getElementById('footer-agents');
+  if (footerAgents) {
+    footerAgents.innerHTML = `<span style="letter-spacing:0.06em;text-transform:uppercase;font-size:0.62rem;color:var(--text-muted);font-family:var(--font-display);">Supports</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;">${agentMark('claude', 14)} Claude Code</span>
+      <span style="opacity:0.4;">·</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;">${agentMark('codex', 14)} OpenAI Codex</span>`;
+  }
   try {
     // A remembered source may no longer exist (e.g. Codex sessions aged out of
     // the window) — the server falls back to the `all` view and meta.source
@@ -2694,6 +2912,7 @@ function render() {
     <div class="${rd(1)}">${renderWeeklyNarrative(d.weeklyNarrative)}</div>
     <div class="${rd(2)}">${renderHeroStats(summary)}</div>
     <div class="${rd(3)}">${renderCostByPeriod(summary.costByPeriod)}</div>
+    <div id="agent-faceoff"></div>
     ${summary.plan ? `<div class="scroll-reveal">${renderPlan(summary)}</div>` : ''}
     <div class="scroll-reveal">${renderAttribution(summary)}</div>
     <div class="${rd(4)}">${renderTokenHeroStats(t)}</div>
@@ -2743,6 +2962,78 @@ function render() {
     initHeatmap();
   }
   bindEvents();
+  loadAgentFaceoff();
+}
+
+/* ── Agent face-off ──
+   Side-by-side scoreboard for the two agents, shown on the All Agents view
+   when both have sessions. The per-agent numbers live in the per-source
+   payloads, so they're fetched once (in parallel) and cached until refresh. */
+let faceoffCache = null;
+
+async function loadAgentFaceoff() {
+  const host = document.getElementById('agent-faceoff');
+  if (!host) return;
+  if (!hasMultipleSources() || (DATA.meta.source || 'all') !== 'all') {
+    host.innerHTML = '';
+    return;
+  }
+  try {
+    if (!faceoffCache) {
+      const [claude, codex] = await Promise.all([
+        fetch('/api/all?source=claude').then(r => r.json()),
+        fetch('/api/all?source=codex').then(r => r.json()),
+      ]);
+      faceoffCache = { claude, codex };
+    }
+    host.innerHTML = renderAgentFaceoff(faceoffCache);
+  } catch {
+    host.innerHTML = ''; // the section is an enhancement — never break the page
+  }
+}
+
+function renderAgentFaceoff(data) {
+  const stats = (p) => ({
+    cost: p.summary.totalCost,
+    sessions: p.summary.totalSessions,
+    commits: p.summary.totalCommits,
+    costPerCommit: p.summary.avgCostPerCommit,
+    survival: p.lineSurvival ? p.lineSurvival.survivalRate : null,
+    grade: p.summary.overallGrade,
+  });
+  const a = stats(data.claude);
+  const b = stats(data.codex);
+  // "win" = the strictly better side of a comparable pair (lower $/commit,
+  // higher survival, more commits). Null/absent values never win.
+  const winLow = (x, y) => x !== null && x !== undefined && (y === null || y === undefined || x < y);
+  const winHigh = (x, y) => x !== null && x !== undefined && (y === null || y === undefined || x > y);
+  const row = (k, val, win, fmt) => `
+    <div class="fo-row"><span class="k">${k}</span><span class="v ${win ? 'win' : ''}">${fmt(val)}</span></div>`;
+  const money = (v) => v === null || v === undefined ? '—' : fmtMoney(v);
+  const pct = (v) => v === null || v === undefined ? 'pending' : v + '%';
+  const num = (v) => (v ?? 0).toLocaleString();
+  const card = (agent, label, accentVar, s, o) => `
+    <div class="faceoff-card" style="--fo-accent: var(${accentVar});">
+      <div class="faceoff-head">${agentMark(agent, 20)} ${label}
+        <span class="grade-badge" style="background:${GRADE_BG_VAR[s.grade] || GRADE_BG_VAR.F};color:${GRADE_VAR[s.grade] || GRADE_VAR.F};">${s.grade}</span>
+      </div>
+      <div class="fo-rows">
+        ${row('Spend', s.cost, false, money)}
+        ${row('Sessions', s.sessions, false, num)}
+        ${row('Commits', s.commits, winHigh(s.commits, o.commits), num)}
+        ${row('$ / Commit', s.costPerCommit, winLow(s.costPerCommit, o.costPerCommit), money)}
+        ${row('Line survival', s.survival, winHigh(s.survival, o.survival), pct)}
+      </div>
+      ${agentMark(agent, 150, 'fo-watermark')}
+    </div>`;
+  return `<div class="stats-section faceoff-section scroll-reveal revealed">
+    <h2>Agent Face-off <i class="info-tip" data-tip="Head-to-head scoreboard for the analyzed window. Each agent's numbers come from its own per-agent view — the same data as its tab. ▲ marks the better side of a comparable pair.">i</i></h2>
+    <div class="faceoff-grid">
+      ${card('claude', 'Claude Code', '--accent-orange', a, b)}
+      <span class="faceoff-vs">VS</span>
+      ${card('codex', 'OpenAI Codex', '--accent-cyan', b, a)}
+    </div>
+  </div>`;
 }
 
 function renderWeeklyNarrative(n) {
@@ -3342,12 +3633,12 @@ function renderSessionsTable(sessions) {
             const idx = (page - 1) * pageSize + i;
             const gradeColor = GRADE_VAR[s.grade] || GRADE_VAR.F;
             const gradeBg = GRADE_BG_VAR[s.grade] || GRADE_BG_VAR.F;
-            // In the mixed "All Agents" view, mark each row's agent with a dot
-            // in the source accent (orange = Claude, cyan = Codex).
+            // In the mixed "All Agents" view, mark each row's agent with its
+            // real brand mark (Claude starburst / OpenAI knot).
             const src = s.source || 'claude';
             const srcMeta = SOURCE_META[src] || SOURCE_META.claude;
             const sourceDot = (DATA.meta.source || 'all') === 'all' && hasMultipleSources()
-              ? `<span title="${srcMeta.label}" style="display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;vertical-align:middle;background:var(${srcMeta.accent});opacity:0.75;"></span>`
+              ? `<span title="${srcMeta.label}" style="margin-right:7px;">${agentMark(src, 12)}</span>`
               : '';
             const primaryName = formatModelName(s.model || 'unknown');
             // Compare base ids, not raw keys: 'gpt-5.5[long]' or a dated
@@ -3907,7 +4198,13 @@ function bindEvents() {
         }
       });
     }, { threshold: 0.1 });
-    document.querySelectorAll('.scroll-reveal').forEach(el => observer.observe(el));
+    const pending = document.querySelectorAll('.scroll-reveal');
+    pending.forEach(el => observer.observe(el));
+    // Safety net: if the observer never fires for a section (fast jump
+    // scrolling, reduced-motion agents, printing), reveal everything after a
+    // few seconds — a missed animation is fine, permanently hidden content
+    // is not.
+    setTimeout(() => pending.forEach(el => el.classList.add('revealed')), 4000);
 
     initialRenderDone = true;
   }
@@ -4020,6 +4317,18 @@ const SHARE_THEME = {
     insightText: '#4A453C',
   }
 };
+
+// Stamp an agent brand mark (24x24 vector path) onto the share-card canvas.
+function drawAgentMark(ctx, agent, x, y, size, color) {
+  const path = AGENT_MARK_PATHS[agent];
+  if (!path || typeof Path2D === 'undefined') return;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(size / 24, size / 24);
+  ctx.fillStyle = color;
+  ctx.fill(new Path2D(path));
+  ctx.restore();
+}
 
 function drawRoundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -4377,6 +4686,9 @@ function renderShareCard(canvas) {
   ctx.font = '400 10px "Instrument Sans", sans-serif';
   ctx.fillStyle = th.textDim;
   ctx.fillText('Generated by Codelens AI  ·  codelensai-dev.vercel.app', 32, H - 24);
+  // Agent brand marks, right-aligned in the footer strip
+  drawAgentMark(ctx, 'claude', W - 66, H - 33, 13, '#D97757');
+  drawAgentMark(ctx, 'codex', W - 45, H - 33, 13, th.textDim);
 }
 
 let shareCardTheme = 'dark';
