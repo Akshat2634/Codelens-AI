@@ -48,7 +48,10 @@ function cacheFileFor(options = {}) {
 // 13: OpenAI Codex web_search_call server-tool fees.
 // 14: token dedup criterion changed and readOnlyBashCalls added to sessions —
 //     cached sessions from 13 carry double-counted totals.
-const CACHE_VERSION = 14;
+// 15: filesRead and non-verification bashCommands dropped from sessions (no
+//     consumers; pure cache/memory ballast) — cached sessions from 14 still
+//     carry them and would keep the bloat alive.
+const CACHE_VERSION = 15;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);
@@ -98,6 +101,36 @@ export function deleteCache(options = {}) {
   const cacheFile = cacheFileFor(options);
   if (existsSync(cacheFile)) {
     unlinkSync(cacheFile);
+  }
+}
+
+// Tiny denormalized summary written after every full pipeline run, so the
+// `codelens-ai statusline` fast path (invoked by Claude Code every few hundred
+// ms) can show today's ROI without re-running any parsing or git work. Kept
+// separate from the session cache — it must stay small enough to read in
+// microseconds. Only default-directory runs write it: fixture/CI runs against
+// --claude-dir/--codex-dir would otherwise overwrite the user's real stats.
+const QUICKSTATS_FILE = path.join(CACHE_DIR, 'quickstats.json');
+
+export function saveQuickstats(stats, options = {}) {
+  // Same default-dir predicate as the session cache (accepts either raw CLI
+  // overrides or resolved paths): anything that would hash to its own cache
+  // file — fixture dirs, CI, a temporary $CODEX_HOME — must not overwrite the
+  // stats built from the user's real sessions.
+  if (cacheFileFor(options) !== CACHE_FILE) return;
+  try {
+    mkdirSync(CACHE_DIR, { recursive: true });
+    writeFileSync(QUICKSTATS_FILE, JSON.stringify(stats));
+  } catch {
+    // Best-effort: the statusline degrades gracefully without it.
+  }
+}
+
+export function loadQuickstats() {
+  try {
+    return JSON.parse(readFileSync(QUICKSTATS_FILE, 'utf-8'));
+  } catch {
+    return null;
   }
 }
 

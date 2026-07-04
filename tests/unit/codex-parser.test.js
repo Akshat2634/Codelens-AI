@@ -715,7 +715,7 @@ test('sessions produced are shape-compatible with claude-parser sessions', async
       'sessionId', 'repoPath', 'projectName', 'gitBranch', 'startTime', 'endTime',
       'durationMinutes', 'totalInputTokens', 'totalOutputTokens', 'cacheCreationTokens',
       'cacheReadTokens', 'cost', 'model', 'modelBreakdown', 'toolCalls', 'filesWritten',
-      'filesRead', 'userMessageCount', 'assistantMessageCount', 'bashCommands',
+      'userMessageCount', 'assistantMessageCount', 'bashCommands',
       'totalBashCalls', 'verificationBashCalls', 'readOnlyBashCalls', 'estimatedCost',
       'cacheSavingsDollars', 'dailyUsage', 'source',
     ]) {

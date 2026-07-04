@@ -16,6 +16,12 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${isCI ? CI_PORT : LOCAL_PORT}`,
     trace: isCI ? 'retain-on-failure' : 'off',
+    // Escape hatch for environments with a system/pre-provisioned Chromium
+    // whose revision doesn't match this @playwright/test version (e.g.
+    // sandboxed CI images): PW_CHROMIUM_PATH=/path/to/chrome npm run test:e2e
+    ...(process.env.PW_CHROMIUM_PATH
+      ? { launchOptions: { executablePath: process.env.PW_CHROMIUM_PATH } }
+      : {}),
   },
   // Boot the CLI against fixture sessions so CI has something to render.
   // Regenerate fixtures first so their timestamps are current-relative —

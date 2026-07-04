@@ -217,3 +217,63 @@ test('analyzeGitRepo does NOT merge same-subject commits with different diffstat
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('analyzeGitRepo detects agent Co-authored-by trailers as aiTrailer', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'git-trailer-'));
+  try {
+    const dir = path.join(root, 'repo');
+    mkdirSync(dir, { recursive: true });
+    execSync('git init -q -b main', { cwd: dir });
+    execSync('git config user.email a@b.com', { cwd: dir });
+    execSync('git config user.name A', { cwd: dir });
+    const base = new Date(Date.now() - 5 * 86400000);
+    const iso = (m) => new Date(base.getTime() + m * 60000).toISOString();
+
+    // Multi-line messages need separate -m flags — a JSON-quoted "\n" inside
+    // a shell string stays a literal backslash-n and never becomes a trailer.
+    const commitWithTrailer = (file, subject, trailer, isoDate) => {
+      writeFileSync(path.join(dir, file), file + '\n');
+      execSync('git add -A', { cwd: dir });
+      const msgFlags = trailer
+        ? `-m ${JSON.stringify(subject)} -m ${JSON.stringify(trailer)}`
+        : `-m ${JSON.stringify(subject)}`;
+      execSync(`git commit -q ${msgFlags}`, {
+        cwd: dir,
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 'A', GIT_AUTHOR_EMAIL: 'a@b.com',
+          GIT_COMMITTER_NAME: 'A', GIT_COMMITTER_EMAIL: 'a@b.com',
+          GIT_AUTHOR_DATE: isoDate, GIT_COMMITTER_DATE: isoDate,
+        },
+      });
+    };
+    // Claude Code-style trailer (name varies by model; domain is stable)
+    commitWithTrailer('a.txt', 'add a', 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>', iso(0));
+    // Codex-style trailer
+    commitWithTrailer('b.txt', 'add b', 'Co-authored-by: Codex <codex@openai.com>', iso(10));
+    // Human co-author — must NOT be flagged as an agent
+    commitWithTrailer('c.txt', 'add c', 'Co-authored-by: Bob Smith <bob@example.com>', iso(20));
+    // No trailer at all
+    commitWithTrailer('d.txt', 'add d', null, iso(30));
+    // Generic CI automation — not an AI coding agent
+    commitWithTrailer('f.txt', 'add f', 'Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>', iso(35));
+    // A HUMAN named Claude — a bare first name must never count as an AI stamp
+    commitWithTrailer('g.txt', 'add g', 'Co-authored-by: Claude Martin <claude@example.fr>', iso(38));
+    // Pipe in the subject must not break field parsing
+    commitWithTrailer('e.txt', 'add e | with pipes | everywhere', 'Co-Authored-By: Claude <noreply@anthropic.com>', iso(40));
+
+    const { commits } = analyzeGitRepo(dir, 3650);
+    const bySubject = Object.fromEntries(commits.map(c => [c.subject, c]));
+    assert.equal(bySubject['add a'].aiTrailer, 'claude');
+    assert.equal(bySubject['add b'].aiTrailer, 'codex');
+    assert.equal(bySubject['add c'].aiTrailer, null);
+    assert.equal(bySubject['add d'].aiTrailer, null);
+    assert.equal(bySubject['add f'].aiTrailer, null, 'github-actions[bot] is not an AI agent');
+    assert.equal(bySubject['add g'].aiTrailer, null, 'a human named Claude is not an AI stamp');
+    const piped = commits.find(c => c.subject.includes('with pipes'));
+    assert.equal(piped.subject, 'add e | with pipes | everywhere', 'pipes in subject survive parsing');
+    assert.equal(piped.aiTrailer, 'claude');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

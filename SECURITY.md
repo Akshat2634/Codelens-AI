@@ -4,8 +4,8 @@
 
 | Version | Supported |
 | ------- | --------- |
-| 0.2.x   | Yes       |
-| < 0.2   | No        |
+| 0.9.x   | Yes       |
+| < 0.9   | No        |
 
 ## Reporting a Vulnerability
 
@@ -23,10 +23,11 @@ If you discover a security vulnerability, please report it responsibly:
 
 This tool:
 
-- Reads local files from `~/.claude/projects/` (read-only)
-- Runs a local HTTP server on localhost (not exposed to network by default)
-- Stores cache at `~/.cache/codelens-ai/`
-- Loads Chart.js and Inter font from CDN in the dashboard
+- Reads local files from `~/.claude/projects/` and `~/.codex/sessions/` (read-only)
+- Runs a local HTTP server bound to `127.0.0.1` by default (pass `--host 0.0.0.0` to opt in to network exposure)
+- Stores cache at `~/.cache/agent-analytics/`
+- `codelens-ai statusline --install` writes a `statusLine` entry to `~/.claude/settings.json` (after backing the file up); no other file outside the cache directory is ever written
+- Serves Chart.js from a bundled local copy; the dashboard loads webfonts from Google Fonts (the only external request, and only when online)
 
 ## Known Limitations
 

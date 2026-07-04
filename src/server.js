@@ -158,8 +158,6 @@ export function createServer(initialPayload, rebuildFn, opts = {}) {
           linesDeleted,
           netLines,
           costPerCommit: mainCommits.length > 0 ? s.cost.totalCost / mainCommits.length : null,
-          costPerLine: linesAdded > 0 ? s.cost.totalCost / linesAdded : null,
-          costPerNetLine: netLines > 0 ? s.cost.totalCost / netLines : null,
         };
       });
     }

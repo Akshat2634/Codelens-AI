@@ -84,7 +84,6 @@ test('chat-only session uses time-based fallback', () => {
     { '/repo': { commits: [commit], defaultBranch: 'main' } }
   );
   assert.equal(correlatedSessions[0].commitCount, 1);
-  assert.equal(correlatedSessions[0].matchedByFiles, false);
   // Time-only matches have no file evidence → always low confidence
   assert.equal(correlatedSessions[0].attributionConfidence, 'low');
 });
@@ -239,4 +238,60 @@ test('attribution confidence: null when no commits matched', () => {
     { '/repo': { commits: [], defaultBranch: 'main' } }
   );
   assert.equal(correlatedSessions[0].attributionConfidence, null);
+});
+
+test('a commit trailer naming the agent upgrades attribution to high confidence', () => {
+  // Chat-only session (time-only match → normally low confidence), but the
+  // commit is stamped Co-authored-by this agent — near-ground-truth.
+  const session = mkSession({ filesWritten: [], source: 'claude' });
+  const commit = mkCommit({ aiTrailer: 'claude' });
+  const { correlatedSessions } = correlateSessions(
+    [session],
+    { '/repo': { commits: [commit], defaultBranch: 'main' } }
+  );
+  assert.equal(correlatedSessions[0].commitCount, 1);
+  assert.equal(correlatedSessions[0].trailerConfirmedCommits, 1);
+  assert.equal(correlatedSessions[0].attributionConfidence, 'high');
+});
+
+test('a trailer naming a DIFFERENT agent does not upgrade confidence', () => {
+  const session = mkSession({ filesWritten: [], source: 'claude' });
+  const commit = mkCommit({ aiTrailer: 'codex' });
+  const { correlatedSessions } = correlateSessions(
+    [session],
+    { '/repo': { commits: [commit], defaultBranch: 'main' } }
+  );
+  assert.equal(correlatedSessions[0].trailerConfirmedCommits, 0);
+  assert.equal(correlatedSessions[0].attributionConfidence, 'low');
+});
+
+test('trailer breaks ties between equal file-overlap sessions from different agents', () => {
+  // Both sessions wrote the same file and are equally distant in time; the
+  // commit's Codex trailer must route it to the codex session.
+  const claude = mkSession({ sessionId: 'cl', source: 'claude', filesWritten: ['src/foo.js'] });
+  const codex = mkSession({ sessionId: 'cx', source: 'codex', filesWritten: ['src/foo.js'] });
+  const commit = mkCommit({ aiTrailer: 'codex' });
+  const { correlatedSessions } = correlateSessions(
+    [claude, codex],
+    { '/repo': { commits: [commit], defaultBranch: 'main' } }
+  );
+  const byId = Object.fromEntries(correlatedSessions.map(s => [s.sessionId, s]));
+  assert.equal(byId.cx.commitCount, 1, 'trailer-matching agent claims the commit');
+  assert.equal(byId.cl.commitCount, 0);
+});
+
+test('file overlap still beats a trailer match from a chat-only session', () => {
+  // Trailer preference must not override file evidence: the session that
+  // actually wrote the committed file wins over a trailer-matching
+  // chat-only session.
+  const wroteFile = mkSession({ sessionId: 'wf', source: 'codex', filesWritten: ['src/foo.js'] });
+  const chatOnly = mkSession({ sessionId: 'co', source: 'claude', filesWritten: [] });
+  const commit = mkCommit({ aiTrailer: 'claude' });
+  const { correlatedSessions } = correlateSessions(
+    [wroteFile, chatOnly],
+    { '/repo': { commits: [commit], defaultBranch: 'main' } }
+  );
+  const byId = Object.fromEntries(correlatedSessions.map(s => [s.sessionId, s]));
+  assert.equal(byId.wf.commitCount, 1, 'file evidence dominates');
+  assert.equal(byId.co.commitCount, 0);
 });

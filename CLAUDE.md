@@ -25,10 +25,12 @@ src/
 ├── claude-parser.js   # Parses JSONL session files from ~/.claude/projects/
 ├── codex-parser.js    # Parses OpenAI Codex rollout files from ~/.codex/sessions/
 ├── git-analyzer.js    # Git log analysis, branch detection, diff stats
-├── correlator.js      # Matches sessions to commits via file overlap + time window
-├── metrics.js         # ROI calculations, grades, insights, heatmap, survival rate
+├── correlator.js      # Matches sessions to commits via file overlap + time window + Co-authored-by trailers
+├── metrics.js         # ROI calculations, grades, insights, heatmap, survival rate, AI code share, value leak
+├── report.js          # `codelens-ai report` — terminal / Markdown / HTML ROI scorecard
+├── statusline.js      # `codelens-ai statusline` — Claude Code statusline (reads stdin JSON + quickstats)
 ├── server.js          # Express REST API routes (?source= selects per-agent views)
-├── cache.js           # Smart caching with per-source stale file detection
+├── cache.js           # Smart caching with per-source stale file detection + statusline quickstats
 └── dashboard.html     # Single-file SPA dashboard (4000+ lines)
 
 tests/
@@ -83,6 +85,9 @@ npx codelens-ai --source codex  # analyze a single agent: claude | codex
 npx codelens-ai --claude-dir X  # override ~/.claude/projects (testing/CI)
 npx codelens-ai --codex-dir X   # override ~/.codex/sessions (testing/CI)
 npx codelens-ai --plan max20 --codex-plan plus   # per-agent subscription mode
+npx codelens-ai --host 0.0.0.0  # expose dashboard beyond localhost (default 127.0.0.1)
+npx codelens-ai report          # terminal ROI scorecard (--md / --html to export)
+npx codelens-ai statusline      # Claude Code statusline (--install to configure)
 npx claude-roi                  # backward-compatible alias
 ```
 
@@ -100,9 +105,9 @@ node --check src/*.js           # syntax validation
 - **Single-file dashboard** — no build step, served directly by Express
 - **Zero-config** — auto-discovers `~/.claude/projects/` and `~/.codex/sessions/` (`$CODEX_HOME` honored)
 - **Smart caching** — incremental parsing with per-source staleness, so a new Codex rollout doesn't force a Claude re-parse (`~/.cache/agent-analytics/`)
-- **File-first correlation** — sessions matched to commits by file overlap, 2-hour temporal buffer; all agent sources correlate together so a commit is attributed to at most one session
+- **File-first correlation** — sessions matched to commits by file overlap, 2-hour temporal buffer; all agent sources correlate together so a commit is attributed to at most one session. `Co-authored-by` agent trailers (parsed from git log) route trailer-stamped commits to the matching agent and upgrade attribution confidence to high
 - **Uniform session shape** — codex-parser produces the exact claude-parser session shape (`cacheReadTokens` = OpenAI `cached_input_tokens`, `cacheCreationTokens` = 0) so correlator/metrics/server are source-agnostic
-- **Privacy-first** — all data stays local, no telemetry
+- **Privacy-first** — all data stays local, no telemetry; the dashboard binds 127.0.0.1 by default (`--host` to override)
 - **Version-aware pricing** — token costs reflect each provider's pricing tiers per model (Anthropic per-version tiers; OpenAI per-model-id, with o3's Jun 2025 price cut date-tiered)
 
 ## Coding Conventions
@@ -127,7 +132,7 @@ Use these skills when working on this project:
 ## Important Notes
 
 - The dashboard is a single 4000+ line HTML file — changes should maintain the inline architecture
-- Cache is stored at `~/.cache/agent-analytics/parsed-sessions.json`; runs with custom `--claude-dir`/`--codex-dir` write to a separate `parsed-sessions-<hash>.json` so tests/CI never evict the real cache
+- Cache is stored at `~/.cache/agent-analytics/parsed-sessions.json` (plus `quickstats.json`, a tiny summary the statusline reads); runs with custom `--claude-dir`/`--codex-dir` write to a separate `parsed-sessions-<hash>.json` so tests/CI never evict the real cache
 - Claude session JSONL files are at `~/.claude/projects/`; Codex rollouts at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (zstd-compressed `.jsonl.zst` after ~7 days — readable on Node >= 22.15)
 - Token pricing is hardcoded in `claude-parser.js` (Anthropic) and `codex-parser.js` (OpenAI) — update when providers change pricing
 - Codex gotchas already handled in `codex-parser.js`: `token_count` totals are cumulative (use `last_token_usage` deltas), duplicate re-logged usage events (deduped only when the cumulative total is unchanged), `cached_input_tokens ⊂ input_tokens`, `reasoning_output_tokens ⊂ output_tokens`, subagent `thread_spawn` rollouts replay parent history (skipped), legacy pre-envelope 2025 format, long-context pricing only above 272K input tokens per request

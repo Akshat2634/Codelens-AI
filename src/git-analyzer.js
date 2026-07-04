@@ -111,6 +111,53 @@ function parseNumstatPath(raw) {
   return parts[parts.length - 1];
 }
 
+// Agents that stamp commits with a Co-authored-by trailer, mapped to the
+// session `source` names used across the codebase. Emails are the strong
+// signal (vendor domains are stable while display names vary across agent
+// versions); display names alone must be unambiguous product names — a bare
+// human first name ("Claude Martin <claude@company.com>", "Devin Jones")
+// must never be classified as an AI stamp, since these counts feed the
+// attribution audit as near-ground-truth.
+const AI_TRAILER_EMAIL_PATTERNS = [
+  [/@anthropic\.com/i, 'claude'],
+  [/@openai\.com|chatgpt/i, 'codex'],
+  [/copilot@|copilot\[bot\]|copilot@users\.noreply\.github\.com/i, 'copilot'],
+  [/cursoragent|@cursor\.(com|sh)/i, 'cursor'],
+  [/@devin\.ai/i, 'devin'],
+  [/@aider\.chat/i, 'aider'],
+  [/jules\[bot\]|google-labs-jules|gemini/i, 'gemini'],
+];
+const AI_TRAILER_NAME_PATTERNS = [
+  // "Claude" alone is a human name; require a product qualifier.
+  [/\bclaude\s+(code|fable|mythos|opus|sonnet|haiku|\d)/i, 'claude'],
+  [/\bcodex\b/i, 'codex'],
+  [/\bcopilot\b/i, 'copilot'],
+  [/\bcursor\s+agent\b/i, 'cursor'],
+  [/\bgemini\b/i, 'gemini'],
+  [/\baider\b/i, 'aider'],
+  [/\bdevin\s+ai\b/i, 'devin'],
+];
+function detectAiTrailer(coAuthorValues) {
+  for (const value of coAuthorValues) {
+    // "Display Name <email>" — match email and name against separate rules.
+    const emailMatch = value.match(/<([^>]*)>/);
+    const email = emailMatch ? emailMatch[1] : '';
+    const name = emailMatch ? value.slice(0, emailMatch.index) : value;
+    for (const [re, agent] of AI_TRAILER_EMAIL_PATTERNS) {
+      if (email && re.test(email)) return agent;
+    }
+    for (const [re, agent] of AI_TRAILER_NAME_PATTERNS) {
+      if (re.test(name)) return agent;
+    }
+  }
+  return null;
+}
+
+// One-time note when git predates %(trailers:...) options (git < 2.22): the
+// placeholder passes through unparsed, so trailer attribution is unavailable
+// but everything else still works.
+let warnedTrailersUnsupported = false;
+
 function parseGitLog(raw) {
   const commits = [];
   let current = null;
@@ -118,30 +165,24 @@ function parseGitLog(raw) {
   for (const line of raw.split('\n')) {
     if (line.startsWith('COMMIT:')) {
       if (current) commits.push(current);
-      const rest = line.slice(7);
-      // Format: hash|email|timestamp|subject|decorations
-      // Subject may contain | so we split carefully
-      const pipeIdx1 = rest.indexOf('|');
-      const pipeIdx2 = rest.indexOf('|', pipeIdx1 + 1);
-      const pipeIdx3 = rest.indexOf('|', pipeIdx2 + 1);
+      // Format: hash \x01 email \x01 timestamp \x01 subject \x01 co-author
+      // trailers (\x02-separated). Control-char separators instead of `|`:
+      // subjects and trailer values can legitimately contain pipes, but never
+      // control characters, so splitting is exact instead of best-effort.
+      const parts = line.slice(7).split('\x01');
+      if (parts.length < 4) continue;
 
-      if (pipeIdx1 === -1 || pipeIdx2 === -1 || pipeIdx3 === -1) continue;
-
-      const hash = rest.slice(0, pipeIdx1);
-      const email = rest.slice(pipeIdx1 + 1, pipeIdx2);
-      const timestamp = rest.slice(pipeIdx2 + 1, pipeIdx3);
-      const remaining = rest.slice(pipeIdx3 + 1);
-
-      // Last field after last | is decorations (may be empty)
-      const lastPipe = remaining.lastIndexOf('|');
-      let subject, decorations;
-      if (lastPipe !== -1) {
-        subject = remaining.slice(0, lastPipe);
-        decorations = remaining.slice(lastPipe + 1).trim();
-      } else {
-        subject = remaining;
-        decorations = '';
+      const [hash, email, timestamp, subject] = parts;
+      let trailersField = parts[4] || '';
+      if (trailersField.startsWith('%(trailers')) {
+        // git < 2.22 echoes the unsupported placeholder verbatim.
+        trailersField = '';
+        if (!warnedTrailersUnsupported) {
+          warnedTrailersUnsupported = true;
+          process.stderr.write('note: git < 2.22 detected — Co-authored-by trailer attribution is unavailable (upgrade git to enable it)\n');
+        }
       }
+      const coAuthors = trailersField.split('\x02').map(v => v.trim()).filter(Boolean);
 
       current = {
         hash,
@@ -149,28 +190,15 @@ function parseGitLog(raw) {
         timestamp,
         timestampMs: new Date(timestamp).getTime(),
         subject,
-        decorations,
-        branches: [],
+        // Near-ground-truth AI attribution: agents stamp their commits with
+        // Co-authored-by trailers. null when no known agent trailer is present.
+        aiTrailer: detectAiTrailer(coAuthors),
         onMain: false,
         files: [],
         totalAdded: 0,
         totalDeleted: 0,
         netLines: 0,
       };
-
-      // Parse decorations for branch info
-      if (decorations) {
-        const refs = decorations.split(',').map(r => r.trim());
-        for (const ref of refs) {
-          const cleaned = ref
-            .replace('HEAD -> ', '')
-            .replace('origin/', '')
-            .trim();
-          if (cleaned && !cleaned.startsWith('tag:')) {
-            current.branches.push(cleaned);
-          }
-        }
-      }
     } else if (current && line.trim()) {
       // numstat line: "2\t2\tpath/to/file" or "-\t-\tbinary_file"
       const parts = line.split('\t');
@@ -264,14 +292,14 @@ export function resolveMovedRepoPaths(repoPaths, sessions = []) {
 
 export function analyzeGitRepo(repoPath, days) {
   if (!existsSync(path.join(repoPath, '.git'))) {
-    return { repoPath, commits: [], allCommits: [], defaultBranch: null };
+    return { repoPath, commits: [], defaultBranch: null };
   }
 
   const user = getGitUser(repoPath);
 
   try {
     const raw = execSync(
-      `git -C "${repoPath}" log --no-merges --exclude=refs/stash --all --since="${days} days ago" --format="COMMIT:%H|%ae|%aI|%s|%D" --numstat`,
+      `git -C "${repoPath}" log --no-merges --exclude=refs/stash --all --since="${days} days ago" --format="COMMIT:%H%x01%ae%x01%aI%x01%s%x01%(trailers:key=Co-authored-by,valueonly,separator=%x02)" --numstat`,
       { encoding: 'utf-8', maxBuffer: 256 * 1024 * 1024 }
     );
 
@@ -362,9 +390,9 @@ export function analyzeGitRepo(repoPath, days) {
       Number.isFinite(c.timestampMs) && c.timestampMs >= cutoffMs
     );
 
-    return { repoPath, commits: userCommits, allCommits, defaultBranch: branchName };
+    return { repoPath, commits: userCommits, defaultBranch: branchName };
   } catch (err) {
     process.stderr.write(`Warning: Git analysis failed for ${repoPath}: ${err.message}\n`);
-    return { repoPath, commits: [], allCommits: [], defaultBranch: null };
+    return { repoPath, commits: [], defaultBranch: null };
   }
 }

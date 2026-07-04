@@ -304,19 +304,23 @@ function extractToolUse(session, msg, seenToolUseIds) {
     // Count tool calls
     session.toolCalls[toolName] = (session.toolCalls[toolName] || 0) + 1;
 
-    // Track Bash commands for autonomy self-heal scoring
+    // Track Bash commands for autonomy self-heal scoring. Only verification
+    // commands keep their text (for the "top tests" list) — storing every
+    // command was pure memory/cache ballast, as nothing downstream reads
+    // non-verification entries.
     if (toolName === 'Bash') {
       const command = block.input?.command || block.input?.content;
       if (command) {
         session.totalBashCalls++;
-        const isVerif = isVerificationCommand(command);
-        if (isVerif) session.verificationBashCalls++;
+        if (isVerificationCommand(command)) {
+          session.verificationBashCalls++;
+          session.bashCommands.push({ command: command.slice(0, 200), isVerification: true });
+        }
         if (isReadOnlyCommand(command)) session.readOnlyBashCalls++;
-        session.bashCommands.push({ command: command.slice(0, 200), isVerification: isVerif });
       }
     }
 
-    // Track files written/read. Write/Edit/MultiEdit carry input.file_path;
+    // Track files written. Write/Edit/MultiEdit carry input.file_path;
     // NotebookEdit uses input.notebook_path. All four are file-editing tools
     // and must land in filesWritten so file-overlap correlation can attribute
     // commits — omitting MultiEdit/NotebookEdit leaves such a session with no
@@ -327,10 +331,6 @@ function extractToolUse(session, msg, seenToolUseIds) {
     if (toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit' || toolName === 'NotebookEdit') {
       if (!session.filesWritten.includes(filePath)) {
         session.filesWritten.push(filePath);
-      }
-    } else if (toolName === 'Read') {
-      if (!session.filesRead.includes(filePath)) {
-        session.filesRead.push(filePath);
       }
     }
   }
@@ -356,7 +356,6 @@ function createEmptySession(sessionId) {
     modelBreakdown: {},
     toolCalls: {},
     filesWritten: [],
-    filesRead: [],
     userMessageCount: 0,
     assistantMessageCount: 0,
     bashCommands: [],
@@ -719,9 +718,6 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
     session.filesWritten = session.filesWritten
       .map(fp => toRelativePath(fp, gitRoot))
       .filter(Boolean);
-    session.filesRead = session.filesRead
-      .map(fp => toRelativePath(fp, gitRoot))
-      .filter(Boolean);
     // Also normalize repoPath to the actual git root
     session.repoPath = gitRoot;
   }
@@ -858,9 +854,6 @@ function mergeSubagentIntoSession(parent, sub) {
   // Merge files
   for (const f of sub.filesWritten) {
     if (!parent.filesWritten.includes(f)) parent.filesWritten.push(f);
-  }
-  for (const f of sub.filesRead) {
-    if (!parent.filesRead.includes(f)) parent.filesRead.push(f);
   }
 }
 

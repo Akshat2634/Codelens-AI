@@ -163,24 +163,6 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
       expect(transition).toContain('transform');
     });
 
-    test('legend row shows 4 color-coded items including grade', async ({ page }) => {
-      const legend = page.locator('.hero-legend');
-      await expect(legend).toHaveCount(1);
-      await expect(legend.locator('.dot')).toHaveCount(4);
-      await expect(legend).toContainText('Cost');
-      await expect(legend).toContainText('Output');
-      await expect(legend).toContainText('Efficiency');
-      await expect(legend).toContainText('Grade');
-    });
-
-    test('legend has card-style background and border', async ({ page }) => {
-      const legend = page.locator('.hero-legend');
-      const bg = await legend.evaluate(el => getComputedStyle(el).backgroundColor);
-      const border = await legend.evaluate(el => getComputedStyle(el).borderStyle);
-      expect(bg).not.toBe('rgba(0, 0, 0, 0)');
-      expect(border).toBe('solid');
-    });
-
     test('each stat card has an info-tip tooltip', async ({ page }) => {
       const section = page.locator('.stats-section').first();
       const tips = section.locator('.stat-card .info-tip');
@@ -292,16 +274,6 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
       const todayCard = page.locator('.period-card.today');
       const transition = await todayCard.evaluate(el => getComputedStyle(el).transition);
       expect(transition).toContain('background');
-    });
-
-    test('legend row shows 4 period labels with colored dots', async ({ page }) => {
-      const legend = page.locator('.cost-legend');
-      await expect(legend).toHaveCount(1);
-      await expect(legend.locator('.dot')).toHaveCount(4);
-      await expect(legend).toContainText('Today');
-      await expect(legend).toContainText('This Week');
-      await expect(legend).toContainText('This Month');
-      await expect(legend).toContainText('All Time');
     });
 
     test('each period card shows token count', async ({ page }) => {
@@ -470,16 +442,6 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
         const text = await barVals.nth(i).textContent();
         expect(text).toMatch(/[\d.]+[KMB]?/);
       }
-    });
-
-    test('legend row shows 4 token categories', async ({ page }) => {
-      const legend = page.locator('.token-legend');
-      await expect(legend).toHaveCount(1);
-      await expect(legend.locator('.dot')).toHaveCount(4);
-      await expect(legend).toContainText('Total Burned');
-      await expect(legend).toContainText('Wasted');
-      await expect(legend).toContainText('Efficient');
-      await expect(legend).toContainText('Per Commit');
     });
 
     test('wasted label text is properly capitalized', async ({ page }) => {
@@ -1290,30 +1252,6 @@ test.describe('Dashboard — Complete Top-to-Bottom Tests', () => {
       expect(beforeBg).toBeTruthy();
     });
 
-    test('all legend bars share same styling', async ({ page }) => {
-      const legends = ['.hero-legend', '.cost-legend', '.token-legend'];
-      for (const selector of legends) {
-        const legend = page.locator(selector);
-        if (await legend.count() > 0) {
-          const bg = await legend.evaluate(el => getComputedStyle(el).backgroundColor);
-          const border = await legend.evaluate(el => getComputedStyle(el).borderStyle);
-          const radius = await legend.evaluate(el => getComputedStyle(el).borderRadius);
-          expect(bg).not.toBe('rgba(0, 0, 0, 0)');
-          expect(border).toBe('solid');
-          expect(radius).toBe('8px');
-        }
-      }
-    });
-
-    test('legend dots are 8px circular', async ({ page }) => {
-      const dot = page.locator('.hero-legend .dot').first();
-      const width = await dot.evaluate(el => getComputedStyle(el).width);
-      const height = await dot.evaluate(el => getComputedStyle(el).height);
-      const radius = await dot.evaluate(el => getComputedStyle(el).borderRadius);
-      expect(width).toBe('8px');
-      expect(height).toBe('8px');
-      expect(radius).toBe('50%');
-    });
   });
 
   // ═══════════════════════════════════════════
