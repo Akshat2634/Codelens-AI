@@ -162,14 +162,16 @@ All analysis flags (`--days`, `--source`, `--plan`, `--project`, ...) work on `r
 
 ### Claude Code statusline (`codelens-ai statusline`)
 
-A one-line always-on HUD inside Claude Code, and the only statusline that can show **ROI**, not just burn:
+A one-line always-on HUD inside Claude Code, and the only statusline that shows **ROI** alongside burn:
 
 ```text
-$4.20 session │ today $12.40 · 3 commits · $4.13/commit · A │ 5h 84% (resets 1h15m) · wk 41% │ ctx 23%
+$4.20 session │ today $12.40 · 3 commits · $4.13/commit · A │ burn 2.6K/min · $0.23/hr │ 5h 84% (resets 1h15m) · wk 41% │ ctx 23%
 ```
 
 - **Session cost** straight from Claude Code (exact, not estimated)
 - **Today's spend, commits, and $/commit** from your last pipeline run
+- **Burn rate** of the open 5-hour block — tokens/min (colored by the cache-excluded indicator) and
+  $/hr — snapshotted by your last pipeline run and hidden once the window closes
 - **Official 5-hour and weekly rate-limit usage** with a reset countdown when you're close — the
   numbers Anthropic's limiter actually enforces, not token-math estimates
 - **Context-window pressure**

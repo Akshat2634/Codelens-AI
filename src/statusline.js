@@ -39,6 +39,14 @@ function fmtMoney(v) {
   return `$${v.toFixed(2)}`;
 }
 
+// Compact token count for the tight statusline (2567 → "2.6K").
+function fmtCompactTokens(n) {
+  if (!Number.isFinite(n)) return null;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return String(Math.round(n));
+}
+
 // "resets 1h23m" from an epoch-seconds timestamp; null when absent/past.
 function fmtReset(resetsAtSec, nowMs) {
   if (!Number.isFinite(resetsAtSec)) return null;
@@ -87,6 +95,21 @@ export function composeStatusline(input, quickstats, nowMs = Date.now()) {
       }
       segments.push(seg);
     }
+  }
+
+  // Burn rate of the open 5-hour block, from the quickstats snapshot the
+  // pipeline writes. The block's endTime bounds staleness — once now passes it
+  // the window has closed (≤5h old), so we hide the segment rather than show a
+  // rate from a block that's no longer running. Colored by the input+output
+  // indicator (cache excluded) so thresholds match the `blocks` view.
+  const ab = quickstats?.activeBlock;
+  if (ab && Number.isFinite(ab.endTime) && nowMs < ab.endTime && Number.isFinite(ab.tokensPerMinute)) {
+    const indicator = Number.isFinite(ab.tokensPerMinuteIndicator) ? ab.tokensPerMinuteIndicator : ab.tokensPerMinute;
+    const col = indicator > 5000 ? ANSI.red : indicator > 2000 ? ANSI.yellow : ANSI.green;
+    const parts = [`${col}${fmtCompactTokens(ab.tokensPerMinute)}/min${ANSI.reset}`];
+    const perHr = fmtMoney(ab.costPerHour);
+    if (perHr) parts.push(`${perHr}/hr`);
+    segments.push(`${dim('burn')} ${parts.join(dim(' · '))}`);
   }
 
   // Official rate limits — the numbers Anthropic's limiter actually enforces,

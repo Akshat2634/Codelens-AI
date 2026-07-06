@@ -322,12 +322,25 @@ async function runAnalysis(opts) {
     if (!sourceFilter && !opts.project) {
       const today = payloads.all.summary.costByPeriod?.today;
       const now = new Date();
+      // Snapshot the open 5-hour block so the statusline can show a live burn
+      // rate without parsing. The block's endTime bounds staleness: the
+      // statusline hides it once now passes endTime (i.e. after ≤5h).
+      const { activeBlock } = buildBlocks(payloads.all.sessions);
+      const blockSnapshot = activeBlock ? {
+        endTime: activeBlock.endTime,
+        cost: activeBlock.cost,
+        totalTokens: activeBlock.totalTokens,
+        tokensPerMinute: activeBlock.burnRate ? Math.round(activeBlock.burnRate.tokensPerMinute) : null,
+        tokensPerMinuteIndicator: activeBlock.burnRate ? Math.round(activeBlock.burnRate.tokensPerMinuteIndicator) : null,
+        costPerHour: activeBlock.burnRate ? activeBlock.burnRate.costPerHour : null,
+      } : null;
       saveQuickstats({
         day: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
         generatedAt: now.toISOString(),
         todayCost: today?.cost ?? 0,
         todayCommits: today?.commits ?? 0,
         grade: payloads.all.summary.overallGrade,
+        activeBlock: blockSnapshot,
       }, { claudeDir, codexDir });
     }
   }
