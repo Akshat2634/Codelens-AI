@@ -59,7 +59,7 @@ node src/index.js
 
 ## Prerequisites
 
-- **Node.js >= 18** — [Download](https://nodejs.org/) (Node >= 22.15 to also read Codex's zstd-compressed archive rollouts)
+- **Node.js >= 22.12** — [Download](https://nodejs.org/) (Node >= 22.15 to also read Codex's zstd-compressed archive rollouts)
 - **Git** — installed and configured with `user.name` and `user.email`
 - At least one supported agent with local session data:
   - **Claude Code** — [Claude Code](https://claude.com/claude-code) sessions at `~/.claude/projects/`

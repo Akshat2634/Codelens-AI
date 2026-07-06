@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Codex accounting correctness: per-request `last_token_usage` deltas (cumulative-total fallback with reset handling), exact-duplicate event dedup, subagent `thread_spawn` replay-burst skip, `cached_input ⊂ input` and `reasoning ⊂ output` semantics, plus OpenAI web-search server-tool fees
 - Per-source cache staleness — a new Codex rollout no longer forces a Claude re-parse (cache schema v13)
 
+### Changed
+
+- **Minimum Node.js raised to >= 22.12** (from >= 18) — required by `commander@15` (now ESM-only; needs Node 22.12+) and `open@11` (needs Node 20+). Node 18 and 20 are both past end-of-life; CI now runs the Node 22 and 24 LTS lines (was 18/20/22)
+- Bumped `commander` 13 → 15 and `open` 10 → 11 to their current majors (no code changes required — the CLI's option/subcommand/hook usage is unaffected)
+
 ### Fixed
 
 - **Squash-merge / branch-copy commits were double-counted (Claude & all sources)** — `git-analyzer` deduped only exact rebase/cherry-pick copies (keyed on the byte-for-byte `%aI` author date), so GitHub "Squash and merge" twins (a new commit on the default branch with a drifted author date and a `(#NNNN)` subject suffix) survived under `git log --all` and both were counted. A second, conservative dedup pass now collapses an off-branch twin into its on-default-branch copy only when the author, the full per-file diffstat, and the normalized subject all match and the author dates fall within 10 minutes — inflated commit/line totals and deflated cost-per-commit are corrected (verified on real data: techops 228 → 171 commits, avg cost/commit $6.89 → $9.18, ~25% fewer phantom commits)
@@ -41,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--source all` accepted as the documented no-filter value; `?source=` deep links honored on dashboard load; `--days`/`--port` validated up front; nonexistent `--claude-dir`/`--codex-dir` warned about; `CODEX_HOME` overrides no longer evict the primary cache; moved-repo aliasing corroborates against `git ls-files` before claiming commits; ChatGPT `team` plan recognized
 - Model display polish: null-model sessions sort deterministically, legacy `claude-3-5-sonnet-*` ids render as "Sonnet 3.5" (not "3"), long-context billing buckets are no longer listed as separate models, `[1m]` marker supported, misleading tooltips corrected (self-heal, toolbelt, cost-per-commit chart, Lines column, estimated-cost banner, cache-write funnel hidden for Codex)
 - Sessions whose repo was later moved or renamed on disk (e.g. a folder reorganization) permanently showed zero correlated commits — `analyzeGitRepo` did a literal path-existence check with no fallback. Moved repos are now auto-resolved by matching folder name against another still-valid path from the same parse run; ambiguous or unmatched paths are surfaced with a warning instead of silently returning empty
+
+### Security
+
+- **`qs` bumped to 6.15.3** to resolve a moderate remotely-triggerable DoS (GHSA-q8mj-m7cp-5q26): `qs.stringify` crashes on null/undefined entries in comma-format arrays with `encodeValuesOnly` set. An explicit `qs` override (`^6.15.2`) pins a floor above the vulnerable range (<= 6.15.1) so it can never resolve again; `npm audit` reports 0 vulnerabilities
+- Added `socket.yml` to suppress Socket.dev's routine capability and package-age/ownership dependency alerts (environment/filesystem/network/shell access, eval, dynamic require, URL strings, trivial, unmaintained, new author, unstable ownership) in pull-request checks — these are informational supply-chain signals on the `express`/`open` transitive tree and dev tooling, not vulnerabilities
 
 ## [0.2.1] - 2026-02-26
 
