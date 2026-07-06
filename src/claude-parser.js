@@ -304,6 +304,13 @@ function extractToolUse(session, msg, seenToolUseIds) {
     // Count tool calls
     session.toolCalls[toolName] = (session.toolCalls[toolName] || 0) + 1;
 
+    // Track which named Skill was invoked (input.skill), not just that the
+    // generic Skill tool fired — this is what makes a "top skills" ranking
+    // possible instead of a single undifferentiated count.
+    if (toolName === 'Skill' && typeof block.input?.skill === 'string' && block.input.skill) {
+      session.skillCalls[block.input.skill] = (session.skillCalls[block.input.skill] || 0) + 1;
+    }
+
     // Track Bash commands for autonomy self-heal scoring. Only verification
     // commands keep their text (for the "top tests" list) — storing every
     // command was pure memory/cache ballast, as nothing downstream reads
@@ -342,6 +349,7 @@ function createEmptySession(sessionId) {
     repoPath: null,
     projectName: null,
     gitBranch: null,
+    entrypoint: null,
     startTime: null,
     endTime: null,
     durationMinutes: 0,
@@ -355,6 +363,7 @@ function createEmptySession(sessionId) {
     model: null,
     modelBreakdown: {},
     toolCalls: {},
+    skillCalls: {},
     filesWritten: [],
     userMessageCount: 0,
     assistantMessageCount: 0,
@@ -363,6 +372,9 @@ function createEmptySession(sessionId) {
     verificationBashCalls: 0,
     readOnlyBashCalls: 0,
     estimatedCost: 0,
+    // Subagent transcripts merged into this session (subagents/agent-*.jsonl) —
+    // >0 means work was delegated, not just handled by the main conversation.
+    subagentTranscriptCount: 0,
     // What the cache-read tokens would have cost at full input price minus what
     // was paid — computed per pricing tier (a flat 9x of cacheReadCost is wrong
     // for tiers like haiku-3 whose cache-read price isn't exactly 0.1x input).
@@ -415,6 +427,11 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
       }
       if (!session.gitBranch && obj.gitBranch) {
         session.gitBranch = obj.gitBranch;
+      }
+      // Client surface the session ran from (e.g. 'cli', 'claude-vscode') —
+      // first value wins, consistent with cwd/gitBranch above.
+      if (!session.entrypoint && obj.entrypoint) {
+        session.entrypoint = obj.entrypoint;
       }
       if (obj.sessionId) {
         session.sessionId = obj.sessionId;
@@ -757,7 +774,9 @@ async function parseSessionWithSubagents(projectDir, sessionId, cutoffMs = 0) {
   // Merge every subagent transcript (including workflow-nested ones)
   const subagentDir = path.join(projectDir, sessionId, 'subagents');
   if (existsSync(subagentDir)) {
-    for (const af of listSubagentTranscripts(subagentDir)) {
+    const subagentFiles = listSubagentTranscripts(subagentDir);
+    session.subagentTranscriptCount += subagentFiles.length;
+    for (const af of subagentFiles) {
       try {
         const subSession = await parseSessionFile(af, cutoffMs);
         mergeSubagentIntoSession(session, subSession);
@@ -819,6 +838,11 @@ function mergeSubagentIntoSession(parent, sub) {
   // Merge tool calls
   for (const [tool, count] of Object.entries(sub.toolCalls)) {
     parent.toolCalls[tool] = (parent.toolCalls[tool] || 0) + count;
+  }
+
+  // Merge skill calls (a subagent can invoke Skill itself)
+  for (const [skill, count] of Object.entries(sub.skillCalls || {})) {
+    parent.skillCalls[skill] = (parent.skillCalls[skill] || 0) + count;
   }
 
   // Merge bash command tracking

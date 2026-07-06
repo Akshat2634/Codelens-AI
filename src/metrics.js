@@ -966,6 +966,51 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     }
   }
 
+  // ---- Skill breakdown (Skill tool invocations, keyed by skill name) ----
+  const skillBreakdown = {};
+  for (const session of correlatedSessions) {
+    for (const [skill, count] of Object.entries(session.skillCalls || {})) {
+      skillBreakdown[skill] = (skillBreakdown[skill] || 0) + count;
+    }
+  }
+
+  // ---- MCP server breakdown, derived from tool names (mcp__<server>__<tool>) ----
+  const mcpServerBreakdown = {};
+  for (const [tool, count] of Object.entries(toolBreakdown)) {
+    if (!tool.startsWith('mcp__')) continue;
+    const rest = tool.slice('mcp__'.length);
+    const sep = rest.indexOf('__');
+    const server = sep === -1 ? rest : rest.slice(0, sep);
+    mcpServerBreakdown[server] = (mcpServerBreakdown[server] || 0) + count;
+  }
+
+  // ---- Sessions by client surface (entrypoint: cli, claude-vscode, codex-cli, ...) ----
+  const clientBreakdown = {};
+  for (const session of correlatedSessions) {
+    const client = session.entrypoint || 'unknown';
+    clientBreakdown[client] = (clientBreakdown[client] || 0) + 1;
+  }
+
+  // ---- Sessions by agent type + feature adoption. Reframed for a single local
+  // user as "share of your sessions" rather than the org-wide "% of active
+  // users" an admin console shows — there's no multi-user denominator here.
+  const adoptionPct = (n) => correlatedSessions.length > 0 ? Math.round((n / correlatedSessions.length) * 100) : 0;
+  const delegatedCount = correlatedSessions.filter((s) => (s.subagentTranscriptCount || 0) > 0).length;
+  const skillSessions = correlatedSessions.filter((s) => Object.keys(s.skillCalls || {}).length > 0).length;
+  const mcpSessions = correlatedSessions.filter((s) => Object.keys(s.toolCalls || {}).some((t) => t.startsWith('mcp__'))).length;
+  const planModeSessions = correlatedSessions.filter((s) => (s.toolCalls?.ExitPlanMode || 0) > 0).length;
+
+  const agentTypeBreakdown = {
+    main_only: { sessions: correlatedSessions.length - delegatedCount, pct: adoptionPct(correlatedSessions.length - delegatedCount) },
+    delegated: { sessions: delegatedCount, pct: adoptionPct(delegatedCount) },
+  };
+  const featureAdoption = [
+    { feature: 'Sub-agents', sessions: delegatedCount, pct: adoptionPct(delegatedCount) },
+    { feature: 'Skills', sessions: skillSessions, pct: adoptionPct(skillSessions) },
+    { feature: 'MCP servers', sessions: mcpSessions, pct: adoptionPct(mcpSessions) },
+    { feature: 'Plan mode', sessions: planModeSessions, pct: adoptionPct(planModeSessions) },
+  ];
+
   // ---- Session length buckets ----
   // Sessions that started before the window are excluded: their message counts
   // are whole-session while their cost/commits are window-clipped, so bucketing
@@ -1233,6 +1278,11 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     sessions: sessionsWithGrades,
     modelBreakdown,
     toolBreakdown,
+    skillBreakdown,
+    mcpServerBreakdown,
+    clientBreakdown,
+    agentTypeBreakdown,
+    featureAdoption,
     sessionBuckets,
     lineSurvival,
     heatmap: { commits: heatmap },

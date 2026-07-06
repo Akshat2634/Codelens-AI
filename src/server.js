@@ -222,6 +222,31 @@ export function createServer(initialPayload, rebuildFn, opts = {}) {
     res.json(pick(req).toolBreakdown);
   });
 
+  // Skill usage (Claude Code Skill invocations, by skill name)
+  app.get('/api/skills', (req, res) => {
+    res.json(pick(req).skillBreakdown);
+  });
+
+  // MCP server usage, grouped from mcp__<server>__<tool> tool calls
+  app.get('/api/mcp-servers', (req, res) => {
+    res.json(pick(req).mcpServerBreakdown);
+  });
+
+  // Sessions by client surface (entrypoint: cli, claude-vscode, codex-cli, ...)
+  app.get('/api/clients', (req, res) => {
+    res.json(pick(req).clientBreakdown);
+  });
+
+  // Sessions by agent type (main_only vs delegated to a subagent)
+  app.get('/api/agent-type', (req, res) => {
+    res.json(pick(req).agentTypeBreakdown);
+  });
+
+  // Feature adoption — share of sessions using Sub-agents / Skills / MCP / Plan mode
+  app.get('/api/feature-adoption', (req, res) => {
+    res.json(pick(req).featureAdoption);
+  });
+
   // Line survival
   app.get('/api/survival', (req, res) => {
     res.json(pick(req).lineSurvival);

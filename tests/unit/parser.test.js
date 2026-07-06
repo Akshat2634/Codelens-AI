@@ -342,3 +342,86 @@ test('MultiEdit and NotebookEdit populate filesWritten (not just Write/Edit)', a
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('Skill tool_use blocks are counted per skill name in skillCalls', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codelens-skills-'));
+  try {
+    const proj = path.join(root, 'proj');
+    mkdirSync(proj, { recursive: true });
+    const sid = 'aaaaaaaa-1111-2222-3333-888888888888';
+    const now = new Date().toISOString();
+    const skill = (id, skillName) => ({
+      type: 'assistant', requestId: id, timestamp: now,
+      message: { model: 'claude-sonnet-5', usage: { input_tokens: 5, output_tokens: 2 }, content: [{ type: 'tool_use', id, name: 'Skill', input: { skill: skillName } }] },
+    });
+    const lines = [
+      { type: 'user', sessionId: sid, cwd: '/repo', gitBranch: 'main', entrypoint: 'cli', timestamp: now, message: { content: [{ type: 'text', text: 'go' }] } },
+      skill('s1', 'deep-research'),
+      skill('s2', 'deep-research'),
+      skill('s3', 'worktree'),
+    ];
+    writeFileSync(path.join(proj, sid + '.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions } = await parseAllProjects(root, 30);
+    const s = sessions.find(x => x.sessionId === sid);
+    assert.ok(s, 'session should be parsed');
+    assert.equal(s.skillCalls['deep-research'], 2);
+    assert.equal(s.skillCalls.worktree, 1);
+    assert.equal(s.toolCalls.Skill, 3, 'generic tool count still tracked alongside the per-skill breakdown');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('entrypoint is captured from the first user message that carries one', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codelens-entrypoint-'));
+  try {
+    const proj = path.join(root, 'proj');
+    mkdirSync(proj, { recursive: true });
+    const sid = 'aaaaaaaa-1111-2222-3333-999999999999';
+    const now = new Date().toISOString();
+    const lines = [
+      { type: 'user', sessionId: sid, cwd: '/repo', gitBranch: 'main', entrypoint: 'claude-vscode', timestamp: now, message: { content: [{ type: 'text', text: 'go' }] } },
+      { type: 'user', sessionId: sid, timestamp: now, message: { content: [{ type: 'text', text: 'again' }] } },
+    ];
+    writeFileSync(path.join(proj, sid + '.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions } = await parseAllProjects(root, 30);
+    const s = sessions.find(x => x.sessionId === sid);
+    assert.ok(s, 'session should be parsed');
+    assert.equal(s.entrypoint, 'claude-vscode');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('subagent transcripts under subagents/ are counted and their skill/tool calls merged', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codelens-subagents-'));
+  try {
+    const proj = path.join(root, 'proj');
+    mkdirSync(proj, { recursive: true });
+    const sid = 'aaaaaaaa-1111-2222-3333-aaaaaaaaaaaa';
+    const now = new Date().toISOString();
+    const mainLines = [
+      { type: 'user', sessionId: sid, cwd: '/repo', gitBranch: 'main', timestamp: now, message: { content: [{ type: 'text', text: 'go' }] } },
+      { type: 'assistant', requestId: 'r1', timestamp: now, message: { model: 'claude-sonnet-5', usage: { input_tokens: 10, output_tokens: 5 }, content: [{ type: 'tool_use', id: 'r1', name: 'Task', input: {} }] } },
+    ];
+    writeFileSync(path.join(proj, sid + '.jsonl'), mainLines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const subDir = path.join(proj, sid, 'subagents');
+    mkdirSync(subDir, { recursive: true });
+    const subLines = [
+      { type: 'user', timestamp: now, message: { content: [{ type: 'text', text: 'sub task' }] } },
+      { type: 'assistant', requestId: 'sr1', timestamp: now, message: { model: 'claude-sonnet-5', usage: { input_tokens: 20, output_tokens: 8 }, content: [{ type: 'tool_use', id: 'sr1', name: 'Skill', input: { skill: 'correctness-review' } }] } },
+    ];
+    writeFileSync(path.join(subDir, 'agent-1.jsonl'), subLines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions } = await parseAllProjects(root, 30);
+    const s = sessions.find(x => x.sessionId === sid);
+    assert.ok(s, 'session should be parsed');
+    assert.equal(s.subagentTranscriptCount, 1);
+    assert.equal(s.skillCalls['correctness-review'], 1, 'subagent skill calls merge into the parent session');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

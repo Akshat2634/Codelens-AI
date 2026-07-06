@@ -486,3 +486,54 @@ test('per-agent views do not report the other agent\'s claimed commits as traile
   assert.equal(m.summary.reconciliation.commits.trailerStamped.organic, 0);
   assert.ok(!m.insights.some(i => i.text.includes('co-author trailer')), 'no false missing-logs insight');
 });
+
+test('skillBreakdown aggregates per-skill counts across sessions', () => {
+  const s1 = mkCorrelated({ sessionId: 's1', skillCalls: { 'deep-research': 2, worktree: 1 } });
+  const s2 = mkCorrelated({ sessionId: 's2', skillCalls: { 'deep-research': 1 } });
+  const m = computeMetrics([s1, s2], [], {}, 30);
+  assert.deepEqual(m.skillBreakdown, { 'deep-research': 3, worktree: 1 });
+});
+
+test('mcpServerBreakdown groups mcp__<server>__<tool> tool names by server', () => {
+  const session = mkCorrelated({
+    toolCalls: { Read: 5, 'mcp__claude_ai_Linear__list_issues': 2, 'mcp__claude_ai_Linear__get_issue': 1, mcp__playwright__browser_click: 4 },
+  });
+  const m = computeMetrics([session], [], {}, 30);
+  assert.deepEqual(m.mcpServerBreakdown, { claude_ai_Linear: 3, playwright: 4 });
+});
+
+test('clientBreakdown counts sessions by entrypoint, defaulting to unknown', () => {
+  const s1 = mkCorrelated({ sessionId: 's1', entrypoint: 'cli' });
+  const s2 = mkCorrelated({ sessionId: 's2', entrypoint: 'claude-vscode' });
+  const s3 = mkCorrelated({ sessionId: 's3' }); // no entrypoint field
+  const m = computeMetrics([s1, s2, s3], [], {}, 30);
+  assert.deepEqual(m.clientBreakdown, { cli: 1, 'claude-vscode': 1, unknown: 1 });
+});
+
+test('agentTypeBreakdown and featureAdoption reflect subagent, skill, MCP, and plan-mode usage', () => {
+  const delegated = mkCorrelated({ sessionId: 's1', subagentTranscriptCount: 2, skillCalls: { review: 1 } });
+  const mainOnly = mkCorrelated({
+    sessionId: 's2',
+    toolCalls: { Read: 1, 'mcp__playwright__browser_click': 1, ExitPlanMode: 1 },
+  });
+  const m = computeMetrics([delegated, mainOnly], [], {}, 30);
+
+  assert.deepEqual(m.agentTypeBreakdown, {
+    main_only: { sessions: 1, pct: 50 },
+    delegated: { sessions: 1, pct: 50 },
+  });
+
+  const byFeature = Object.fromEntries(m.featureAdoption.map((f) => [f.feature, f]));
+  assert.deepEqual(byFeature['Sub-agents'], { feature: 'Sub-agents', sessions: 1, pct: 50 });
+  assert.deepEqual(byFeature.Skills, { feature: 'Skills', sessions: 1, pct: 50 });
+  assert.deepEqual(byFeature['MCP servers'], { feature: 'MCP servers', sessions: 1, pct: 50 });
+  assert.deepEqual(byFeature['Plan mode'], { feature: 'Plan mode', sessions: 1, pct: 50 });
+});
+
+test('skillBreakdown, mcpServerBreakdown, and clientBreakdown are empty (not missing) on empty input', () => {
+  const m = computeMetrics([], [], {}, 30);
+  assert.deepEqual(m.skillBreakdown, {});
+  assert.deepEqual(m.mcpServerBreakdown, {});
+  assert.deepEqual(m.clientBreakdown, {});
+  assert.deepEqual(m.agentTypeBreakdown, { main_only: { sessions: 0, pct: 0 }, delegated: { sessions: 0, pct: 0 } });
+});
