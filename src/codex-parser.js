@@ -248,6 +248,9 @@ function createEmptyCodexSession(sessionId) {
     cacheCreation1hTokens: 0,
     cacheReadTokens: 0,
     webSearchRequests: 0,
+    // Per-event usage timeline (ts in epoch ms + token split + priced cost) for
+    // 5-hour billing blocks / burn rate — mirrors claude-parser's shape.
+    usageEvents: [],
     cost: { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, serverToolCost: 0, totalCost: 0 },
     model: null,
     modelBreakdown: {},
@@ -397,6 +400,21 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
     dailyModelTokens[dateStr][billingModel].input += freshInput;
     dailyModelTokens[dateStr][billingModel].output += output;
     dailyModelTokens[dateStr][billingModel].cacheRead += cached;
+
+    // Per-event record for 5-hour blocks / burn rate. OpenAI auto-cache has no
+    // separate cache-creation charge, so cacheCreate is always 0 (mirrors the
+    // uniform session shape). Priced at the event's own date + per-request
+    // long-context tier (rawInput drives the '[long]' marker in billingModel).
+    if (ts) {
+      const evMs = Date.parse(ts);
+      if (Number.isFinite(evMs)) {
+        session.usageEvents.push({
+          ts: evMs,
+          input: freshInput, output, cacheRead: cached, cacheCreate: 0,
+          cost: calculateCodexCost(freshInput, output, cached, billingModel, evMs),
+        });
+      }
+    }
   };
 
   const accumulateWebSearch = (ts, model) => {

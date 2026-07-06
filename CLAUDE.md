@@ -29,6 +29,7 @@ src/
 ├── metrics.js         # ROI calculations, grades, insights, heatmap, survival rate, AI code share, value leak
 ├── report.js          # `codelens-ai report` — terminal / Markdown / HTML ROI scorecard
 ├── tables.js          # `codelens-ai daily|weekly|monthly` — usage/cost tables + ROI columns
+├── blocks.js          # `codelens-ai blocks` — 5-hour billing windows, burn rate, projection
 ├── statusline.js      # `codelens-ai statusline` — Claude Code statusline (reads stdin JSON + quickstats)
 ├── server.js          # Express REST API routes (?source= selects per-agent views)
 ├── cache.js           # Smart caching with per-source stale file detection + statusline quickstats
@@ -95,6 +96,7 @@ npx codelens-ai --host 0.0.0.0  # expose dashboard beyond localhost (default 127
 npx codelens-ai report          # terminal ROI scorecard (--md / --html to export)
 npx codelens-ai daily           # usage/cost table by day (+ commits, $/commit); -b per-model, --json
 npx codelens-ai weekly          # ...by week (--start-of-week monday|sunday); `monthly` = by month
+npx codelens-ai blocks          # Claude's 5-hour billing windows + burn rate (--active, --recent, -t max)
 npx codelens-ai statusline      # Claude Code statusline (--install to configure)
 npx claude-roi                  # backward-compatible alias
 ```

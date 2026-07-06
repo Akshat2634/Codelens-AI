@@ -122,6 +122,11 @@ codelens-ai weekly                 # ...by week (--start-of-week monday|sunday)
 codelens-ai monthly                # ...by month
 codelens-ai daily --breakdown      # nest per-model rows under each period
 codelens-ai daily --json           # structured export (pipe to jq)
+
+codelens-ai blocks                 # group usage into Claude's 5-hour billing windows
+codelens-ai blocks --active        # just the open block: burn rate, time left, projection
+codelens-ai blocks --recent        # only the last 3 days of blocks
+codelens-ai blocks -t max          # warn against a token limit (a number, or "max")
 ```
 
 ### Usage tables (`codelens-ai daily|weekly|monthly`)
@@ -130,6 +135,16 @@ ccusage-style token accounting over the same analyzed window — Input / Output 
 Cache Read / Total / Cost per period — plus the two ROI columns a pure usage tool can't give you:
 **Commits** and **$/Commit**. All the shared analysis flags (`--days`, `--source`, `--project`,
 `--claude-dir`, `--codex-dir`) apply.
+
+### Billing blocks (`codelens-ai blocks`)
+
+Claude bills usage in rolling **5-hour windows** (the window opens with your first message and lasts
+exactly 5 hours). `blocks` groups every session's usage into those windows and shows per-block
+tokens and cost, your **burn rate** (tokens/min and $/hr), and — for the block that's still open — a
+linear **projection** of where it lands plus an optional quota gauge (`-t <n>` or `-t max`). Add
+`--active` for just the current window, `--recent` for the last 3 days, `--session-length <hours>` to
+change the window size, or `--json` for a structured export. Costs use Codelens's version-aware
+per-token pricing, so the numbers match the rest of the tool.
 
 ### ROI report (`codelens-ai report`)
 
