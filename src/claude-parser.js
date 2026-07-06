@@ -383,6 +383,10 @@ function createEmptySession(sessionId) {
     cacheCreation1hTokens: 0,
     cacheReadTokens: 0,
     webSearchRequests: 0,
+    // Per-event usage timeline (ts in epoch ms + token split + priced cost) for
+    // 5-hour billing blocks / burn rate. Only events with a resolvable
+    // timestamp are recorded — a block is inherently time-placed.
+    usageEvents: [],
     cost: { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, serverToolCost: 0, totalCost: 0 },
     model: null,
     modelBreakdown: {},
@@ -572,6 +576,19 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
         dailyModelTokens[dateStr][model].cacheCreate += cacheCreate;
         dailyModelTokens[dateStr][model].cacheCreate1h += cacheCreate1h;
         dailyModelTokens[dateStr][model].webSearch += webSearch;
+
+        // Per-event record for 5-hour blocks / burn rate, priced at the
+        // event's own date so date-tiered rates stay accurate.
+        if (usageTs) {
+          const evMs = Date.parse(usageTs);
+          if (Number.isFinite(evMs)) {
+            session.usageEvents.push({
+              ts: evMs,
+              input, output, cacheRead, cacheCreate,
+              cost: calculateCost(input, output, cacheRead, cacheCreate, model, cacheCreate1h, evMs, webSearch),
+            });
+          }
+        }
       }
 
       session.assistantMessageCount++;
@@ -897,6 +914,12 @@ function mergeSubagentIntoSession(parent, sub) {
         }
       }
     }
+  }
+
+  // Merge per-event usage timeline (5-hour blocks / burn rate)
+  if (sub.usageEvents?.length) {
+    if (!parent.usageEvents) parent.usageEvents = [];
+    parent.usageEvents.push(...sub.usageEvents);
   }
 
   // Merge files

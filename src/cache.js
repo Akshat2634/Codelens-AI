@@ -51,7 +51,9 @@ function cacheFileFor(options = {}) {
 // 15: filesRead and non-verification bashCommands dropped from sessions (no
 //     consumers; pure cache/memory ballast) — cached sessions from 14 still
 //     carry them and would keep the bloat alive.
-const CACHE_VERSION = 15;
+// 16: per-event usageEvents timeline added to sessions (5-hour billing blocks /
+//     burn rate) — cached sessions from 15 lack it, so `blocks` would see no data.
+const CACHE_VERSION = 16;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);
