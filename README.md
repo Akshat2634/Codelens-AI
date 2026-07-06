@@ -116,7 +116,20 @@ codelens-ai report                 # print an ROI scorecard to the terminal
 codelens-ai report --md            # export codelens-report.md (or --md <path>)
 codelens-ai report --html          # export a self-contained codelens-report.html
 codelens-ai statusline --install   # add the ROI statusline to Claude Code
+
+codelens-ai daily                  # token usage & cost table by day (+ commits, $/commit)
+codelens-ai weekly                 # ...by week (--start-of-week monday|sunday)
+codelens-ai monthly                # ...by month
+codelens-ai daily --breakdown      # nest per-model rows under each period
+codelens-ai daily --json           # structured export (pipe to jq)
 ```
+
+### Usage tables (`codelens-ai daily|weekly|monthly`)
+
+ccusage-style token accounting over the same analyzed window — Input / Output / Cache Create /
+Cache Read / Total / Cost per period — plus the two ROI columns a pure usage tool can't give you:
+**Commits** and **$/Commit**. All the shared analysis flags (`--days`, `--source`, `--project`,
+`--claude-dir`, `--codex-dir`) apply.
 
 ### ROI report (`codelens-ai report`)
 

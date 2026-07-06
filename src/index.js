@@ -12,6 +12,7 @@ import { computeMetrics } from './metrics.js';
 import { renderReportHtml, renderReportMarkdown, renderReportText, reportModel } from './report.js';
 import { createServer } from './server.js';
 import { installStatusline, runStatusline } from './statusline.js';
+import { buildPeriodTable, periodTableJson, renderPeriodTableText } from './tables.js';
 
 const { version: VERSION } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8')
@@ -450,6 +451,49 @@ async function runReport(opts) {
   process.stdout.write(`${renderReportText(model)}\n`, () => process.exit(0));
 }
 
+// `codelens-ai daily|weekly|monthly` — ccusage-style usage tables over the
+// same analyzed window, with the ROI columns (commits, $/commit) on top.
+async function runTable(period, opts) {
+  // Progress to stderr so `codelens-ai daily --json | jq` gets clean stdout.
+  progress = console.error;
+  printBanner(` ${period}`);
+
+  if (period === 'weekly' && opts.startOfWeek !== 'monday' && opts.startOfWeek !== 'sunday') {
+    console.error(`  ${icon.err} ${c.red}--start-of-week must be monday or sunday, got "${opts.startOfWeek}".${c.reset}`);
+    process.exit(1);
+  }
+
+  const { payloads, days, claudeDir, codexDir, sourceFilter } = await runAnalysis(opts);
+  if (!payloads) {
+    printNoSessions(sourceFilter, days, claudeDir, codexDir);
+    if (opts.json) {
+      process.stdout.write('null', () => process.exit(0));
+      return;
+    }
+    process.exit(0);
+  }
+
+  const payload = payloads.all;
+  // Same cutoff the pipeline used — clamps fallback days for sessions that
+  // started before the window (mirrors the metrics daily timeline).
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const table = buildPeriodTable(payload.sessions, {
+    period,
+    startOfWeek: opts.startOfWeek,
+    cutoffMs: cutoff.getTime(),
+  });
+
+  if (opts.json) {
+    const doc = periodTableJson(table, { source: payload.meta.source, daysAnalyzed: days });
+    process.stdout.write(JSON.stringify(doc, null, 2), () => process.exit(0));
+    return;
+  }
+  const src = payload.meta.source !== 'all' ? `, ${payload.meta.source} only` : '';
+  const title = `\n  ${c.bold}${c.cyan}Usage by ${period === 'daily' ? 'day' : period === 'weekly' ? 'week' : 'month'}${c.reset} ${c.dim}· last ${days} days${src}${c.reset}\n`;
+  process.stdout.write(`${title}\n${renderPeriodTableText(table, { breakdown: opts.breakdown })}\n\n`, () => process.exit(0));
+}
+
 async function main() {
   const program = new Command();
   program
@@ -475,12 +519,30 @@ async function main() {
   addAnalysisOptions(reportCmd);
   reportCmd.action(async (opts) => runReport(opts));
 
+  // The usage tables: `daily`, `weekly`, `monthly`. Shared flags + renderer;
+  // weekly additionally takes --start-of-week.
+  for (const [name, desc] of [
+    ['daily', 'token usage and cost table aggregated by day'],
+    ['weekly', 'token usage and cost table aggregated by week'],
+    ['monthly', 'token usage and cost table aggregated by month'],
+  ]) {
+    const cmd = program
+      .command(name)
+      .description(desc)
+      .option('-b, --breakdown', 'nest per-model rows under each period')
+      .option('-j, --json', 'output JSON to stdout instead of a table');
+    if (name === 'weekly') cmd.option('--start-of-week <day>', 'week boundary: monday | sunday', 'monday');
+    addAnalysisOptions(cmd);
+    cmd.action(async (opts) => runTable(name, opts));
+  }
+
   // `codelens-ai --days 90 report` places analysis flags on the PARENT (with
   // positional options, they'd otherwise be parsed there and silently ignored
   // while report runs with defaults). Forward parent CLI values into the
   // subcommand before it parses its own flags — its own flags still win.
+  const ANALYSIS_SUBCOMMANDS = new Set(['report', 'daily', 'weekly', 'monthly']);
   program.hook('preSubcommand', (thisCommand, subcommand) => {
-    if (subcommand.name() !== 'report') return;
+    if (!ANALYSIS_SUBCOMMANDS.has(subcommand.name())) return;
     for (const key of ['days', 'project', 'refresh', 'claudeDir', 'codexDir', 'source', 'plan', 'planCost', 'codexPlan', 'codexPlanCost']) {
       if (thisCommand.getOptionValueSource(key) === 'cli') {
         subcommand.setOptionValueWithSource(key, thisCommand.getOptionValue(key), 'cli');
