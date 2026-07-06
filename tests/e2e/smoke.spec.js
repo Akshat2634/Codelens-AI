@@ -214,4 +214,40 @@ test.describe('UI modernization (brand marks, face-off, command palette)', () =>
     await expect(page.locator('#chart-timeline')).toBeVisible();
     expect(errors, 'theme toggle JS errors: ' + errors.join(' | ')).toEqual([]);
   });
+
+  test('share report card renders a canvas and closes on Escape', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+    await page.goto('/');
+    await page.waitForSelector('#share-btn');
+    await page.click('#share-btn');
+    await page.waitForSelector('.share-modal', { state: 'visible' });
+    await page.waitForTimeout(700); // fonts + canvas draw
+    const size = await page.locator('#share-canvas').evaluate((c) => ({ w: c.width, h: c.height }));
+    expect(size.w).toBeGreaterThan(0);
+    expect(size.h).toBeGreaterThan(0);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.share-modal')).toHaveCount(0);
+    expect(errors, 'share card JS errors: ' + errors.join(' | ')).toEqual([]);
+  });
+
+  test('refresh button re-parses data and shows a completion toast', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+    await page.goto('/');
+    await page.waitForSelector('#refresh-btn');
+    await page.click('#refresh-btn');
+    // Disabled + spinning while the /api/refresh round trip is in flight.
+    await expect(page.locator('#refresh-btn')).toBeDisabled();
+    await expect(page.locator('#toast-root')).toContainText(/refresh/i, { timeout: 10_000 });
+    await expect(page.locator('#refresh-btn')).toBeEnabled();
+    expect(errors, 'refresh JS errors: ' + errors.join(' | ')).toEqual([]);
+  });
+
+  test('footer shows both agent marks and links to the real project', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('footer');
+    await expect(page.locator('footer svg[data-agent-logo]')).toHaveCount(2);
+    await expect(page.locator('footer a[href="https://github.com/Akshat2634/Codelens-AI"]')).toHaveCount(2);
+  });
 });

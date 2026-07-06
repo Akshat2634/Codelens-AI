@@ -77,6 +77,7 @@
   @keyframes blinkDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
   @keyframes drawLine { from { stroke-dashoffset: 300; } to { stroke-dashoffset: 0; } }
   @keyframes popIn { from { opacity: 0; transform: scale(0.96) translateY(6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+  @keyframes spinCw { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   [data-motion="off"] *, [data-motion="off"] *::before, [data-motion="off"] *::after { animation-duration: 0.01s !important; transition-duration: 0.01s !important; }
   ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 0.45s; }
   html.vt-theme::view-transition-old(root) { animation: none; }
@@ -108,7 +109,9 @@
   [data-act="toggleLog"]:hover,
   [data-act="toggleBurn"]:hover,
   [data-act="prevPage"]:hover,
-  [data-act="nextPage"]:hover { border-color: var(--glass-line) !important; color: var(--ink) !important; }
+  [data-act="nextPage"]:hover,
+  [data-act="openShare"]:hover,
+  [data-act="refreshData"]:not([disabled]):hover { border-color: var(--glass-line) !important; color: var(--ink) !important; }
   [data-act="sort"]:not([disabled]):hover,
   [data-act="range"]:hover,
   [data-act="filter"]:hover { color: var(--ink) !important; }
@@ -118,6 +121,10 @@
   .session-row:not(.expanded):hover { background: var(--hover) !important; }
   .heat-cell { transition: transform 0.12s, box-shadow 0.12s; }
   .heat-cell:hover { transform: scale(1.35); box-shadow: 0 0 0 1px var(--glass-line), 0 4px 10px rgba(0, 0, 0, 0.35); position: relative; z-index: 2; }
+  .share-close:hover { color: var(--ink) !important; background: var(--hover) !important; }
+  .share-copy:hover { filter: brightness(1.08); }
+  .share-download:hover { border-color: var(--glass-line) !important; background: var(--hover) !important; }
+  .footer-link:hover { text-decoration: underline !important; color: var(--cyan) !important; }
 
   /* ── Responsive: collapse the fixed rail into a stacked header on narrow viewports ── */
   @media (max-width: 900px) {
@@ -152,6 +159,8 @@
   </main>
 </div>
 <div id="cmd-root"></div>
+<div id="share-root"></div>
+<div id="toast-root"></div>
 
 <script>
 "use strict";
@@ -188,6 +197,7 @@
     q: '', filter: 'all',
     sortCol: 'startTime', sortDir: -1, page: 1,
     expanded: null, activeSection: 'sec-overview',
+    shareOpen: false, shareTheme: 'dark', toastMsg: '', refreshing: false,
   };
   const payloads = { all: null, claude: null, codex: null };
   const charts = {};
@@ -501,6 +511,267 @@
     }
   }
 
+  // ── Toast ──
+  let toastTimer = null;
+  function toast(msg) {
+    clearTimeout(toastTimer);
+    state.toastMsg = msg;
+    renderToast();
+    toastTimer = setTimeout(() => { state.toastMsg = ''; renderToast(); }, 2400);
+  }
+  function renderToast() {
+    $('toast-root').innerHTML = state.toastMsg
+      ? `<div style="position:fixed;bottom:26px;left:50%;transform:translateX(-50%);z-index:300;font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;letter-spacing:0.04em;color:var(--ink);background:var(--glass);border:1px solid var(--glass-line);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-radius:10px;padding:10px 18px;box-shadow:0 16px 40px -12px rgba(0,0,0,0.5);animation:popIn .2s cubic-bezier(0.22,1,0.36,1) both;pointer-events:none;">${esc(state.toastMsg)}</div>`
+      : '';
+  }
+
+  // ── Refresh — a real POST to /api/refresh (re-parses sessions server-side),
+  // then re-fetches every source so the dashboard reflects the new data. ──
+  async function refreshData() {
+    if (state.refreshing) return;
+    state.refreshing = true;
+    renderTopbar();
+    try {
+      const res = await fetch('/api/refresh', { method: 'POST' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Refresh failed (${res.status})`);
+      const [all, claude, codex] = await Promise.all([fetchPayload('all'), fetchPayload('claude'), fetchPayload('codex')]);
+      if (all && all.meta) {
+        payloads.all = all;
+        payloads.claude = (claude && claude.meta && claude.meta.source === 'claude') ? claude : null;
+        payloads.codex = (codex && codex.meta && codex.meta.source === 'codex') ? codex : null;
+        if (state.source !== 'all' && !payloads[state.source]) state.source = 'all';
+        state.expanded = null; state.page = 1;
+        renderAll();
+      }
+      toast('Data refreshed');
+    } catch (e) {
+      toast(e.message || 'Refresh failed');
+    } finally {
+      state.refreshing = false;
+      renderTopbar();
+    }
+  }
+
+  // ── Share report card — draws a self-contained canvas summary (grade,
+  // headline stats, efficiency bars, heatmap, top insights) for copy/download. ──
+  function srcTitle() {
+    return state.source === 'all' ? 'All Agents' : state.source === 'claude' ? 'Claude Code' : 'OpenAI Codex';
+  }
+  function openShare() {
+    state.shareOpen = true; state.shareTheme = state.theme;
+    renderShare();
+    (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => drawShareCard());
+  }
+  function closeShare() { state.shareOpen = false; renderShare(); }
+  function setShareTheme(t) { state.shareTheme = t; renderShare(); drawShareCard(); }
+  function drawShareCard() {
+    const canvas = $('share-canvas');
+    const v = view();
+    if (!canvas || !v) return;
+    const isLight = state.shareTheme === 'light';
+    const th = isLight
+      ? { bg1: '#F6F4EF', bg2: '#FDFCFA', border: 'rgba(27,24,17,0.14)', ink: '#1B1811', ink2: '#59534A', ink3: '#8B8375', dim: '#8B8375', track: '#EAE6DC', box: 'rgba(27,24,17,0.03)', sep: '#D9D3C6', orb: 'rgba(181,118,3,0.08)' }
+      : { bg1: '#0B0A08', bg2: '#161411', border: 'rgba(244,241,234,0.13)', ink: '#F4F1EA', ink2: '#A9A296', ink3: '#746D60', dim: '#746D60', track: '#221E17', box: 'rgba(244,241,234,0.03)', sep: '#2A251D', orb: 'rgba(196,132,11,0.10)' };
+    const cOrange = isLight ? '#B57603' : '#E8A93C', cGreen = isLight ? '#20813C' : '#2E9E4F',
+      cBlue = isLight ? '#2A78D6' : '#3987E5', cPurple = isLight ? '#5D50C9' : '#9085E9',
+      cTeal = isLight ? '#14936B' : '#1FA97C', cRed = isLight ? '#D64444' : '#E66767';
+    const gradeHex = { A: cGreen, B: cBlue, C: cOrange, D: isLight ? '#C24E1D' : '#D95926', F: cRed };
+    const s = v.summary, t = v.tokenAnalytics, ls = v.lineSurvival;
+    const W = 600, ctx = canvas.getContext('2d');
+    const mono = (w) => `${w} 10px 'IBM Plex Mono', monospace`;
+
+    const LINE_H = 14;
+    ctx.font = "400 11px 'Instrument Sans', sans-serif";
+    const wrap = (text, maxW) => {
+      const words = String(text).split(' '), lines = [];
+      let cur = '';
+      for (const w of words) {
+        const cand = cur ? cur + ' ' + w : w;
+        if (ctx.measureText(cand).width > maxW && cur) { lines.push(cur); cur = w; }
+        else cur = cand;
+      }
+      if (cur) lines.push(cur);
+      return lines.slice(0, 3);
+    };
+    const topInsights = (v.insights || []).slice(0, 3);
+    const insightLines = topInsights.map((i) => wrap(i.text, W - 64 - 26));
+    const insightsH = topInsights.length ? 26 + insightLines.reduce((a, l) => a + l.length * LINE_H + 12, 0) : 0;
+    const heatH = 7 * 12;
+    const H = 136 + 20 + 116 + 24 + 18 + 34 * 3 + 34 + 16 + heatH + insightsH + 62;
+
+    canvas.width = W * 2; canvas.height = H * 2;
+    canvas.style.width = '100%'; canvas.style.height = 'auto'; canvas.style.display = 'block';
+    ctx.setTransform(2, 0, 0, 2, 0, 0);
+
+    const g = ctx.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, th.bg1); g.addColorStop(0.5, th.bg2); g.addColorStop(1, th.bg1);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    const orb = (x, y, r) => {
+      const rg = ctx.createRadialGradient(x, y, 0, x, y, r);
+      rg.addColorStop(0, th.orb); rg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = rg; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    };
+    orb(W * 0.5, 0, 300); orb(W * 0.1, H * 0.9, 200);
+    const rr = (x, y, w, h, r) => { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); };
+    rr(0.5, 0.5, W - 1, H - 1, 16); ctx.strokeStyle = th.border; ctx.lineWidth = 1; ctx.stroke();
+
+    let y = 36;
+    const bars = [[16, cOrange], [26, cGreen], [20, cBlue]];
+    bars.forEach(([bh, col], i) => { rr(32 + i * 9, y + 26 - bh, 5, bh, 2); ctx.fillStyle = col; ctx.fill(); });
+    ctx.font = "800 27px 'Bricolage Grotesque', 'Instrument Sans', sans-serif";
+    ctx.fillStyle = th.ink; ctx.fillText('Codelens', 69, y + 26);
+    ctx.fillStyle = cOrange; ctx.fillText(' AI', 69 + ctx.measureText('Codelens').width, y + 26);
+    y += 44;
+    ctx.font = mono(600); ctx.fillStyle = cOrange;
+    try { ctx.letterSpacing = '0.18em'; } catch (e) { /* unsupported */ }
+    ctx.fillText('AI CODING REPORT CARD', 32, y);
+    try { ctx.letterSpacing = '0px'; } catch (e) { /* unsupported */ }
+    y += 20;
+    const fd = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    ctx.font = "500 11px 'IBM Plex Mono', monospace"; ctx.fillStyle = th.dim;
+    ctx.fillText(fd(v.meta.startDate) + '  –  ' + fd(v.meta.endDate) + '   ·   ' + srcTitle(), 32, y);
+    y += 16;
+    ctx.strokeStyle = cOrange; ctx.beginPath(); ctx.moveTo(32, y); ctx.lineTo(80, y); ctx.stroke();
+    ctx.strokeStyle = th.sep; ctx.beginPath(); ctx.moveTo(80, y); ctx.lineTo(W - 32, y); ctx.stroke();
+
+    y += 20;
+    const es = s.efficiencyScore || { letter: 'F', score: 0 };
+    const gc = gradeHex[es.letter] || th.ink3;
+    ctx.beginPath(); ctx.arc(80, y + 52, 42, 0, Math.PI * 2); ctx.strokeStyle = th.track; ctx.lineWidth = 5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(80, y + 52, 42, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * es.score / 100);
+    ctx.strokeStyle = gc; ctx.lineCap = 'round'; ctx.stroke(); ctx.lineCap = 'butt';
+    ctx.font = "800 40px 'Bricolage Grotesque', sans-serif"; ctx.fillStyle = gc; ctx.textAlign = 'center';
+    ctx.fillText(es.letter, 80, y + 66);
+    ctx.font = mono(600); ctx.fillStyle = th.ink3;
+    ctx.fillText(es.score + '/100', 80, y + 110);
+    ctx.textAlign = 'left';
+    const box = (x, by, val, label, col) => {
+      rr(x, by, 152, 52, 9); ctx.fillStyle = th.box; ctx.fill(); ctx.strokeStyle = th.sep; ctx.lineWidth = 1; ctx.stroke();
+      ctx.font = "700 17px 'IBM Plex Mono', monospace"; ctx.fillStyle = col; ctx.fillText(val, x + 13, by + 24);
+      ctx.font = mono(500); ctx.fillStyle = th.ink3; ctx.fillText(label, x + 13, by + 40);
+    };
+    box(160, y, fmtMoney(s.totalCost), 'Total Spend', cOrange);
+    box(324, y, String(s.totalCommits), 'Commits Shipped', cGreen);
+    box(160, y + 64, s.avgCostPerCommit != null ? fmtMoney(s.avgCostPerCommit) : 'N/A', 'Avg $/Commit', cBlue);
+    box(324, y + 64, String(s.totalSessions), 'Sessions', cPurple);
+
+    const section = (text, ly) => {
+      ctx.fillStyle = cOrange; ctx.fillRect(32, ly - 8, 3, 9);
+      ctx.font = mono(600); ctx.fillStyle = th.ink3;
+      try { ctx.letterSpacing = '0.12em'; } catch (e) { /* unsupported */ }
+      ctx.fillText(text, 42, ly);
+      try { ctx.letterSpacing = '0px'; } catch (e) { /* unsupported */ }
+    };
+
+    y += 116 + 24;
+    section('EFFICIENCY', y);
+    y += 18;
+    const bar = (label, pct, col) => {
+      ctx.font = "500 11px 'Instrument Sans', sans-serif"; ctx.fillStyle = th.ink2; ctx.fillText(label, 32, y + 10);
+      ctx.font = "700 11px 'IBM Plex Mono', monospace"; ctx.fillStyle = col; ctx.textAlign = 'right';
+      ctx.fillText(pct + '%', W - 32, y + 10); ctx.textAlign = 'left';
+      rr(32, y + 16, W - 64, 6, 4); ctx.fillStyle = th.track; ctx.fill();
+      rr(32, y + 16, Math.max(8, (W - 64) * pct / 100), 6, 4); ctx.fillStyle = col; ctx.fill();
+      y += 34;
+    };
+    bar('Token Efficiency', t.tokenEfficiencyRate, cGreen);
+    bar('Cache Hit Rate', t.cacheHitRate, cTeal);
+    bar('Line Survival', ls.survivalRate ?? 0, cPurple);
+
+    section('PRODUCTIVITY HEATMAP', y);
+    y += 16;
+    const heat = v.heatmap.commits, maxH = Math.max(1, ...heat.flat());
+    const labelW = 26, cw = (W - 64 - labelW - 23 * 2) / 24;
+    const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    heat.forEach((row, di) => {
+      ctx.font = "500 8px 'IBM Plex Mono', monospace"; ctx.fillStyle = th.ink3;
+      ctx.fillText(days[di], 32, y + di * 12 + 8);
+      row.forEach((val, h) => {
+        rr(32 + labelW + h * (cw + 2), y + di * 12, cw, 10, 2);
+        if (val === 0) ctx.fillStyle = th.track;
+        else {
+          const a = 0.25 + 0.75 * val / maxH;
+          ctx.fillStyle = isLight ? `rgba(32,129,60,${a})` : `rgba(46,158,79,${a})`;
+        }
+        ctx.fill();
+      });
+    });
+    y += heatH;
+
+    if (topInsights.length) {
+      y += 26;
+      section('KEY INSIGHTS', y);
+      y += 6;
+      const iCol = { warning: cOrange, success: cGreen, info: cBlue, tip: cPurple };
+      const iGlyph = { warning: '!', success: '+', info: 'i', tip: '*' };
+      topInsights.forEach((ins, ii) => {
+        const col = iCol[ins.type] || cBlue;
+        rr(32, y + 3, 15, 15, 5); ctx.fillStyle = col; ctx.globalAlpha = 0.16; ctx.fill(); ctx.globalAlpha = 1;
+        ctx.font = "700 10px 'IBM Plex Mono', monospace"; ctx.fillStyle = col; ctx.textAlign = 'center';
+        ctx.fillText(iGlyph[ins.type] || 'i', 39.5, y + 14); ctx.textAlign = 'left';
+        ctx.font = "400 11px 'Instrument Sans', sans-serif"; ctx.fillStyle = th.ink2;
+        insightLines[ii].forEach((ln, li) => ctx.fillText(ln, 58, y + 13 + li * LINE_H));
+        y += insightLines[ii].length * LINE_H + 12;
+      });
+    }
+
+    ctx.strokeStyle = th.sep; ctx.beginPath(); ctx.moveTo(32, H - 40); ctx.lineTo(W - 32, H - 40); ctx.stroke();
+    ctx.font = "400 10px 'Instrument Sans', sans-serif"; ctx.fillStyle = th.dim;
+    ctx.fillText('Generated by Codelens AI  ·  codelensai-dev.vercel.app', 32, H - 24);
+    const mark = (path, x, my, size, col) => {
+      ctx.save(); ctx.translate(x, my); ctx.scale(size / 24, size / 24);
+      ctx.fillStyle = col; ctx.fill(new Path2D(path)); ctx.restore();
+    };
+    mark(MARKS.claude, W - 66, H - 33, 13, '#D97757');
+    mark(MARKS.codex, W - 45, H - 33, 13, th.dim);
+  }
+  async function copyShare() {
+    const canvas = $('share-canvas');
+    if (!canvas) return;
+    try {
+      const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      toast('Copied to clipboard!');
+    } catch (e) {
+      toast('Clipboard blocked — downloading instead');
+      downloadShare();
+    }
+  }
+  function downloadShare() {
+    const canvas = $('share-canvas');
+    if (!canvas) return;
+    const link = document.createElement('a');
+    link.download = 'codelens-ai-report-card.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    toast('Downloaded!');
+  }
+  function renderShare() {
+    if (!state.shareOpen) { $('share-root').innerHTML = ''; return; }
+    const chips = ['dark', 'light'].map((t) =>
+      `<button class="share-chip" data-act="shareTheme" data-arg="${t}" style="border:0;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;letter-spacing:0.06em;padding:5px 14px;border-radius:7px;color:${state.shareTheme === t ? 'var(--ink)' : 'var(--ink3)'};background:${state.shareTheme === t ? 'var(--hover)' : 'transparent'};transition:color .15s,background .15s;">${t === 'dark' ? 'Dark' : 'Light'}</button>`).join('');
+    $('share-root').innerHTML = `<div class="share-modal" data-act="closeShare" style="position:fixed;inset:0;z-index:210;background:var(--scrim);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:24px;overflow-y:auto;">
+      <div data-act="shareStop" style="width:520px;max-width:100%;max-height:calc(100vh - 48px);overflow-y:auto;border:1px solid var(--glass-line);border-radius:18px;background:var(--glass);backdrop-filter:blur(22px) saturate(1.4);-webkit-backdrop-filter:blur(22px) saturate(1.4);box-shadow:0 32px 80px -20px rgba(0,0,0,0.6);padding:22px 24px 24px;animation:popIn .24s cubic-bezier(0.22,1,0.36,1) both;position:relative;">
+        <button class="share-close" data-act="closeShare" aria-label="Close" style="position:absolute;top:14px;right:14px;border:0;background:transparent;color:var(--ink3);cursor:pointer;font-size:17px;line-height:1;padding:6px;border-radius:7px;transition:color .15s,background .15s;">✕</button>
+        <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:19px;font-weight:700;letter-spacing:-0.01em;">Your AI Report Card</div>
+        <div style="font-size:12.5px;color:var(--ink2);margin-top:3px;">Share your AI coding insights</div>
+        <div style="display:flex;gap:4px;border:1px solid var(--line2);border-radius:9px;padding:3px;background:var(--bg2);width:fit-content;margin-top:14px;">${chips}</div>
+        <div style="margin-top:14px;border-radius:14px;overflow:hidden;border:1px solid var(--line2);"><canvas id="share-canvas"></canvas></div>
+        <div style="display:flex;gap:10px;margin-top:16px;">
+          <button class="share-copy" data-act="copyShare" style="flex:1;display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700;letter-spacing:0.06em;padding:11px 14px;border-radius:10px;color:#0B0A08;background:var(--amber-hi);transition:filter .15s;">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            Copy to Clipboard
+          </button>
+          <button class="share-download" data-act="downloadShare" style="flex:1;display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line2);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700;letter-spacing:0.06em;padding:11px 14px;border-radius:10px;color:var(--ink);background:var(--card);transition:border-color .15s,background .15s;">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Download PNG
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }
+
   // ══════════════════════════════════════════════════════════════════
   //  RENDER
   // ══════════════════════════════════════════════════════════════════
@@ -588,6 +859,11 @@
     });
   }
 
+  function tzLabel() {
+    try {
+      return (Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local time').split('/').pop().replace(/_/g, ' ');
+    } catch (e) { return 'Local time'; }
+  }
   function renderTopbar() {
     const v = view();
     const fmtD = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -601,6 +877,14 @@
       <div style="flex:1;"></div>
       <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:500;letter-spacing:0.04em;color:var(--green);border:1px solid color-mix(in srgb, var(--green) 30%, transparent);background:color-mix(in srgb, var(--green) 10%, transparent);border-radius:7px;padding:5px 11px;">${esc(dateRange)}</span>
       <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:500;letter-spacing:0.04em;color:var(--ink3);border:1px solid var(--line2);background:var(--card);border-radius:7px;padding:5px 11px;">${esc(windowLabel)}</span>
+      <span title="Heatmap hours use this timezone" style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:500;letter-spacing:0.04em;color:var(--ink3);border:1px solid var(--line2);background:var(--card);border-radius:7px;padding:5px 11px;">${esc(tzLabel())}</span>
+      <button id="share-btn" data-act="openShare" title="Share AI Report Card" style="display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line2);background:var(--card);color:var(--ink2);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;padding:6px 12px;border-radius:7px;transition:color .2s,border-color .2s;">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+        Share
+      </button>
+      <button id="refresh-btn" data-act="refreshData" title="Refresh dashboard data" ${state.refreshing ? 'disabled' : ''} style="display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line2);background:var(--card);color:var(--ink2);cursor:${state.refreshing ? 'default' : 'pointer'};opacity:${state.refreshing ? 0.6 : 1};padding:6px 9px;border-radius:7px;transition:color .2s,border-color .2s;">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation:${state.refreshing ? 'spinCw 0.8s linear infinite' : 'none'};"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+      </button>
     </div>`;
   }
 
@@ -1254,10 +1538,22 @@
           <button data-act="nextPage" style="border:1px solid var(--line2);background:var(--bg2);color:${page < pageCount ? 'var(--ink2)' : 'var(--ink3)'};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;padding:6px 14px;border-radius:8px;">Next →</button>
         </div>
       </div>
-      <div style="text-align:center;padding:44px 0 0;font-size:12px;color:var(--ink3);">
-        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.18em;text-transform:uppercase;color:var(--amber);">Codelens AI · Mission Control</span>
-        <div style="margin-top:8px;">Cost estimates use published per-token API pricing and may differ from actual billing. All data stays local.</div>
-      </div>`;
+      <footer style="text-align:center;padding:52px 0 0;font-size:12.5px;color:var(--ink3);display:flex;flex-direction:column;align-items:center;gap:9px;">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;letter-spacing:0.24em;text-transform:uppercase;color:var(--amber);">Designed &amp; built in the Bay Area · California <span style="color:var(--amber-hi);">◆</span></div>
+        <div style="color:var(--ink2);font-size:13px;">
+          Made by <a href="https://www.linkedin.com/in/akshat2634/" class="footer-link" style="color:var(--blue);text-decoration:none;">Akshat</a>
+          <span style="color:var(--ink3);">·</span> Powered by <a href="https://code.claude.com/docs/en/overview" class="footer-link" style="color:var(--blue);text-decoration:none;">Claude Code</a>
+          <span style="color:var(--ink3);">·</span> <a href="https://github.com/Akshat2634/Codelens-AI" class="footer-link" style="color:var(--blue);text-decoration:none;">GitHub</a>
+          <span style="color:var(--ink3);">·</span> <a href="https://codelensai-dev.vercel.app/" class="footer-link" style="color:var(--blue);text-decoration:none;">Website</a>
+        </div>
+        <div style="color:var(--ink3);">Open source — contributions, ideas, and feedback welcome! <a href="https://github.com/Akshat2634/Codelens-AI" class="footer-link" style="color:var(--blue);text-decoration:none;">Star the repo</a> if you find it useful.</div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;margin-top:3px;">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:var(--ink3);">Supports</span>
+          <span style="display:inline-flex;align-items:center;gap:7px;color:var(--ink2);font-size:12.5px;">${logoSvg('claude', 13, '#D97757', 'style="display:block"')}Claude Code</span>
+          <span style="display:inline-flex;align-items:center;gap:7px;color:var(--ink2);font-size:12.5px;">${logoSvg('codex', 13, 'var(--ink2)', 'style="display:block"')}OpenAI Codex</span>
+        </div>
+        <div style="font-size:11px;color:var(--ink3);opacity:0.75;max-width:720px;line-height:1.6;text-wrap:pretty;">Cost estimates are approximate — based on Anthropic's and OpenAI's published per-token API pricing and may vary from actual billing (subscription plans pay a flat fee). Cursor, Gemini CLI, and more coming soon. All data stays local.</div>
+      </footer>`;
   }
 
   // ── Command palette ──
@@ -1276,6 +1572,8 @@
       { icon: '◉', iconColor: '#D97757', label: 'View: Claude Code', hint: 'Agent', runNow: () => { state.cmdOpen = false; switchSource('claude'); } },
       { icon: '◉', iconColor: 'var(--cyan)', label: 'View: OpenAI Codex', hint: 'Agent', runNow: () => { state.cmdOpen = false; switchSource('codex'); } },
       { icon: '◑', iconColor: 'var(--amber-hi)', label: 'Toggle light / dark theme', hint: 'Theme', runNow: () => { state.cmdOpen = false; renderCmd(); toggleThemeAt(window.innerWidth / 2, window.innerHeight / 3); } },
+      { icon: '⇪', iconColor: 'var(--amber-hi)', label: 'Share AI report card', hint: 'Action', runNow: () => { state.cmdOpen = false; renderCmd(); openShare(); } },
+      { icon: '↻', iconColor: 'var(--green)', label: 'Refresh dashboard data', hint: 'Action', runNow: () => { state.cmdOpen = false; renderCmd(); refreshData(); } },
       ...[7, 14, 30].map((rr) => ({ icon: '▤', iconColor: 'var(--blue)', label: `Chart range: last ${rr} days`, hint: 'Range', runNow: () => { state.range = rr; state.cmdOpen = false; renderFlow(); renderCmd(); scheduleCharts(['timeline', 'burn']); } })),
       ...v.sessions.slice(0, 40).map((x) => ({
         icon: '⌁', iconColor: x.source === 'codex' ? srcColors.codex : srcColors.claude,
@@ -1346,6 +1644,13 @@
       case 'closeCmd': state.cmdOpen = false; renderCmd(); break;
       case 'cmdStop': e.stopPropagation(); break;
       case 'toggleTheme': toggleThemeAt(e.clientX || 40, e.clientY || (window.innerHeight - 60)); break;
+      case 'openShare': openShare(); break;
+      case 'closeShare': closeShare(); break;
+      case 'shareStop': e.stopPropagation(); break;
+      case 'shareTheme': setShareTheme(arg); break;
+      case 'copyShare': copyShare(); break;
+      case 'downloadShare': downloadShare(); break;
+      case 'refreshData': refreshData(); break;
       // renderFlow() recreates BOTH flow canvases, so both charts must rebuild
       // even though only one toggle changed (a single-key rebuild would leave
       // the other canvas blank).
@@ -1421,6 +1726,7 @@
       renderCmd();
       return;
     }
+    if (e.key === 'Escape' && state.shareOpen) { closeShare(); return; }
     if (!state.cmdOpen) return;
     if (e.key === 'Escape') { state.cmdOpen = false; renderCmd(); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); state.cmdIdx = Math.min(state.cmdIdx + 1, lastCmdItems.length - 1); renderCmd(); }
