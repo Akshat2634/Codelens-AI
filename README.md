@@ -188,6 +188,7 @@ The dashboard includes:
 - **Session length analysis** — which session sizes have the best ROI
 - **Productivity heatmap** — GitHub-style grid showing when you're most productive
 - **Agent Autonomy** — autonomy score badge, autopilot ratio, self-heal score, commit velocity, and top verification commands
+- **Projects** — per-repository ROI: which repo your spend goes to, ranked by cost, with its share of spend, commits, $/commit, lines, and % on the default branch
 - **Sessions table** — sortable, expandable table with per-session metrics, matched commits, and autopilot ratio
 
 ## How It Works
