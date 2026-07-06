@@ -28,6 +28,7 @@ src/
 ├── correlator.js      # Matches sessions to commits via file overlap + time window + Co-authored-by trailers
 ├── metrics.js         # ROI calculations, grades, insights, heatmap, survival rate, AI code share, value leak
 ├── report.js          # `codelens-ai report` — terminal / Markdown / HTML ROI scorecard
+├── tables.js          # `codelens-ai daily|weekly|monthly` — usage/cost tables + ROI columns
 ├── statusline.js      # `codelens-ai statusline` — Claude Code statusline (reads stdin JSON + quickstats)
 ├── server.js          # Express REST API routes (?source= selects per-agent views)
 ├── cache.js           # Smart caching with per-source stale file detection + statusline quickstats
@@ -92,6 +93,8 @@ npx codelens-ai --codex-dir X   # override ~/.codex/sessions (testing/CI)
 npx codelens-ai --plan max20 --codex-plan plus   # per-agent subscription mode
 npx codelens-ai --host 0.0.0.0  # expose dashboard beyond localhost (default 127.0.0.1)
 npx codelens-ai report          # terminal ROI scorecard (--md / --html to export)
+npx codelens-ai daily           # usage/cost table by day (+ commits, $/commit); -b per-model, --json
+npx codelens-ai weekly          # ...by week (--start-of-week monday|sunday); `monthly` = by month
 npx codelens-ai statusline      # Claude Code statusline (--install to configure)
 npx claude-roi                  # backward-compatible alias
 ```
@@ -136,7 +139,7 @@ Use these skills when working on this project:
 
 ## Important Notes
 
-- The dashboard is a single 4000+ line HTML file — changes should maintain the inline architecture
+- The dashboard is a single-file HTML app — changes should maintain the inline architecture. Sections are **console pages** (progressive disclosure): every section renders, but only `state.activeSection` is visible; the left-rail nav, Overview "console index" tiles, and `#sec-*` hashes switch pages, and Chart.js charts are (re)built only when their page is shown (`chartKeysFor`). E2E tests must open a section's page (`openPage()` helper in `smoke.spec.js`) before asserting on it
 - Cache is stored at `~/.cache/agent-analytics/parsed-sessions.json` (plus `quickstats.json`, a tiny summary the statusline reads); runs with custom `--claude-dir`/`--codex-dir` write to a separate `parsed-sessions-<hash>.json` so tests/CI never evict the real cache
 - Claude session JSONL files are at `~/.claude/projects/`; Codex rollouts at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (zstd-compressed `.jsonl.zst` after ~7 days — readable on Node >= 22.15)
 - Token pricing is hardcoded in `claude-parser.js` (Anthropic) and `codex-parser.js` (OpenAI) — update when providers change pricing
