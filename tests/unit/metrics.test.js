@@ -298,6 +298,43 @@ test('selfHealScore clamps at 100 and tolerates sessions cached before readOnlyB
   assert.equal(computeMetrics([legacy], [], {}, 30).autonomyMetrics.selfHealScore, 40);
 });
 
+test('self-heal denominator floor is aligned at 0 for both the score and the exposed field', () => {
+  // Synthetic repro of the old "pwd && npm test" double-count shape (a
+  // command flagged as BOTH verification and read-only, which real
+  // classification can no longer produce — isReadOnlyCommand('pwd && npm
+  // test') is now false). With zero real attempted calls, the denominator
+  // must floor at 0 for BOTH the score math and the displayed field, so the
+  // dashboard never shows a fabricated non-zero score ("100% verified")
+  // paired with a "0 shell calls" denominator.
+  const doubleCounted = mkCorrelated({
+    totalBashCalls: 1,
+    readOnlyBashCalls: 1,
+    verificationBashCalls: 1,
+  });
+  const m = computeMetrics([doubleCounted], [], {}, 30);
+  assert.equal(m.autonomyMetrics.attemptedBashCalls, 0);
+  assert.equal(m.autonomyMetrics.selfHealScore, 0);
+  assert.equal(m.sessions[0].selfHealScore, 0);
+});
+
+test('an all-read-only session is neutral (50), not punished (0), and does not trigger the low self-heal warning', () => {
+  // Every bash call is read-only inspection — zero state-changing calls
+  // means there is nothing to have tested, which is exactly the
+  // "not enough evidence" case MIN_BASH_FOR_SELFHEAL exists to protect.
+  const allReadOnly = mkCorrelated({
+    totalBashCalls: 25,
+    readOnlyBashCalls: 25,
+    verificationBashCalls: 0,
+  });
+  const m = computeMetrics([allReadOnly], [], {}, 30);
+  assert.equal(m.autonomyMetrics.attemptedBashCalls, 0);
+  assert.equal(m.autonomyMetrics.breakdown.selfHealWeighted, 50);
+  assert.ok(
+    !m.insights.some(i => i.text.includes('low self-healing')),
+    'a purely-exploratory read-only session should not generate a self-contradictory "0% of 0" warning'
+  );
+});
+
 test('self-heal insight uses agent-neutral shell wording', () => {
   const session = mkCorrelated({
     totalBashCalls: 30,

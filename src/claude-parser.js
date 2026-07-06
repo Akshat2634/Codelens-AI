@@ -208,6 +208,8 @@ const NON_VERIFICATION_PATTERNS = [
   /^\s*wc\s+/,              // word count
   /^\s*head\s+/,            // file preview
   /^\s*tail\s+/,            // file preview
+  /^\s*(?:yarn|pnpm|bun)\s+(?:global\s+)?add\b/, // package install via non-npm managers
+  /^\s*npx\s+playwright\s+install\b/, // playwright browser-binary install, not a test run
 ];
 
 // Patterns that identify test/lint/typecheck commands (for autonomy self-heal score)
@@ -215,7 +217,7 @@ const VERIFICATION_PATTERNS = [
   // JavaScript/TypeScript
   /\bnpm\s+(test|run\s+(test|lint|check|typecheck|format:check))\b/,
   /\b(pnpm|yarn|bun)\s+(run\s+)?(test|lint|check|typecheck|format:check)\b/,
-  /\b(jest|vitest|mocha|ava|cypress|playwright)\s/,
+  /\b(jest|vitest|mocha|ava|cypress|playwright)(?:\s|$)/,
   /\btsc(\s+--noEmit|\s+-p)\b/,
   /\b(eslint|biome|prettier\b.*--check)/,
   /\bnode\s+--check\b/,
@@ -243,17 +245,24 @@ const VERIFICATION_PATTERNS = [
   /\bpre-commit\s+run\b/,
 ];
 
-function isVerificationCommand(command) {
+// Evaluates one shell segment (no top-level && or ; left in it) against the
+// verification/non-verification pattern lists.
+function isSingleVerificationCommand(command) {
   if (!command || typeof command !== 'string') return false;
-  // Strip cd/path and env var prefixes to get the core command
-  const core = command
-    .replace(/^(?:cd\s+\S+\s*&&\s*)+/g, '')
-    .replace(/^(?:cd\s+\S+\s*;\s*)+/g, '')
-    .replace(/^(?:\w+=\S+\s+)+/g, '')
-    .trim();
+  // Strip env var prefixes to get the core command ("cd ..." is its own
+  // segment after splitting, so it never needs stripping here).
+  const core = command.replace(/^(?:\w+=\S+\s+)+/g, '').trim();
   // Exclude commands that are clearly not verification
   if (NON_VERIFICATION_PATTERNS.some(p => p.test(core))) return false;
   return VERIFICATION_PATTERNS.some(p => p.test(core));
+}
+
+// A compound command ("<setup/cleanup> && <test>") counts as verification if
+// ANY segment is one — a leading rm/mkdir/git-checkout/etc. must not mask a
+// real test/lint/typecheck call later in the chain.
+function isVerificationCommand(command) {
+  if (!command || typeof command !== 'string') return false;
+  return command.split(/&&|;/).some(isSingleVerificationCommand);
 }
 
 // Read-only inspection commands (for the self-heal score): they examine state
@@ -265,23 +274,38 @@ const READ_ONLY_COMMANDS = new Set([
   'dirname', 'basename', 'type', 'printenv', 'env', 'echo', 'printf',
 ]);
 
-function isReadOnlyCommand(command) {
+// Evaluates one shell segment (no top-level &&, ;, or | left in it).
+function isSingleReadOnlyCommand(command) {
   if (!command || typeof command !== 'string') return false;
-  // Strip cd/path and env var prefixes, same as isVerificationCommand
-  const core = command
-    .replace(/^(?:cd\s+\S+\s*&&\s*)+/g, '')
-    .replace(/^(?:cd\s+\S+\s*;\s*)+/g, '')
-    .replace(/^(?:\w+=\S+\s+)+/g, '')
-    .trim();
+  // Strip env var prefixes, same as isVerificationCommand ("cd ..." is its
+  // own segment after splitting, handled explicitly below instead).
+  const core = command.replace(/^(?:\w+=\S+\s+)+/g, '').trim();
+  if (!core) return false;
   const tokens = core.split(/\s+/);
   const first = tokens[0];
+  // A bare directory change doesn't read or write anything itself.
+  if (first === 'cd') return true;
   // sed only reads with an explicit -n (print mode) and never with an
   // in-place flag (-i / -i.bak / -i''); combined or ambiguous flags don't qualify.
   if (first === 'sed') {
     const args = tokens.slice(1);
     return args.includes('-n') && !args.some(a => a.startsWith('-i'));
   }
+  // find only reads unless -delete/-exec/-execdir let it mutate or run
+  // arbitrary commands on the matched files.
+  if (first === 'find') {
+    return !tokens.slice(1).some(a => a === '-delete' || a === '-exec' || a === '-execdir');
+  }
   return READ_ONLY_COMMANDS.has(first);
+}
+
+// A compound/piped command ("<opener> && <mutation>", "<search> | xargs rm")
+// is read-only only if EVERY segment is — a read-only-looking opener must not
+// give the whole chain a free pass when a later stage mutates state.
+function isReadOnlyCommand(command) {
+  if (!command || typeof command !== 'string') return false;
+  const segments = command.split(/&&|;|\|/).map(s => s.trim()).filter(Boolean);
+  return segments.length > 0 && segments.every(isSingleReadOnlyCommand);
 }
 
 function extractToolUse(session, msg, seenToolUseIds) {

@@ -433,8 +433,10 @@ function computeAutonomyMetrics(correlatedSessions, cutoffMs = 0) {
     // Self-heal denominator excludes read-only shell calls (sed/rg/ls) —
     // Codex routes file reading through the shell, which would structurally
     // deflate the score. `|| 0` keeps sessions cached before the field existed.
-    const attemptedBashCalls = Math.max(1, (s.totalBashCalls || 0) - (s.readOnlyBashCalls || 0));
-    const selfHealScore = s.totalBashCalls > 0
+    // Floored at 0 (not 1) so a session with zero non-read-only calls can't
+    // report a fabricated non-zero score off a division-by-a-fake-1.
+    const attemptedBashCalls = Math.max(0, (s.totalBashCalls || 0) - (s.readOnlyBashCalls || 0));
+    const selfHealScore = attemptedBashCalls > 0
       ? Math.round(Math.min(1, s.verificationBashCalls / attemptedBashCalls) * 100)
       : 0;
 
@@ -459,8 +461,12 @@ function computeAutonomyMetrics(correlatedSessions, cutoffMs = 0) {
   const totalBash = correlatedSessions.reduce((s, c) => s + (c.totalBashCalls || 0), 0);
   const totalReadOnly = correlatedSessions.reduce((s, c) => s + (c.readOnlyBashCalls || 0), 0);
   const totalVerif = correlatedSessions.reduce((s, c) => s + (c.verificationBashCalls || 0), 0);
-  const selfHealScore = totalBash > 0
-    ? Math.round(Math.min(1, totalVerif / Math.max(1, totalBash - totalReadOnly)) * 100)
+  // Single source of truth for the real (read-only-adjusted) denominator —
+  // reused below for the score math, the MIN_BASH_FOR_SELFHEAL gate, and the
+  // exposed/displayed field, so all three agree with each other.
+  const attemptedBashCallsTotal = Math.max(0, totalBash - totalReadOnly);
+  const selfHealScore = attemptedBashCallsTotal > 0
+    ? Math.round(Math.min(1, totalVerif / attemptedBashCallsTotal) * 100)
     : 0;
 
   const withCommits = perSession.filter(a => a.commitVelocity !== null);
@@ -469,11 +475,14 @@ function computeAutonomyMetrics(correlatedSessions, cutoffMs = 0) {
     : null;
 
   // Composite score (0-100): clamp and weight each component. Self-heal needs
-  // enough shell activity to mean anything; below the threshold it's neutral
-  // (50) rather than a punishing 0.
+  // enough real (non-read-only) shell activity to mean anything; below the
+  // threshold it's neutral (50) rather than a punishing 0. Gated on the
+  // attempted count, not raw totalBash — a session that's all read-only
+  // inspection has zero state-changing calls to have tested, which is exactly
+  // the "not enough evidence" case this neutral branch exists for.
   const MIN_BASH_FOR_SELFHEAL = 5;
   const autopilotScore = Math.round(Math.min(autopilotRatio / 5, 1) * 100);
-  const selfHealWeighted = totalBash >= MIN_BASH_FOR_SELFHEAL ? selfHealScore : 50;
+  const selfHealWeighted = attemptedBashCallsTotal >= MIN_BASH_FOR_SELFHEAL ? selfHealScore : 50;
   const velocityScore = commitVelocity !== null
     ? Math.round(Math.max(0, Math.min(1, 1 - (commitVelocity / 100))) * 100)
     : 50; // neutral when no commits
@@ -515,7 +524,7 @@ function computeAutonomyMetrics(correlatedSessions, cutoffMs = 0) {
     // self-heal score is actually computed against. Exposed so the card and
     // insight can show a fraction consistent with the percentage (verif /
     // attempted), instead of pairing the percentage with the full bash count.
-    attemptedBashCalls: Math.max(0, totalBash - totalReadOnly),
+    attemptedBashCalls: attemptedBashCallsTotal,
     totalVerificationCalls: totalVerif,
     topVerificationCommands,
     perSession,
@@ -645,8 +654,11 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
     }
   }
 
-  // 2. Self-heal warning — critical behavioral signal
-  if (autonomyMetrics && autonomyMetrics.totalBashCalls > 20 && autonomyMetrics.selfHealScore < 10) {
+  // 2. Self-heal warning — critical behavioral signal. Gated on
+  // attemptedBashCalls > 0 too: a purely-exploratory session with zero
+  // non-read-only calls has no state-changing activity to judge at all, so
+  // "low self-healing" would be a false accusation, not a real signal.
+  if (autonomyMetrics && autonomyMetrics.attemptedBashCalls > 0 && autonomyMetrics.totalBashCalls > 20 && autonomyMetrics.selfHealScore < 10) {
     candidates.push({
       priority: 1,
       type: 'warning',
