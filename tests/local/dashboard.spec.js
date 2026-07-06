@@ -55,7 +55,7 @@ test.describe('Chrome — sidebar & top bar', () => {
   });
 
   test('top bar carries a timezone chip and share/refresh actions', async ({ page }) => {
-    await expect(page.locator('#topbar [title="Heatmap hours use this timezone"]')).toBeVisible();
+    await expect(page.locator('#topbar [title^="Heatmap hours use this timezone"]')).toBeVisible();
     await expect(page.locator('#share-btn')).toBeVisible();
     await expect(page.locator('#refresh-btn')).toBeVisible();
     await expect(page.locator('#refresh-btn')).toBeEnabled();

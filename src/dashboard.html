@@ -862,16 +862,36 @@
     });
   }
 
-  function tzLabel() {
-    try {
-      return (Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local time').split('/').pop().replace(/_/g, ' ');
-    } catch (e) { return 'Local time'; }
+  function tzInfo() {
+    let tz = '';
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { /* unsupported */ }
+    const city = tz.includes('/') ? tz.split('/').pop().replace(/_/g, ' ') : (tz || 'Local time');
+    const now = new Date();
+    const partsOf = (opts) => {
+      try { return new Intl.DateTimeFormat('en-US', { timeZone: tz || undefined, ...opts }).formatToParts(now); }
+      catch (e) { return []; }
+    };
+    let offset = (partsOf({ timeZoneName: 'longOffset' }).find((p) => p.type === 'timeZoneName') || {}).value || '';
+    offset = offset.replace('GMT', 'UTC');
+    if (!offset) {
+      const mins = -now.getTimezoneOffset();
+      const sign = mins < 0 ? '-' : '+';
+      const abs = Math.abs(mins);
+      offset = 'UTC' + sign + String(Math.floor(abs / 60)).padStart(2, '0') + ':' + String(abs % 60).padStart(2, '0');
+    }
+    offset = offset.replace(/^UTC([+-])(\d{2}):(\d{2})$/, (_, s, h, m) => 'UTC' + s + parseInt(h, 10) + (m === '00' ? '' : ':' + m));
+    let abbr = (partsOf({ timeZoneName: 'short' }).find((p) => p.type === 'timeZoneName') || {}).value || '';
+    if (/^(GMT|UTC)([+-]\d{1,2}(:\d{2})?)?$/i.test(abbr)) abbr = '';
+    return { city, tz, abbr, offset };
   }
   function renderTopbar() {
     const v = view();
     const fmtD = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     const dateRange = `${fmtD(v.meta.startDate)} – ${fmtD(v.meta.endDate)}`;
     const windowLabel = `${v.meta.daysAnalyzed}-day window`;
+    const tzi = tzInfo();
+    const tzVisible = [tzi.city, tzi.abbr, tzi.offset].filter(Boolean).join(' · ');
+    const tzTitle = `Heatmap hours use this timezone${tzi.tz ? ` · ${tzi.tz}` : ''}`;
     $('topbar').innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding-bottom:22px;flex-wrap:wrap;">
       <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.26em;text-transform:uppercase;color:var(--accent);display:flex;align-items:center;gap:10px;">
         Agent ROI · Mission Control
@@ -880,7 +900,7 @@
       <div style="flex:1;"></div>
       <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:500;letter-spacing:0.04em;color:var(--green);border:1px solid color-mix(in srgb, var(--green) 30%, transparent);background:color-mix(in srgb, var(--green) 10%, transparent);border-radius:7px;padding:5px 11px;">${esc(dateRange)}</span>
       <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:500;letter-spacing:0.04em;color:var(--ink3);border:1px solid var(--line2);background:var(--card);border-radius:7px;padding:5px 11px;">${esc(windowLabel)}</span>
-      <span title="Heatmap hours use this timezone" style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:500;letter-spacing:0.04em;color:var(--ink3);border:1px solid var(--line2);background:var(--card);border-radius:7px;padding:5px 11px;">${esc(tzLabel())}</span>
+      <span title="${esc(tzTitle)}" style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:500;letter-spacing:0.04em;color:var(--ink3);border:1px solid var(--line2);background:var(--card);border-radius:7px;padding:5px 11px;">${esc(tzVisible)}</span>
       <button id="share-btn" data-act="openShare" title="Share AI Report Card" style="display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line2);background:var(--card);color:var(--ink2);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;padding:6px 12px;border-radius:7px;transition:color .2s,border-color .2s;">
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
         Share
@@ -1750,12 +1770,18 @@
     }
   });
 
-  // Hover in command palette
+  // Hover in command palette — restyle rows in place. A full renderCmd() here
+  // would destroy/recreate the hovered button, re-triggering mouseover on the
+  // fresh element and looping into a flicker.
   document.addEventListener('mouseover', (e) => {
     const el = e.target.closest('[data-hover]');
     if (!el) return;
     const i = parseInt(el.getAttribute('data-hover'), 10);
-    if (state.cmdIdx !== i) { state.cmdIdx = i; renderCmd(); }
+    if (state.cmdIdx === i) return;
+    state.cmdIdx = i;
+    el.parentElement.querySelectorAll('[data-hover]').forEach((row) => {
+      row.style.background = parseInt(row.getAttribute('data-hover'), 10) === i ? 'var(--hover)' : 'transparent';
+    });
   });
 
   // Card hover accent (stat tiles)
