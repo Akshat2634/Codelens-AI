@@ -10,7 +10,7 @@
 
 ## Tech Stack
 
-- **Runtime:** Node.js >= 18, ES modules (`"type": "module"`)
+- **Runtime:** Node.js >= 22.12, ES modules (`"type": "module"`)
 - **Backend:** Express.js 5.0.0
 - **CLI:** Commander.js 13.0.0
 - **Frontend:** Single-file HTML (`src/dashboard.html`) with vanilla JS + Chart.js 4.5.1. The UMD bundle is **committed at `src/vendor/chart.umd.min.js`** and served at `/vendor/chart.umd.min.js` — no CDN, works offline, and does not depend on `chart.js` being resolvable at the user's runtime (npx caches have shipped partial `node_modules`). `chart.js` is a **devDependency**; refresh the vendored copy with `npm run vendor:chart` after upgrading it (also runs on `prepublishOnly`).
@@ -40,7 +40,7 @@ tests/
 └── local/             # full dashboard suite for local runs
 
 .github/workflows/
-├── ci.yml             # CI: syntax check, unit tests, CLI smoke (both agents), Node 18/20/22 matrix
+├── ci.yml             # CI: syntax check, unit tests, CLI smoke (both agents), Node 22/24 matrix
 └── release.yml        # npm publish on version tag push
 ```
 

@@ -34,7 +34,7 @@ Feature requests are welcome! Please [open a feature request](https://github.com
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) >= 18.0.0
+- [Node.js](https://nodejs.org/) >= 22.12.0
 - [Git](https://git-scm.com/)
 - [Claude Code](https://claude.ai/code) (for generating session data to test against)
 
