@@ -61,6 +61,46 @@ test('statusline never renders $0.00-per-commit for zero commits', () => {
   assert.ok(!line.includes('/commit'), `no per-commit for 0 commits: ${line}`);
 });
 
+test('statusline shows the active-block burn rate while the window is open', () => {
+  const quickstats = {
+    day: TODAY,
+    activeBlock: {
+      endTime: NOW + 2 * 60 * 60 * 1000, // window still open
+      cost: 0.36, totalTokens: 236200,
+      tokensPerMinute: 2567, tokensPerMinuteIndicator: 1650, costPerHour: 0.23,
+    },
+  };
+  const line = plain(composeStatusline({}, quickstats, NOW));
+  assert.ok(line.includes('burn 2.6K/min'), `compact burn rate in: ${line}`);
+  assert.ok(line.includes('$0.23/hr'), `cost per hour in: ${line}`);
+});
+
+test('statusline hides the burn segment once the block window has closed', () => {
+  const quickstats = {
+    day: TODAY,
+    activeBlock: {
+      endTime: NOW - 60 * 1000, // window already ended → stale
+      tokensPerMinute: 2567, tokensPerMinuteIndicator: 1650, costPerHour: 0.23,
+    },
+  };
+  const line = plain(composeStatusline({ cost: { total_cost_usd: 1 } }, quickstats, NOW));
+  assert.ok(!line.includes('burn'), `expired block must not render a burn rate: ${line}`);
+});
+
+test('statusline burn colors by the input+output indicator, not total tok/min', () => {
+  // total tok/min is high (cache-heavy) but the indicator is low → should be green (not red).
+  const quickstats = {
+    day: TODAY,
+    activeBlock: {
+      endTime: NOW + 60 * 60 * 1000,
+      tokensPerMinute: 9000, tokensPerMinuteIndicator: 500, costPerHour: 0.1,
+    },
+  };
+  const raw = composeStatusline({}, quickstats, NOW);
+  assert.ok(raw.includes('\x1b[32m'), 'green (NORMAL) indicator color expected');
+  assert.ok(!raw.includes('\x1b[31m9'), 'must not paint the rate red on a low indicator');
+});
+
 test('installStatusline creates settings.json with the statusLine entry', () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'statusline-install-'));
   try {

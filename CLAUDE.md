@@ -30,7 +30,7 @@ src/
 ├── report.js          # `codelens-ai report` — terminal / Markdown / HTML ROI scorecard
 ├── tables.js          # `codelens-ai daily|weekly|monthly` — usage/cost tables + ROI columns
 ├── blocks.js          # `codelens-ai blocks` — 5-hour billing windows, burn rate, projection
-├── statusline.js      # `codelens-ai statusline` — Claude Code statusline (reads stdin JSON + quickstats)
+├── statusline.js      # `codelens-ai statusline` — Claude Code statusline (stdin JSON + quickstats: ROI, burn rate)
 ├── server.js          # Express REST API routes (?source= selects per-agent views)
 ├── cache.js           # Smart caching with per-source stale file detection + statusline quickstats
 └── dashboard.html     # Single-file SPA dashboard (4000+ lines)
