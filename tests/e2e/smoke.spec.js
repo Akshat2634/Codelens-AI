@@ -9,15 +9,6 @@ import { expect, test } from '@playwright/test';
 // tiles), Cost & Token Flow, Models & Tools, Agents & Autonomy (with the
 // Claude-vs-Codex face-off), Shipping Rhythm, and a searchable Sessions table.
 // A ⌘K command palette replaces the old sticky command bar.
-//
-// Sections are console PAGES (progressive disclosure): only the active one is
-// visible; the rail nav / overview tiles / #hash switch pages. Tests that
-// assert on a non-Overview section must open its page first.
-
-const openPage = async (page, id) => {
-  await page.locator(`.nav-item[data-arg="${id}"]`).click();
-  await page.waitForSelector(`#${id}`, { state: 'visible' });
-};
 
 test.describe('Dashboard smoke (fixtures)', () => {
   test('server responds and API payload is well-formed', async ({ request }) => {
@@ -70,42 +61,17 @@ test.describe('Dashboard smoke (fixtures)', () => {
 
   test('sessions table renders fixture sessions', async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('.stats-section .hero-stats');
-    await openPage(page, 'sec-sessions');
     await page.waitForSelector('.sessions-section .session-row');
     const count = await page.locator('.sessions-section .session-row').count();
     expect(count).toBeGreaterThan(0);
-  });
-
-  test('console pages: overview tiles navigate, hash deep-links work', async ({ page }) => {
-    const errors = [];
-    page.on('pageerror', (err) => errors.push(err.message));
-    await page.goto('/');
-    await page.waitForSelector('.stats-section .hero-stats');
-    // Overview is the only visible page on load, with one tile per hidden page.
-    await expect(page.locator('#sec-flow')).toBeHidden();
-    await expect(page.locator('.console-index .console-tile')).toHaveCount(6);
-    // A tile opens its page and puts the overview away.
-    await page.locator('.console-tile[data-arg="sec-flow"]').click();
-    await expect(page.locator('#sec-flow')).toBeVisible();
-    await expect(page.locator('#sec-overview')).toBeHidden();
-    expect(page.url()).toContain('#sec-flow');
-    // Hash deep-link boots straight into a page.
-    await page.goto('/#sec-sessions');
-    await page.waitForSelector('.sessions-section .session-row');
-    await expect(page.locator('#sec-overview')).toBeHidden();
-    expect(errors, 'console page JS errors: ' + errors.join(' | ')).toEqual([]);
   });
 
   test('all dashboard charts render without throwing', async ({ page }) => {
     const errors = [];
     page.on('pageerror', (err) => errors.push(err.message));
     await page.goto('/');
-    await page.waitForSelector('.stats-section .hero-stats');
-    await openPage(page, 'sec-flow');
     await page.waitForSelector('#chart-timeline');
     await page.waitForSelector('#chart-token-burn');
-    await openPage(page, 'sec-models');
     await page.waitForSelector('#chart-models');
     await page.waitForSelector('#chart-model-efficiency');
     // Give Chart.js a beat to finish animating.
@@ -144,7 +110,6 @@ test.describe('Dashboard smoke (fixtures)', () => {
     await page.locator('.source-tabs .source-tab', { hasText: 'OpenAI Codex' }).click();
     await expect(page.locator('.source-tabs .source-tab.active')).toContainText(/OpenAI Codex/i, { timeout: 10_000 });
     // Sessions table now shows only Codex sessions (GPT / Codex / o-series models).
-    await openPage(page, 'sec-sessions');
     await page.waitForSelector('.sessions-section .session-row');
     const rows = page.locator('.sessions-section .session-row');
     const n = await rows.count();
@@ -166,7 +131,6 @@ test.describe('UI modernization (brand marks, face-off, command palette)', () =>
     await expect(page.locator('.source-tabs .source-tab', { hasText: 'OpenAI Codex' }).locator('svg[data-agent-logo="codex"]')).toHaveCount(1);
     await expect(page.locator('.source-tabs .source-tab', { hasText: 'All Agents' }).locator('svg[data-agent-logo]')).toHaveCount(2);
     // Sessions table: every row is stamped with its agent's mark on the mixed view.
-    await openPage(page, 'sec-sessions');
     await page.waitForSelector('.sessions-section .session-row');
     const rows = await page.locator('.sessions-section .session-row').count();
     const rowMarks = await page.locator('.sessions-section .session-row svg[data-agent-logo]').count();
@@ -185,8 +149,6 @@ test.describe('UI modernization (brand marks, face-off, command palette)', () =>
 
   test('agent face-off renders on All Agents and hides on a per-agent tab', async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('.stats-section .hero-stats');
-    await openPage(page, 'sec-agents');
     await page.waitForSelector('.faceoff-section', { timeout: 15_000 });
     // One head-to-head card: two grade badges, one VS divider, the Claude mascot
     // (head + watermark) and the Codex knot (header + watermark).
@@ -227,8 +189,6 @@ test.describe('UI modernization (brand marks, face-off, command palette)', () =>
     const errors = [];
     page.on('pageerror', (err) => errors.push(err.message));
     await page.goto('/');
-    await page.waitForSelector('.stats-section .hero-stats');
-    await openPage(page, 'sec-sessions');
     await page.waitForSelector('#session-search');
     const before = await page.locator('.sessions-section .session-row').count();
     expect(before).toBeGreaterThan(0);
@@ -245,7 +205,6 @@ test.describe('UI modernization (brand marks, face-off, command palette)', () =>
     page.on('pageerror', (err) => errors.push(err.message));
     await page.goto('/');
     await page.waitForSelector('[data-act="toggleTheme"]');
-    await openPage(page, 'sec-flow'); // theme rebuild targets the visible page's charts
     const initial = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
     await page.locator('[data-act="toggleTheme"]').click();
     await page.waitForTimeout(700); // allow the view-transition reveal to settle
@@ -277,11 +236,9 @@ test.describe('UI modernization (brand marks, face-off, command palette)', () =>
     page.on('pageerror', (err) => errors.push(err.message));
     await page.goto('/');
     await page.waitForSelector('#refresh-btn');
-    // Await the /api/refresh round trip via the network (asserting the
-    // transient disabled state races a fast re-parse and flakes).
-    const refreshed = page.waitForResponse((r) => r.url().includes('/api/refresh'));
     await page.click('#refresh-btn');
-    expect((await refreshed).ok()).toBe(true);
+    // Disabled + spinning while the /api/refresh round trip is in flight.
+    await expect(page.locator('#refresh-btn')).toBeDisabled();
     await expect(page.locator('#toast-root')).toContainText(/refresh/i, { timeout: 10_000 });
     await expect(page.locator('#refresh-btn')).toBeEnabled();
     expect(errors, 'refresh JS errors: ' + errors.join(' | ')).toEqual([]);

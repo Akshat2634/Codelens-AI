@@ -139,7 +139,7 @@ Use these skills when working on this project:
 
 ## Important Notes
 
-- The dashboard is a single-file HTML app — changes should maintain the inline architecture. Sections are **console pages** (progressive disclosure): every section renders, but only `state.activeSection` is visible; the left-rail nav, Overview "console index" tiles, and `#sec-*` hashes switch pages, and Chart.js charts are (re)built only when their page is shown (`chartKeysFor`). E2E tests must open a section's page (`openPage()` helper in `smoke.spec.js`) before asserting on it
+- The dashboard is a single 4000+ line HTML file — changes should maintain the inline architecture
 - Cache is stored at `~/.cache/agent-analytics/parsed-sessions.json` (plus `quickstats.json`, a tiny summary the statusline reads); runs with custom `--claude-dir`/`--codex-dir` write to a separate `parsed-sessions-<hash>.json` so tests/CI never evict the real cache
 - Claude session JSONL files are at `~/.claude/projects/`; Codex rollouts at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (zstd-compressed `.jsonl.zst` after ~7 days — readable on Node >= 22.15)
 - Token pricing is hardcoded in `claude-parser.js` (Anthropic) and `codex-parser.js` (OpenAI) — update when providers change pricing
