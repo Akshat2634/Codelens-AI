@@ -54,6 +54,13 @@ test.describe('Chrome — sidebar & top bar', () => {
     await expect(page.locator('#topbar')).toContainText(`${p.meta.daysAnalyzed}-day window`);
   });
 
+  test('top bar carries a timezone chip and share/refresh actions', async ({ page }) => {
+    await expect(page.locator('#topbar [title="Heatmap hours use this timezone"]')).toBeVisible();
+    await expect(page.locator('#share-btn')).toBeVisible();
+    await expect(page.locator('#refresh-btn')).toBeVisible();
+    await expect(page.locator('#refresh-btn')).toBeEnabled();
+  });
+
   test('footer carries the live-status text and both agent marks', async ({ page }) => {
     await expect(page.locator('#footer-agents')).toContainText(/Local · no telemetry/i);
     await expect(page.locator('#footer-agents svg[data-agent-logo]')).toHaveCount(2);
@@ -262,6 +269,95 @@ test.describe('Sessions table', () => {
     await page.locator('[data-act="nextPage"]').click();
     await page.waitForTimeout(200);
     await expect(page.locator('.sessions-section').getByText('Page 2 /')).toBeVisible();
+  });
+});
+
+test.describe('Share report card', () => {
+  test('opens, draws a canvas, and closes via Escape / backdrop / X', async ({ page }) => {
+    await page.click('#share-btn');
+    await expect(page.locator('.share-modal')).toBeVisible();
+    await page.waitForTimeout(600); // fonts + canvas draw
+    const size = await page.locator('#share-canvas').evaluate((c) => ({ w: c.width, h: c.height }));
+    expect(size.w).toBeGreaterThan(0);
+    expect(size.h).toBeGreaterThan(0);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.share-modal')).toHaveCount(0);
+
+    await page.click('#share-btn');
+    await expect(page.locator('.share-modal')).toBeVisible();
+    await page.click('.share-close');
+    await expect(page.locator('.share-modal')).toHaveCount(0);
+  });
+
+  test('switching the theme chip redraws the canvas without closing the modal', async ({ page }) => {
+    await page.click('#share-btn');
+    await page.waitForTimeout(500);
+    await page.locator('.share-chip', { hasText: 'Light' }).click();
+    await page.waitForTimeout(300);
+    await expect(page.locator('.share-modal')).toBeVisible();
+    const size = await page.locator('#share-canvas').evaluate((c) => ({ w: c.width, h: c.height }));
+    expect(size.w).toBeGreaterThan(0);
+    await page.keyboard.press('Escape');
+  });
+
+  test('copy to clipboard succeeds or falls back to a PNG download, always with feedback', async ({ page }) => {
+    // Whether Clipboard-API write succeeds is environment-dependent (headless
+    // Chromium's default permissions vary by Playwright version/OS); either
+    // outcome is correct as long as it doesn't throw and the user gets a toast.
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await page.click('#share-btn');
+    await page.waitForTimeout(500);
+    await page.click('.share-copy');
+    await expect(page.locator('#toast-root')).toContainText(/copied|downloaded|clipboard blocked/i, { timeout: 5_000 });
+    expect(errors, 'share copy JS errors: ' + errors.join(' | ')).toEqual([]);
+  });
+
+  test('download button saves a PNG', async ({ page }) => {
+    await page.click('#share-btn');
+    await page.waitForTimeout(500);
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.click('.share-download'),
+    ]);
+    expect(download.suggestedFilename()).toBe('codelens-ai-report-card.png');
+  });
+
+  test('command palette can open the share card', async ({ page }) => {
+    await page.locator('[data-act="openCmd"]').click();
+    await page.fill('#cmd-input', 'Share AI report card');
+    await page.waitForTimeout(150);
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.share-modal')).toBeVisible({ timeout: 5_000 });
+    await page.keyboard.press('Escape');
+  });
+});
+
+test.describe('Refresh', () => {
+  test('re-parses data server-side and reports completion via toast', async ({ page }) => {
+    await page.click('#refresh-btn');
+    await expect(page.locator('#refresh-btn')).toBeDisabled();
+    await expect(page.locator('#toast-root')).toContainText(/refresh/i, { timeout: 10_000 });
+    await expect(page.locator('#refresh-btn')).toBeEnabled();
+  });
+
+  test('command palette can trigger a refresh', async ({ page }) => {
+    await page.locator('[data-act="openCmd"]').click();
+    await page.fill('#cmd-input', 'Refresh dashboard data');
+    await page.waitForTimeout(150);
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#toast-root')).toContainText(/refresh/i, { timeout: 10_000 });
+  });
+});
+
+test.describe('Page footer', () => {
+  test('carries both agent marks and links to the live project', async ({ page }) => {
+    const footer = page.locator('footer');
+    await expect(footer).toBeVisible();
+    await expect(footer.locator('svg[data-agent-logo]')).toHaveCount(2);
+    await expect(footer.locator('a[href="https://github.com/Akshat2634/Codelens-AI"]')).toHaveCount(2);
+    await expect(footer.locator('a[href="https://codelensai-dev.vercel.app/"]')).toHaveCount(1);
+    await expect(footer).toContainText(/Designed & built in the Bay Area/i);
   });
 });
 
