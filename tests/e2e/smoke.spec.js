@@ -66,6 +66,21 @@ test.describe('Dashboard smoke (fixtures)', () => {
     expect(count).toBeGreaterThan(0);
   });
 
+  test('Projects section renders per-repo ROI rows and a nav entry', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+    await page.goto('/');
+    await page.waitForSelector('#sec-projects .proj-row');
+    // At least one repo card, each showing a dollar cost and a $/commit stat.
+    const rows = await page.locator('#sec-projects .proj-row').count();
+    expect(rows).toBeGreaterThan(0);
+    await expect(page.locator('#sec-projects')).toContainText('Projects');
+    await expect(page.locator('#sec-projects .proj-row').first()).toContainText('/commit');
+    // The left-rail nav lists Projects.
+    await expect(page.locator('.nav-item[data-sec="sec-projects"]')).toHaveCount(1);
+    expect(errors, 'Projects section JS errors: ' + errors.join(' | ')).toEqual([]);
+  });
+
   test('all dashboard charts render without throwing', async ({ page }) => {
     const errors = [];
     page.on('pageerror', (err) => errors.push(err.message));
