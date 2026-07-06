@@ -1,0 +1,45 @@
+# Socket (socket.dev) configuration for codelens-ai
+#
+# Scope: issueRules enable/disable Socket's alerts in PULL-REQUEST checks (the
+# Socket GitHub App check runs + comments) and the Socket CLI. They do NOT change
+# the org-wide alert inventory shown in the Socket dashboard — that is governed
+# separately by the org Security Policy (Alert Actions) in the Socket web app.
+# To mirror these suppressions in the dashboard, set the matching alerts to
+# "ignore"/"monitor" there too.
+#
+# Keys are each alert's URL slug (socket.dev/alerts/<key>); values are booleans
+# (true = alert on, false = suppressed). Unknown keys are silently dropped, so
+# every key below was verified against @socketsecurity/config and the Socket CLI
+# translations map.
+
+version: 2
+
+issueRules:
+  # --- Capability alerts ---
+  # Expected and benign for a local CLI that reads git history + agent session
+  # files, spawns git, launches the OS browser, and serves a localhost dashboard.
+  # These fire on the express/open transitive tree (and dev tooling) as routine
+  # capability signals, not vulnerabilities.
+  envVars: false            # Environment variable access
+  filesystemAccess: false   # Filesystem access
+  networkAccess: false      # Network access
+  shellAccess: false        # Shell access
+  usesEval: false           # Uses eval  (get-intrinsic/function-bind/depd — hardcoded inputs only)
+  debugAccess: false        # Debug access
+  dynamicRequire: false     # Dynamic require  (express view-engine loader, never exercised here)
+  urlStrings: false         # URL strings
+
+  # --- Package age / maintenance / ownership signals ---
+  # Noisy for the small, stable OSS micro-deps under express/open. "Unmaintained"
+  # flags tiny done-not-abandoned utilities; "New author"/"Unstable ownership"
+  # here trace to the documented Express 5 -> OpenJS Technical Committee handoff.
+  trivialPackage: false     # Trivial Package
+  unmaintained: false       # Unmaintained
+  newAuthor: false          # New author
+  unstableOwnership: false  # Unstable ownership
+
+# Optional: gitignore-style globs excluded from Socket's first-party code scan.
+# (This filters by file path only — socket.yml has no dev/prod dependency filter.)
+# projectIgnorePaths:
+#   - "tests/**"
+#   - "src/vendor/**"
