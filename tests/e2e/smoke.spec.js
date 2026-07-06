@@ -185,6 +185,35 @@ test.describe('UI modernization (brand marks, face-off, command palette)', () =>
     expect(errors, 'command palette JS errors: ' + errors.join(' | ')).toEqual([]);
   });
 
+  test('command palette lists all three agent views (incl. OpenAI Codex)', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.source-tabs .source-tab');
+    await page.locator('[data-act="openCmd"]').click();
+    await expect(page.locator('.command-palette')).toBeVisible();
+    // All three agent Views must be reachable at rest — a prior 9-row cap hid Codex.
+    for (const label of ['View: All Agents', 'View: Claude Code', 'View: OpenAI Codex']) {
+      await expect(page.locator('.command-palette [data-act="cmdRun"]', { hasText: label })).toHaveCount(1);
+    }
+  });
+
+  test('CLI commands modal opens, lists commands, and closes on Escape', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+    await page.goto('/');
+    await page.waitForSelector('.stats-section .hero-stats');
+    await expect(page.locator('.cli-modal')).toHaveCount(0);
+    await page.locator('[data-act="openCli"]').click();
+    await expect(page.locator('.cli-modal')).toBeVisible();
+    // Each command row carries a copy button that stashes the full command.
+    const rows = await page.locator('.cli-modal .cli-row').count();
+    expect(rows).toBeGreaterThan(0);
+    const firstCmd = await page.locator('.cli-modal .cli-copy').first().getAttribute('data-cmd');
+    expect(firstCmd).toMatch(/codelens-ai/);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.cli-modal')).toHaveCount(0);
+    expect(errors, 'CLI modal JS errors: ' + errors.join(' | ')).toEqual([]);
+  });
+
   test('searching the sessions table filters rows without errors', async ({ page }) => {
     const errors = [];
     page.on('pageerror', (err) => errors.push(err.message));

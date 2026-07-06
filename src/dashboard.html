@@ -111,6 +111,7 @@
   [data-act="prevPage"]:hover,
   [data-act="nextPage"]:hover,
   [data-act="openShare"]:hover,
+  [data-act="openCli"]:hover,
   [data-act="refreshData"]:not([disabled]):hover { border-color: var(--glass-line) !important; color: var(--ink) !important; }
   [data-act="sort"]:not([disabled]):hover,
   [data-act="range"]:hover,
@@ -123,6 +124,10 @@
   .heat-cell:hover { transform: scale(1.35); box-shadow: 0 0 0 1px var(--glass-line), 0 4px 10px rgba(0, 0, 0, 0.35); position: relative; z-index: 2; }
   .share-close:hover { color: var(--ink) !important; background: var(--hover) !important; }
   .share-copy:hover { filter: brightness(1.08); }
+  .cli-close:hover { color: var(--ink) !important; background: var(--hover) !important; }
+  .cli-row { transition: border-color 0.15s; }
+  .cli-row:hover { border-color: var(--glass-line) !important; }
+  .cli-copy:hover { border-color: var(--glass-line) !important; color: var(--ink) !important; background: var(--hover) !important; }
   .share-download:hover { border-color: var(--glass-line) !important; background: var(--hover) !important; }
   .footer-link:hover { text-decoration: underline !important; color: var(--cyan) !important; }
 
@@ -161,6 +166,7 @@
 </div>
 <div id="cmd-root"></div>
 <div id="share-root"></div>
+<div id="cli-root"></div>
 <div id="toast-root"></div>
 
 <script>
@@ -198,7 +204,7 @@
     q: '', filter: 'all',
     sortCol: 'startTime', sortDir: -1, page: 1,
     expanded: null, activeSection: 'sec-overview',
-    shareOpen: false, shareTheme: 'dark', toastMsg: '', refreshing: false,
+    shareOpen: false, shareTheme: 'dark', cliOpen: false, toastMsg: '', refreshing: false,
   };
   const payloads = { all: null, claude: null, codex: null };
   const charts = {};
@@ -775,6 +781,84 @@
     </div>`;
   }
 
+  // ── CLI command reference ──
+  // The dashboard is browser-sandboxed, so it can't open or type into a native
+  // terminal. The achievable equivalent: copy the command to the clipboard
+  // (works over http://localhost, a secure context) and the user pastes it.
+  const CLI_GROUPS = [
+    { group: 'Dashboard', items: [
+      { cmd: 'npx codelens-ai', desc: 'Launch the ROI dashboard (last 30 days, port 3457)' },
+      { cmd: 'npx codelens-ai --days 90', desc: 'Analyze a custom lookback window' },
+      { cmd: 'npx codelens-ai --source codex', desc: 'Analyze a single agent — claude | codex' },
+      { cmd: 'npx codelens-ai --project my-repo', desc: 'Filter to a single project' },
+      { cmd: 'npx codelens-ai --refresh', desc: 'Force a full re-parse (ignore cache)' },
+      { cmd: 'npx codelens-ai --json', desc: 'Dump all metrics as JSON to stdout' },
+    ] },
+    { group: 'Usage tables', items: [
+      { cmd: 'npx codelens-ai daily', desc: 'Token usage & cost by day (+ commits, $/commit)' },
+      { cmd: 'npx codelens-ai weekly', desc: 'Usage & cost by week (--start-of-week monday|sunday)' },
+      { cmd: 'npx codelens-ai monthly', desc: 'Usage & cost by month' },
+      { cmd: 'npx codelens-ai daily --breakdown', desc: 'Nest per-model rows under each period' },
+      { cmd: 'npx codelens-ai daily --json', desc: 'Structured table export (pipe to jq)' },
+    ] },
+    { group: 'Reports', items: [
+      { cmd: 'npx codelens-ai report', desc: 'Print an ROI scorecard to the terminal' },
+      { cmd: 'npx codelens-ai report --md', desc: 'Export a Markdown ROI report' },
+      { cmd: 'npx codelens-ai report --html', desc: 'Export a self-contained HTML report' },
+    ] },
+    { group: 'Statusline & plans', items: [
+      { cmd: 'npx codelens-ai statusline --install', desc: 'Add the ROI statusline to Claude Code' },
+      { cmd: 'npx codelens-ai --plan max20', desc: 'Claude subscription mode — effective $/commit' },
+      { cmd: 'npx codelens-ai --codex-plan plus', desc: 'ChatGPT / Codex subscription mode' },
+    ] },
+  ];
+  function openCli() { state.cliOpen = true; renderCli(); }
+  function closeCli() { state.cliOpen = false; renderCli(); }
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Fallback for non-secure contexts (e.g. dashboard opened over a LAN IP).
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta);
+      }
+      toast('Copied: ' + text);
+    } catch (e) {
+      toast('Clipboard blocked — select and copy manually');
+    }
+  }
+  function renderCli() {
+    if (!state.cliOpen) { $('cli-root').innerHTML = ''; return; }
+    const groups = CLI_GROUPS.map((g) => {
+      const rows = g.items.map((it) => `
+        <div class="cli-row" style="display:flex;align-items:center;gap:12px;padding:9px 11px;border:1px solid var(--line2);border-radius:10px;background:var(--card);">
+          <div style="flex:1;min-width:0;">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(it.cmd)}</div>
+            <div style="font-size:11px;color:var(--ink2);margin-top:3px;text-wrap:pretty;">${esc(it.desc)}</div>
+          </div>
+          <button class="cli-copy" data-act="copyCmd" data-cmd="${esc(it.cmd)}" title="Copy command" style="flex-shrink:0;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line2);background:var(--bg2);color:var(--ink2);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;padding:6px 10px;border-radius:8px;transition:color .15s,border-color .15s,background .15s;">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            Copy
+          </button>
+        </div>`).join('');
+      return `<div style="margin-top:16px;">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:var(--ink3);margin-bottom:8px;">${esc(g.group)}</div>
+        <div style="display:flex;flex-direction:column;gap:7px;">${rows}</div>
+      </div>`;
+    }).join('');
+    $('cli-root').innerHTML = `<div class="cli-modal" data-act="closeCli" style="position:fixed;inset:0;z-index:210;background:var(--scrim);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;">
+      <div data-act="cliStop" style="width:600px;max-width:100%;max-height:calc(100vh - 48px);overflow-y:auto;border:1px solid var(--glass-line);border-radius:18px;background:var(--glass);backdrop-filter:blur(22px) saturate(1.4);-webkit-backdrop-filter:blur(22px) saturate(1.4);box-shadow:0 32px 80px -20px rgba(0,0,0,0.6);padding:22px 24px 24px;animation:popIn .24s cubic-bezier(0.22,1,0.36,1) both;position:relative;">
+        <button class="cli-close" data-act="closeCli" aria-label="Close" style="position:absolute;top:14px;right:14px;border:0;background:transparent;color:var(--ink3);cursor:pointer;font-size:17px;line-height:1;padding:6px;border-radius:7px;transition:color .15s,background .15s;">✕</button>
+        <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:19px;font-weight:700;letter-spacing:-0.01em;">CLI commands</div>
+        <div style="font-size:12.5px;color:var(--ink2);margin-top:3px;text-wrap:pretty;">Copy a command, then paste it into your terminal (⌘/Ctrl + V).</div>
+        ${groups}
+      </div>
+    </div>`;
+  }
+
   // ══════════════════════════════════════════════════════════════════
   //  RENDER
   // ══════════════════════════════════════════════════════════════════
@@ -901,6 +985,10 @@
       <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:500;letter-spacing:0.04em;color:var(--green);border:1px solid color-mix(in srgb, var(--green) 30%, transparent);background:color-mix(in srgb, var(--green) 10%, transparent);border-radius:7px;padding:5px 11px;">${esc(dateRange)}</span>
       <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:500;letter-spacing:0.04em;color:var(--ink3);border:1px solid var(--line2);background:var(--card);border-radius:7px;padding:5px 11px;">${esc(windowLabel)}</span>
       <span title="${esc(tzTitle)}" style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:500;letter-spacing:0.04em;color:var(--ink3);border:1px solid var(--line2);background:var(--card);border-radius:7px;padding:5px 11px;">${esc(tzVisible)}</span>
+      <button data-act="openCli" title="CLI commands" style="display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line2);background:var(--card);color:var(--ink2);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;padding:6px 12px;border-radius:7px;transition:color .2s,border-color .2s;">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+        CLI
+      </button>
       <button id="share-btn" data-act="openShare" title="Share AI Report Card" style="display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line2);background:var(--card);color:var(--ink2);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;padding:6px 12px;border-radius:7px;transition:color .2s,border-color .2s;">
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
         Share
@@ -1683,7 +1771,12 @@
       })),
     ];
     const cq = state.cmdQuery.trim().toLowerCase();
-    return all.filter((c) => cq ? c.label.toLowerCase().includes(cq) : !c.searchOnly).slice(0, 9);
+    // No query: show the full launcher (sections + all three agent Views +
+    // actions + ranges) — it's a small fixed set and the palette scrolls, so
+    // nothing gets cut (a 9-row cap previously hid "View: OpenAI Codex" et al.).
+    // With a query, cap to the top matches so search stays tight.
+    if (!cq) return all.filter((c) => !c.searchOnly);
+    return all.filter((c) => c.label.toLowerCase().includes(cq)).slice(0, 9);
   }
 
   function renderCmd() {
@@ -1744,6 +1837,10 @@
       case 'openShare': openShare(); break;
       case 'closeShare': closeShare(); break;
       case 'shareStop': e.stopPropagation(); break;
+      case 'openCli': openCli(); break;
+      case 'closeCli': closeCli(); break;
+      case 'cliStop': e.stopPropagation(); break;
+      case 'copyCmd': copyText(el.getAttribute('data-cmd')); break;
       case 'shareTheme': setShareTheme(arg); break;
       case 'copyShare': copyShare(); break;
       case 'downloadShare': downloadShare(); break;
@@ -1830,6 +1927,7 @@
       return;
     }
     if (e.key === 'Escape' && state.shareOpen) { closeShare(); return; }
+    if (e.key === 'Escape' && state.cliOpen) { closeCli(); return; }
     if (!state.cmdOpen) return;
     if (e.key === 'Escape') { state.cmdOpen = false; renderCmd(); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); state.cmdIdx = Math.min(state.cmdIdx + 1, lastCmdItems.length - 1); renderCmd(); }
