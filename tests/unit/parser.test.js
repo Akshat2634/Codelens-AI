@@ -250,6 +250,51 @@ test('isReadOnlyCommand is conservative: writes and ambiguity are not read-only'
   assert.equal(isReadOnlyCommand(undefined), false);
 });
 
+test('isVerificationCommand finds the real test/lint call inside a setup/cleanup chain', () => {
+  // A leading rm/mkdir/git-checkout must not mask a genuine verification
+  // command later in the chain — each && / ; segment is checked on its own.
+  assert.equal(isVerificationCommand('rm -rf dist && npm run build && npm test'), true);
+  assert.equal(isVerificationCommand('mkdir -p dist && npm test'), true);
+  assert.equal(isVerificationCommand('git checkout main && npm test'), true);
+  // A chain with no verification segment anywhere is still rejected.
+  assert.equal(isVerificationCommand('rm -rf dist && mkdir -p dist'), false);
+});
+
+test('isReadOnlyCommand rejects compound/piped commands that mutate in a later segment', () => {
+  // A read-only-looking opener (echo, find, grep) must not give the whole
+  // chain a free pass when a later stage deletes/mutates.
+  assert.equal(isReadOnlyCommand('echo starting && rm -rf dist'), false);
+  assert.equal(isReadOnlyCommand("find . -name '*.log' -delete"), false);
+  assert.equal(isReadOnlyCommand('grep -rl foo . | xargs rm'), false);
+  // Control: an all-read-only chain of the same shape is still read-only.
+  assert.equal(isReadOnlyCommand('echo starting && cat file.js'), true);
+});
+
+test('pwd && npm test is verification but no longer double-counted as read-only', () => {
+  assert.equal(isVerificationCommand('pwd && npm test'), true);
+  assert.equal(isReadOnlyCommand('pwd && npm test'), false);
+});
+
+test('isVerificationCommand excludes package installs that merely mention a test tool by name', () => {
+  assert.equal(isVerificationCommand('yarn add jest --dev'), false);
+  assert.equal(isVerificationCommand('pnpm add -D biome'), false);
+  assert.equal(isVerificationCommand('npx playwright install'), false);
+  assert.equal(isVerificationCommand('npx playwright install --with-deps chromium'), false);
+  // Control case: an actual playwright test run must NOT regress to false.
+  assert.equal(isVerificationCommand('npx playwright test'), true);
+});
+
+test('isVerificationCommand matches a bare trailing test-runner invocation', () => {
+  assert.equal(isVerificationCommand('yarn jest'), true);
+  assert.equal(isVerificationCommand('jest'), true);
+  // Must not match the tool name inside an unrelated filename.
+  assert.equal(isVerificationCommand('cat playwright.config.js'), false);
+  assert.equal(
+    isVerificationCommand('diff playwright.config.js playwright.config.js.bak'),
+    false
+  );
+});
+
 test('readOnlyBashCalls counts read-only Bash commands without changing totalBashCalls', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'codelens-readonly-'));
   try {
