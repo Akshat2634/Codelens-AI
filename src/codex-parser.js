@@ -235,6 +235,9 @@ function createEmptyCodexSession(sessionId) {
     repoPath: null,
     projectName: null,
     gitBranch: null,
+    // Codex CLI has no other surface today (no VS Code/web entrypoint field
+    // like Claude Code's) — fixed so clientBreakdown is meaningful once it is.
+    entrypoint: 'codex-cli',
     startTime: null,
     endTime: null,
     durationMinutes: 0,
@@ -249,6 +252,11 @@ function createEmptyCodexSession(sessionId) {
     model: null,
     modelBreakdown: {},
     toolCalls: {},
+    // Codex has no Skill-tool or subagent-transcript concept — kept empty/zero
+    // so the uniform session shape holds and skill/agent-type metrics degrade
+    // gracefully instead of needing source-specific branches downstream.
+    skillCalls: {},
+    subagentTranscriptCount: 0,
     filesWritten: [],
     userMessageCount: 0,
     assistantMessageCount: 0,

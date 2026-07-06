@@ -154,6 +154,7 @@
       <section id="sec-models" style="scroll-margin-top: 20px; margin-top: 46px;"></section>
       <section id="sec-agents" style="scroll-margin-top: 20px; margin-top: 46px;"></section>
       <section id="sec-rhythm" style="scroll-margin-top: 20px; margin-top: 46px;"></section>
+      <section id="sec-skills" style="scroll-margin-top: 20px; margin-top: 46px;"></section>
       <section id="sec-sessions" class="sessions-section" style="scroll-margin-top: 20px; margin-top: 46px;"></section>
     </div>
   </main>
@@ -238,6 +239,8 @@
     }
     return m.charAt(0).toUpperCase() + m.slice(1);
   }
+  const CLIENT_LABELS = { cli: 'CLI', 'claude-vscode': 'VS Code', 'codex-cli': 'Codex CLI', web: 'Claude Code on the Web', 'claude-web': 'Claude Code on the Web', unknown: 'Unknown' };
+  const clientLabel = (entrypoint) => CLIENT_LABELS[entrypoint] || entrypoint;
   const GRADE_MAP = { A: 'var(--grade-a)', B: 'var(--grade-b)', C: 'var(--grade-c)', D: 'var(--grade-d)', F: 'var(--grade-f)' };
   const gradeColor = (g) => GRADE_MAP[g] || 'var(--ink3)';
   const gradeBg = (g) => `color-mix(in srgb, ${GRADE_MAP[g] || 'var(--ink3)'} 14%, transparent)`;
@@ -798,7 +801,7 @@
       </button>`;
     }).join('');
 
-    const navDefs = [['sec-overview', 'Overview'], ['sec-flow', 'Cost & Tokens'], ['sec-models', 'Models & Tools'], ['sec-agents', 'Agents'], ['sec-rhythm', 'Rhythm'], ['sec-sessions', 'Sessions']];
+    const navDefs = [['sec-overview', 'Overview'], ['sec-flow', 'Cost & Tokens'], ['sec-models', 'Models & Tools'], ['sec-agents', 'Agents'], ['sec-rhythm', 'Rhythm'], ['sec-skills', 'Skills & MCP'], ['sec-sessions', 'Sessions']];
     const nav = navDefs.map(([id, label], i) => {
       const active = state.activeSection === id;
       return `<a class="nav-item" data-sec="${id}" href="#${id}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;text-decoration:none;color:${active ? 'var(--ink)' : 'var(--ink2)'};background:${active ? 'var(--hover)' : 'transparent'};font-size:13px;font-weight:${active ? 600 : 450};transition:background .15s,color .15s;position:relative;">
@@ -1406,6 +1409,79 @@
       </div>`;
   }
 
+  // ── Skills & MCP ──
+  function rankedBarRows(entries, max, colorVar, emptyText) {
+    if (!entries.length) return `<div style="font-size:12px;color:var(--ink3);padding:6px 0;">${esc(emptyText)}</div>`;
+    return entries.map(([name, cnt], i) => `<div style="display:grid;grid-template-columns:1fr 1fr 44px;align-items:center;gap:10px;">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(name)}">${esc(name)}</span>
+      <div style="height:8px;border-radius:5px;background:var(--hover);overflow:hidden;">
+        <div style="height:100%;width:${Math.round(cnt / max * 100)}%;border-radius:5px;background:linear-gradient(90deg, color-mix(in srgb, ${colorVar} 70%, transparent), ${colorVar});transform-origin:left;animation:growX .9s cubic-bezier(0.22,1,0.36,1) both;animation-delay:${(i * 0.05).toFixed(2)}s;"></div>
+      </div>
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink3);text-align:right;">${cnt.toLocaleString()}</span>
+    </div>`).join('');
+  }
+
+  function renderSkills() {
+    const v = view();
+
+    const skillEntries = Object.entries(v.skillBreakdown || {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const skillRows = rankedBarRows(skillEntries, Math.max(1, ...skillEntries.map(([, c]) => c)), 'var(--purple)', 'No Skill invocations recorded yet.');
+
+    const mcpEntries = Object.entries(v.mcpServerBreakdown || {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const mcpRows = rankedBarRows(mcpEntries, Math.max(1, ...mcpEntries.map(([, c]) => c)), 'var(--green)', 'No MCP tool calls recorded yet.');
+
+    const adoptionDefs = v.featureAdoption || [];
+    const adoptionRows = adoptionDefs.length ? adoptionDefs.map((f, i) => `<div style="display:grid;grid-template-columns:1fr 1fr 84px;align-items:center;gap:10px;">
+      <span style="font-size:12px;color:var(--ink2);">${esc(f.feature)}</span>
+      <div style="height:8px;border-radius:5px;background:var(--hover);overflow:hidden;">
+        <div style="height:100%;width:${f.pct}%;border-radius:5px;background:linear-gradient(90deg, color-mix(in srgb, var(--cyan) 70%, transparent), var(--cyan));transform-origin:left;animation:growX .9s cubic-bezier(0.22,1,0.36,1) both;animation-delay:${(i * 0.05).toFixed(2)}s;"></div>
+      </div>
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink3);text-align:right;">${f.pct}% · ${f.sessions}</span>
+    </div>`).join('') : `<div style="font-size:12px;color:var(--ink3);padding:6px 0;">No sessions yet.</div>`;
+
+    const clientEntries = Object.entries(v.clientBreakdown || {}).sort((a, b) => b[1] - a[1]);
+    const clientTotal = clientEntries.reduce((s, [, n]) => s + n, 0) || 1;
+    const clientRows = clientEntries.length ? clientEntries.map(([name, n]) => `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border-radius:9px;background:var(--bg2);">
+      <span style="font-size:12px;color:var(--ink2);">${esc(clientLabel(name))}</span>
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;">${n} <span style="color:var(--ink3);font-weight:500;">(${Math.round(n / clientTotal * 100)}%)</span></span>
+    </div>`).join('') : `<div style="font-size:12px;color:var(--ink3);">No sessions yet.</div>`;
+
+    const at = v.agentTypeBreakdown || { main_only: { sessions: 0, pct: 0 }, delegated: { sessions: 0, pct: 0 } };
+    const agentTypeRows = [['Main agent only', at.main_only], ['Delegated to sub-agents', at.delegated]].map(([label, d]) =>
+      `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border-radius:9px;background:var(--bg2);">
+        <span style="font-size:12px;color:var(--ink2);">${esc(label)}</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;">${d.sessions} <span style="color:var(--ink3);font-weight:500;">(${d.pct}%)</span></span>
+      </div>`).join('');
+
+    $('sec-skills').innerHTML = `
+      <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:16px;">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.2em;color:var(--accent);">06</span>
+        <h2 style="font-family:'Bricolage Grotesque',sans-serif;font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0;">Skills &amp; MCP</h2>
+        <div style="flex:1;height:1px;background:var(--line2);"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px;">
+        <div style="border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:20px 22px;box-shadow:var(--shadow);">
+          <h3 style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink2);margin:0;">Top Skills</h3>
+          <div style="display:flex;flex-direction:column;gap:9px;margin-top:16px;">${skillRows}</div>
+        </div>
+        <div style="border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:20px 22px;box-shadow:var(--shadow);">
+          <h3 style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink2);margin:0;">Top MCP Servers</h3>
+          <div style="display:flex;flex-direction:column;gap:9px;margin-top:16px;">${mcpRows}</div>
+        </div>
+        <div style="border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:20px 22px;box-shadow:var(--shadow);">
+          <h3 style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink2);margin:0;">Feature Adoption</h3>
+          <div style="font-size:11px;color:var(--ink3);margin-top:6px;">Share of your sessions using each capability.</div>
+          <div style="display:flex;flex-direction:column;gap:9px;margin-top:14px;">${adoptionRows}</div>
+        </div>
+        <div style="border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:20px 22px;box-shadow:var(--shadow);">
+          <h3 style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink2);margin:0;">Sessions by Client &amp; Agent Type</h3>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:14px;">${clientRows}</div>
+          <div style="height:1px;background:var(--line2);margin:14px 0;"></div>
+          <div style="display:flex;flex-direction:column;gap:6px;">${agentTypeRows}</div>
+        </div>
+      </div>`;
+  }
+
   // ── Sessions table (re-renders on its own state; charts untouched) ──
   const confColors = { high: 'var(--green)', medium: 'var(--amber-hi)', low: 'var(--red)' };
   function sessionList() {
@@ -1451,7 +1527,7 @@
     const headers = headerDefs.map(([key, label, align]) => {
       const arrow = key === state.sortCol ? (state.sortDir === 1 ? ' ↑' : ' ↓') : '';
       const color = key === state.sortCol ? 'var(--ink)' : 'var(--ink3)';
-      return `<button ${key ? `data-act="sort" data-arg="${key}"` : 'disabled'} title="${key ? 'Sort by ' + esc(label) : ''}" style="border:0;background:transparent;cursor:${key ? 'pointer' : 'default'};text-align:${align};font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:${color};padding:2px 0;">${esc(label)}${arrow}</button>`;
+      return `<button ${key ? `data-act="sort" data-arg="${key}"` : 'disabled'} title="${key ? 'Sort by ' + esc(label) : ''}" style="border:0;background:transparent;cursor:${key ? 'pointer' : 'default'};text-align:${align};font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:${color};padding:2px 0;">${esc(label)}${arrow}</button>`;
     }).join('');
 
     const gridCols = '168px 1.1fr 1.15fr 64px 74px 84px 86px 110px 62px';
@@ -1486,22 +1562,22 @@
         <div class="session-row${expanded ? ' expanded' : ''}" data-act="rowToggle" data-arg="${esc(x.sessionId)}" style="display:grid;grid-template-columns:${gridCols};align-items:center;padding:11px 18px;border-bottom:1px solid var(--line2);cursor:pointer;${expanded ? 'background:var(--bg2);' : ''}opacity:${x.isOrphaned ? 0.62 : 1};">
           <div style="display:flex;align-items:center;gap:8px;">
             <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--ink3);transform:rotate(${expanded ? '90deg' : '0deg'});transition:transform .2s;display:inline-block;">▶</span>
-            <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink2);">${esc(date)}</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--ink2);">${esc(date)}</span>
           </div>
-          <span style="font-size:12.5px;font-weight:500;">${esc(x.projectName || '—')}</span>
+          <span style="font-size:13.5px;font-weight:500;">${esc(x.projectName || '—')}</span>
           <div style="display:flex;align-items:center;gap:7px;">
             <span title="${esc(srcLabel)}" style="display:inline-flex;flex-shrink:0;">${logoSvg(isCodex ? 'codex' : 'claude', 12, srcColor, 'style="display:block"')}</span>
-            <span style="font-size:12px;color:var(--ink2);">${esc(fmtModel(x.model))}</span>
+            <span style="font-size:13px;color:var(--ink2);">${esc(fmtModel(x.model))}</span>
           </div>
-          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink2);text-align:right;padding-right:14px;">${x.userMessageCount + x.assistantMessageCount}</span>
-          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:var(--cyan);text-align:right;padding-right:14px;">${x.autopilotRatio > 0 ? x.autopilotRatio + '×' : '—'}</span>
-          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;text-align:right;padding-right:14px;">${esc(fmtMoney(x.cost.totalCost))}</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--ink2);text-align:right;padding-right:14px;">${x.userMessageCount + x.assistantMessageCount}</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:var(--cyan);text-align:right;padding-right:14px;">${x.autopilotRatio > 0 ? x.autopilotRatio + '×' : '—'}</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;text-align:right;padding-right:14px;">${esc(fmtMoney(x.cost.totalCost))}</span>
           <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;padding-right:14px;">
-            <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;">${x.commitCount}</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;">${x.commitCount}</span>
             <span style="width:7px;height:7px;border-radius:50%;background:${confColor};" title="${esc(confLabel)}"></span>
           </div>
-          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;text-align:right;padding-right:14px;"><span style="color:var(--green);">+${x.linesAdded.toLocaleString()}</span> <span style="color:var(--ink3);">/</span> <span style="color:var(--red);">−${x.linesDeleted.toLocaleString()}</span></span>
-          <span style="display:inline-flex;justify-content:center;"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700;padding:3px 10px;border-radius:6px;color:${gradeColor(x.grade)};background:${gradeBg(x.grade)};">${esc(x.grade)}</span></span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:right;padding-right:14px;"><span style="color:var(--green);">+${x.linesAdded.toLocaleString()}</span> <span style="color:var(--ink3);">/</span> <span style="color:var(--red);">−${x.linesDeleted.toLocaleString()}</span></span>
+          <span style="display:inline-flex;justify-content:center;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;color:${gradeColor(x.grade)};background:${gradeBg(x.grade)};">${esc(x.grade)}</span></span>
         </div>
         ${expandBlock}
       </div>`;
@@ -1512,7 +1588,7 @@
 
     $('sec-sessions').innerHTML = `
       <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:16px;flex-wrap:wrap;">
-        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.2em;color:var(--accent);">06</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.2em;color:var(--accent);">07</span>
         <h2 style="font-family:'Bricolage Grotesque',sans-serif;font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0;">Sessions</h2>
         <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink3);">${list.length} of ${v.sessions.length}</span>
         <div style="flex:1;height:1px;background:var(--line2);min-width:20px;"></div>
@@ -1559,7 +1635,7 @@
   // ── Command palette ──
   function computeCmdItems() {
     const v = view();
-    const navDefs = [['sec-overview', 'Overview'], ['sec-flow', 'Cost & Tokens'], ['sec-models', 'Models & Tools'], ['sec-agents', 'Agents'], ['sec-rhythm', 'Rhythm'], ['sec-sessions', 'Sessions']];
+    const navDefs = [['sec-overview', 'Overview'], ['sec-flow', 'Cost & Tokens'], ['sec-models', 'Models & Tools'], ['sec-agents', 'Agents'], ['sec-rhythm', 'Rhythm'], ['sec-skills', 'Skills & MCP'], ['sec-sessions', 'Sessions']];
     const goTo = (id) => {
       state.cmdOpen = false; renderCmd();
       const el = $(id);
@@ -1626,6 +1702,7 @@
     renderModels();
     renderAgents();
     renderRhythm();
+    renderSkills();
     renderSessions();
     renderCmd();
     scheduleCharts();
@@ -1736,7 +1813,7 @@
 
   // Scroll-spy — updates only nav styling (never rebuilds charts)
   function setupSpy() {
-    const ids = ['sec-overview', 'sec-flow', 'sec-models', 'sec-agents', 'sec-rhythm', 'sec-sessions'];
+    const ids = ['sec-overview', 'sec-flow', 'sec-models', 'sec-agents', 'sec-rhythm', 'sec-skills', 'sec-sessions'];
     const spy = new IntersectionObserver((entries) => {
       entries.forEach((en) => {
         if (en.isIntersecting && state.activeSection !== en.target.id) {

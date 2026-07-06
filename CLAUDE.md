@@ -67,6 +67,11 @@ All GET routes accept `?source=all|claude|codex` (default `all`; per-agent views
 - `GET /api/models` — model breakdown
 - `GET /api/heatmap` — productivity heatmap
 - `GET /api/tools` — tool usage breakdown
+- `GET /api/skills` — Skill invocations, by skill name
+- `GET /api/mcp-servers` — MCP server usage, grouped from `mcp__<server>__<tool>` calls
+- `GET /api/clients` — sessions by client surface (`entrypoint`: cli, claude-vscode, codex-cli, ...)
+- `GET /api/agent-type` — sessions by agent type (main_only vs delegated to a subagent)
+- `GET /api/feature-adoption` — share of sessions using Sub-agents / Skills / MCP / Plan mode
 - `GET /api/survival` — line survival stats
 - `GET /api/tokens` — detailed token analytics
 - `POST /api/refresh` — force re-parse
