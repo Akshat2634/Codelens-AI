@@ -123,6 +123,7 @@ node --check src/*.js           # syntax validation
 - **Privacy-first** — all data stays local, no telemetry; the dashboard binds 127.0.0.1 by default (`--host` to override)
 - **Version-aware pricing** — token costs reflect each provider's pricing tiers per model (Anthropic per-version tiers; OpenAI per-model-id, with o3's Jun 2025 price cut date-tiered)
 - **Auto-pricing fallback** — models the hardcoded tables don't match are priced from LiteLLM's public map (`src/pricing.js`): fetched on demand, disk-cached ~24h (`pricing.json`), refreshed on `--refresh`, skipped with `--offline`, and graceful on failure (cache → hardcoded Sonnet/`CODEX_FALLBACK` estimate). **Hardcoded tables win** when both have a model; overlay-priced models are real rates, so NOT flagged estimated. The overlay must be loaded (`loadPricingOverlay`, awaited in `buildPayload`) before any costing; `lookupExternalRate` is a no-op until then
+- **Update nudge** (`src/update-check.js`) — every run checks npm's registry for a newer published version and prints an upgrade hint if behind; disk-cached ~24h (`version-check.json`), capped at 400ms so a slow network never delays a real command, skipped with `--offline`, silent on any failure. Exists because `npx codelens-ai` (no version pin) can silently run a stale global install or npx-cached copy — old enough to predate whole subcommands — producing a confusing Commander parse error instead of a hint to upgrade (see README Troubleshooting)
 
 ## Coding Conventions
 
