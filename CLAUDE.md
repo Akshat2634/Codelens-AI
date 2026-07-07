@@ -33,6 +33,7 @@ src/
 ├── statusline.js      # `codelens-ai statusline` — Claude Code statusline (stdin JSON + quickstats: ROI, burn rate)
 ├── server.js          # Express REST API routes (?source= selects per-agent views)
 ├── cache.js           # Smart caching with per-source stale file detection + statusline quickstats
+├── pricing.js         # External LiteLLM pricing overlay — auto-prices models the hardcoded tables don't know
 └── dashboard.html     # Single-file SPA dashboard (4000+ lines)
 
 tests/
@@ -90,6 +91,7 @@ npx codelens-ai --json          # dump raw JSON to stdout
 npx codelens-ai --project X     # filter by project name
 npx codelens-ai --refresh       # force full re-parse
 npx codelens-ai --source codex  # analyze a single agent: claude | codex
+npx codelens-ai --offline       # skip network pricing refresh (cached/hardcoded rates only)
 npx codelens-ai --claude-dir X  # override ~/.claude/projects (testing/CI)
 npx codelens-ai --codex-dir X   # override ~/.codex/sessions (testing/CI)
 npx codelens-ai --plan max20 --codex-plan plus   # per-agent subscription mode
@@ -120,6 +122,7 @@ node --check src/*.js           # syntax validation
 - **Uniform session shape** — codex-parser produces the exact claude-parser session shape (`cacheReadTokens` = OpenAI `cached_input_tokens`, `cacheCreationTokens` = 0) so correlator/metrics/server are source-agnostic
 - **Privacy-first** — all data stays local, no telemetry; the dashboard binds 127.0.0.1 by default (`--host` to override)
 - **Version-aware pricing** — token costs reflect each provider's pricing tiers per model (Anthropic per-version tiers; OpenAI per-model-id, with o3's Jun 2025 price cut date-tiered)
+- **Auto-pricing fallback** — models the hardcoded tables don't match are priced from LiteLLM's public map (`src/pricing.js`): fetched on demand, disk-cached ~24h (`pricing.json`), refreshed on `--refresh`, skipped with `--offline`, and graceful on failure (cache → hardcoded Sonnet/`CODEX_FALLBACK` estimate). **Hardcoded tables win** when both have a model; overlay-priced models are real rates, so NOT flagged estimated. The overlay must be loaded (`loadPricingOverlay`, awaited in `buildPayload`) before any costing; `lookupExternalRate` is a no-op until then
 
 ## Coding Conventions
 

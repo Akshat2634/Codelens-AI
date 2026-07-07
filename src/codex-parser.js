@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import zlib from 'node:zlib';
 import { findGitRoot, isReadOnlyCommand, isVerificationCommand, toRelativePath } from './claude-parser.js';
+import { lookupExternalRate } from './pricing.js';
 
 // ── OpenAI Codex CLI session parser ──
 //
@@ -160,6 +161,13 @@ export function getCodexPricing(modelName, usageDateMs = Date.now()) {
       return useLongContextPricing(modelName, price) ? price.longContext : price;
     }
   }
+  // Not in the hardcoded table — try the external LiteLLM overlay so a new
+  // OpenAI model id is priced from its real published rate (not the flat
+  // estimate). LiteLLM's cache_read maps to cachedInput; no `estimate` flag
+  // since these are real rates. Falls through to CODEX_FALLBACK when offline
+  // or the model is genuinely unknown.
+  const ext = lookupExternalRate(modelName);
+  if (ext) return { input: ext.input, cachedInput: ext.cacheRead, output: ext.output };
   return CODEX_FALLBACK;
 }
 

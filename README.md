@@ -105,6 +105,7 @@ codelens-ai --json                 # dump all metrics as JSON to stdout
 codelens-ai --project techops      # filter to a specific project
 codelens-ai --refresh              # force full re-parse (ignore cache)
 codelens-ai --source codex         # analyze a single agent only: claude | codex
+codelens-ai --offline              # skip the network pricing refresh (use cached/hardcoded rates)
 codelens-ai --plan max20           # Claude subscription mode: effective $/commit vs your flat plan
 codelens-ai --plan-cost 150        # custom Claude monthly subscription cost (USD)
 codelens-ai --codex-plan plus      # ChatGPT/Codex subscription: free | go | plus | pro100 | pro | business | business-annual
@@ -221,6 +222,8 @@ The dashboard includes:
 Parsed session data is cached at `~/.cache/agent-analytics/parsed-sessions.json`. On subsequent runs, only new or modified JSONL files are re-parsed, making startup near-instant. Use `--refresh` to force a full re-parse.
 
 ### Cost Calculation
+
+> **Auto-pricing new models:** the per-model tables below stay authoritative (they carry version, date, long-context, and cache-tier precision), but any model they don't recognize is priced automatically from [LiteLLM's public price map](https://github.com/BerriAI/litellm) (2,900+ models) — fetched on demand, cached to `~/.cache/agent-analytics/pricing.json` for ~24h, and refreshed with `--refresh`. So a brand-new model id is costed from its real published rate with no code change, instead of a rough estimate. Use `--offline` to skip the network entirely (cached/hardcoded rates only); if the fetch fails, it degrades to the cache and then to the hardcoded fallback. Hardcoded rates always win when both sources have a model.
 
 Token costs are version-aware and calculated per model, accounting for the two prompt-cache write rates. Multipliers (relative to base input): **cache read = 0.1×**, **5-minute cache write = 1.25×**, **1-hour cache write = 2×**. Figures below are verified against [Anthropic's pricing](https://platform.claude.com/docs/en/about-claude/pricing) (per million tokens):
 

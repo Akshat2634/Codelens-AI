@@ -10,6 +10,7 @@ import { parseCodexSessions } from './codex-parser.js';
 import { correlateSessions } from './correlator.js';
 import { analyzeGitRepo, getGitUser, resolveMovedRepoPaths } from './git-analyzer.js';
 import { computeMetrics } from './metrics.js';
+import { loadPricingOverlay, overlayInfo } from './pricing.js';
 import { renderReportHtml, renderReportMarkdown, renderReportText, reportModel } from './report.js';
 import { createServer } from './server.js';
 import { installStatusline, runStatusline } from './statusline.js';
@@ -36,7 +37,15 @@ const fmt = (ms) => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 // stdout carries only the JSON document.
 let progress = console.log;
 
-async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null) {
+async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null, offline = false) {
+  // Step 0: Load the external pricing overlay before any costing happens, so
+  // models the hardcoded tables don't know get a real published rate instead of
+  // the Sonnet estimate. Cached to disk (~24h TTL); --refresh forces a refetch,
+  // --offline stays on the cache. Never throws — falls back to hardcoded pricing.
+  await loadPricingOverlay({ offline, refresh: forceRefresh });
+  const ov = overlayInfo();
+  if (ov.source === 'network') progress(`  ${icon.ok} Pricing refreshed ${c.dim}── ${ov.models} models from LiteLLM${c.reset}`);
+
   // Step 1: Parse sessions from every agent source (with caching)
   const startParse = Date.now();
   // Same cutoff computation as the parsers, so the cache staleness scan and
@@ -242,6 +251,7 @@ const addAnalysisOptions = (cmd) => cmd
   .option('--claude-dir <path>', 'override path to Claude Code projects directory (for testing/CI)')
   .option('--codex-dir <path>', 'override path to OpenAI Codex sessions directory (for testing/CI)')
   .option('--source <agent>', 'analyze a single agent only: claude | codex | all')
+  .option('--offline', 'skip the network pricing refresh; use cached/hardcoded pricing only')
   .option('--plan <tier>', 'Claude subscription mode — effective $/commit vs your flat plan: pro | max5 | max20')
   .option('--plan-cost <amount>', 'custom Claude monthly subscription cost in USD (overrides --plan)')
   .option('--codex-plan <tier>', 'Codex/ChatGPT subscription mode: free | go | plus | pro100 | pro | team | business | business-annual')
@@ -309,7 +319,7 @@ async function runAnalysis(opts) {
     console.error(`  ${icon.warn} ${c.yellow}--codex-dir does not exist:${c.reset} ${codexDir}`);
   }
 
-  const payloads = await buildPayload(claudeDir, codexDir, days, opts.project, opts.refresh, planConfigs, sourceFilter);
+  const payloads = await buildPayload(claudeDir, codexDir, days, opts.project, opts.refresh, planConfigs, sourceFilter, !!opts.offline);
   if (payloads) {
     const invokedAs = path.basename(process.argv[1]);
     for (const p of Object.values(payloads)) {
@@ -399,7 +409,7 @@ async function runDashboard(opts) {
 
   // Start server — pass a rebuild function so /api/refresh can re-run the pipeline
   const rebuild = async () => {
-    const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter);
+    const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline);
     if (fresh) {
       for (const p of Object.values(fresh)) p.meta.invokedAs = payload.meta.invokedAs;
     }

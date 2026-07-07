@@ -1,6 +1,7 @@
 import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import { lookupExternalRate } from './pricing.js';
 
 // Pricing per million tokens — from https://docs.anthropic.com/en/docs/about-claude/pricing
 // Cache reads = 0.1x base input, Cache writes (5min) = 1.25x base input
@@ -94,7 +95,20 @@ function getPricingTier(modelName, usageDateMs = Date.now()) {
     if (lower.includes('3-5') || lower.includes('3.5')) return 'haiku-35';
     return 'haiku-3'; // Haiku 3 (claude-3-haiku)
   }
-  return 'sonnet'; // default unknown models to Sonnet pricing
+  return null; // unknown — resolveRates tries the external overlay, then Sonnet
+}
+
+// Resolve a model to per-million rates: hardcoded tier wins (most precise);
+// otherwise the external LiteLLM overlay (a real published rate, so NOT
+// estimated); otherwise the Sonnet last-resort (flagged estimated). Returns
+// null only for a missing model name, so callers still cost it as $0.
+function resolveClaudeRates(modelName, usageDateMs = Date.now()) {
+  if (!modelName) return null;
+  const tier = getPricingTier(modelName, usageDateMs);
+  if (tier) return { p: PRICING[tier], estimated: false };
+  const ext = lookupExternalRate(modelName);
+  if (ext) return { p: ext, estimated: false };
+  return { p: PRICING.sonnet, estimated: true };
 }
 
 // `cacheWrite` is the default 5-minute TTL rate (1.25x input). 1-hour-TTL cache
@@ -116,9 +130,9 @@ function geoMultiplier(modelName) {
 const WEB_SEARCH_COST_PER_REQUEST = 10 / 1000;
 
 function calculateCost(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, cacheCreation1hTokens = 0, usageDateMs = Date.now(), webSearchRequests = 0) {
-  const tier = getPricingTier(modelName, usageDateMs);
-  if (!tier) return 0;
-  const p = PRICING[tier];
+  const r = resolveClaudeRates(modelName, usageDateMs);
+  if (!r) return 0;
+  const p = r.p;
   return geoMultiplier(modelName) * (
     (inputTokens * p.input / PER_MIL) +
     (outputTokens * p.output / PER_MIL) +
@@ -129,9 +143,9 @@ function calculateCost(inputTokens, outputTokens, cacheReadTokens, cacheCreation
 }
 
 function calculateCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, cacheCreation1hTokens = 0, usageDateMs = Date.now(), webSearchRequests = 0) {
-  const tier = getPricingTier(modelName, usageDateMs);
-  if (!tier) return { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, serverToolCost: 0, totalCost: 0 };
-  const p = PRICING[tier];
+  const r = resolveClaudeRates(modelName, usageDateMs);
+  if (!r) return { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, serverToolCost: 0, totalCost: 0 };
+  const p = r.p;
   const mult = geoMultiplier(modelName);
   const inputCost = mult * inputTokens * p.input / PER_MIL;
   const outputCost = mult * outputTokens * p.output / PER_MIL;
@@ -616,15 +630,17 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
 
   for (const [model, tokens] of Object.entries(modelTokens)) {
     const cost = calculateCost(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h, sessionDateMs, tokens.webSearch);
-    // Avoided cost of cache reads at this model's actual rates
-    const tier = getPricingTier(model, sessionDateMs);
-    if (tier) {
-      const p = PRICING[tier];
+    // Avoided cost of cache reads at this model's actual rates; estimated spend
+    // = models priced by the Sonnet last-resort (no hardcoded tier AND no
+    // external-overlay match), not a real published rate.
+    const rates = resolveClaudeRates(model, sessionDateMs);
+    if (rates) {
+      const p = rates.p;
       session.cacheSavingsDollars += geoMultiplier(model) * tokens.cacheRead * (p.input - p.cacheRead) / PER_MIL;
+      if (rates.estimated) session.estimatedCost += cost;
     }
     const totalTokens = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
     session.modelBreakdown[model] = { tokens: totalTokens, cost };
-    if (getModelFamily(model) === null) session.estimatedCost += cost;
 
     if (totalTokens > maxTokens) {
       maxTokens = totalTokens;
@@ -713,9 +729,9 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
       dailyTotal.serverToolCost += bd.serverToolCost;
       dailyTotal.totalCost += bd.totalCost;
       // Avoided cost of this day's cache reads, at the rate in effect on it
-      const dayTier = getPricingTier(model, dayMs);
-      if (dayTier) {
-        const p = PRICING[dayTier];
+      const dayRates = resolveClaudeRates(model, dayMs);
+      if (dayRates) {
+        const p = dayRates.p;
         dailySavings += geoMultiplier(model) * tokens.cacheRead * (p.input - p.cacheRead) / PER_MIL;
       }
       dailyCoveredTokens += tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
