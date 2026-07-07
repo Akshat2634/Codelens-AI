@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Command } from 'commander';
+import { blocksJson, buildBlocks, filterRecentBlocks, renderBlocksText } from './blocks.js';
 import { DEFAULT_CLAUDE_DIR, DEFAULT_CODEX_DIR, deleteCache, getCodexStaleFiles, getStaleFiles, loadCache, saveCache, saveQuickstats } from './cache.js';
 import { parseAllProjects } from './claude-parser.js';
 import { parseCodexSessions } from './codex-parser.js';
@@ -331,12 +332,25 @@ async function runAnalysis(opts) {
     if (!sourceFilter && !opts.project) {
       const today = payloads.all.summary.costByPeriod?.today;
       const now = new Date();
+      // Snapshot the open 5-hour block so the statusline can show a live burn
+      // rate without parsing. The block's endTime bounds staleness: the
+      // statusline hides it once now passes endTime (i.e. after ≤5h).
+      const { activeBlock } = buildBlocks(payloads.all.sessions);
+      const blockSnapshot = activeBlock ? {
+        endTime: activeBlock.endTime,
+        cost: activeBlock.cost,
+        totalTokens: activeBlock.totalTokens,
+        tokensPerMinute: activeBlock.burnRate ? Math.round(activeBlock.burnRate.tokensPerMinute) : null,
+        tokensPerMinuteIndicator: activeBlock.burnRate ? Math.round(activeBlock.burnRate.tokensPerMinuteIndicator) : null,
+        costPerHour: activeBlock.burnRate ? activeBlock.burnRate.costPerHour : null,
+      } : null;
       saveQuickstats({
         day: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
         generatedAt: now.toISOString(),
         todayCost: today?.cost ?? 0,
         todayCommits: today?.commits ?? 0,
         grade: payloads.all.summary.overallGrade,
+        activeBlock: blockSnapshot,
       }, { claudeDir, codexDir });
     }
   }
@@ -504,6 +518,53 @@ async function runTable(period, opts) {
   process.stdout.write(`${title}\n${renderPeriodTableText(table, { breakdown: opts.breakdown })}\n\n`, () => process.exit(0));
 }
 
+// `codelens-ai blocks` — group usage into Claude's rolling 5-hour billing
+// windows, with burn rate and a projection for the open block.
+async function runBlocks(opts) {
+  progress = console.error;
+  printBanner(' blocks');
+
+  // --session-length: window length in hours (default 5).
+  const sessionHours = opts.sessionLength !== undefined ? parseFloat(opts.sessionLength) : 5;
+  if (!(sessionHours > 0)) {
+    console.error(`  ${icon.err} ${c.red}--session-length must be a positive number of hours.${c.reset}`);
+    process.exit(1);
+  }
+  // --token-limit: a number, or the literal "max" (largest prior block).
+  let tokenLimit = null;
+  if (opts.tokenLimit !== undefined) {
+    tokenLimit = String(opts.tokenLimit).toLowerCase() === 'max' ? 'max' : parseInt(opts.tokenLimit, 10);
+    if (tokenLimit !== 'max' && !(Number.isFinite(tokenLimit) && tokenLimit > 0)) {
+      console.error(`  ${icon.err} ${c.red}--token-limit must be a positive integer or "max".${c.reset}`);
+      process.exit(1);
+    }
+  }
+
+  const { payloads, days, claudeDir, codexDir, sourceFilter } = await runAnalysis(opts);
+  if (!payloads) {
+    printNoSessions(sourceFilter, days, claudeDir, codexDir);
+    if (opts.json) {
+      process.stdout.write('null', () => process.exit(0));
+      return;
+    }
+    process.exit(0);
+  }
+
+  const payload = payloads.all;
+  let result = buildBlocks(payload.sessions, { sessionHours, tokenLimit });
+  if (opts.recent) result = filterRecentBlocks(result, 3);
+
+  if (opts.json) {
+    const doc = blocksJson(result, { source: payload.meta.source, daysAnalyzed: days });
+    process.stdout.write(JSON.stringify(doc, null, 2), () => process.exit(0));
+    return;
+  }
+  const src = payload.meta.source !== 'all' ? `, ${payload.meta.source} only` : '';
+  const scope = opts.active ? 'active 5-hour block' : opts.recent ? '5-hour blocks · last 3 days' : `5-hour blocks · last ${days} days`;
+  const title = `\n  ${c.bold}${c.cyan}Billing blocks${c.reset} ${c.dim}· ${scope}${src}${c.reset}\n`;
+  process.stdout.write(`${title}${renderBlocksText(result, { active: opts.active })}\n\n`, () => process.exit(0));
+}
+
 async function main() {
   const program = new Command();
   program
@@ -546,11 +607,23 @@ async function main() {
     cmd.action(async (opts) => runTable(name, opts));
   }
 
+  // `codelens-ai blocks` — Claude's rolling 5-hour billing windows + burn rate.
+  const blocksCmd = program
+    .command('blocks')
+    .description("group usage into Claude's 5-hour billing windows with burn rate & projection")
+    .option('-a, --active', 'show only the current (open) block, in detail')
+    .option('-r, --recent', 'show only blocks from the last 3 days')
+    .option('--session-length <hours>', 'billing window length in hours', '5')
+    .option('-t, --token-limit <n>', 'quota ceiling for the active block: a number, or "max"')
+    .option('-j, --json', 'output JSON to stdout instead of a table');
+  addAnalysisOptions(blocksCmd);
+  blocksCmd.action(async (opts) => runBlocks(opts));
+
   // `codelens-ai --days 90 report` places analysis flags on the PARENT (with
   // positional options, they'd otherwise be parsed there and silently ignored
   // while report runs with defaults). Forward parent CLI values into the
   // subcommand before it parses its own flags — its own flags still win.
-  const ANALYSIS_SUBCOMMANDS = new Set(['report', 'daily', 'weekly', 'monthly']);
+  const ANALYSIS_SUBCOMMANDS = new Set(['report', 'daily', 'weekly', 'monthly', 'blocks']);
   program.hook('preSubcommand', (thisCommand, subcommand) => {
     if (!ANALYSIS_SUBCOMMANDS.has(subcommand.name())) return;
     for (const key of ['days', 'project', 'refresh', 'claudeDir', 'codexDir', 'source', 'plan', 'planCost', 'codexPlan', 'codexPlanCost']) {

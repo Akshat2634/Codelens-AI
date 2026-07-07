@@ -123,6 +123,11 @@ codelens-ai weekly                 # ...by week (--start-of-week monday|sunday)
 codelens-ai monthly                # ...by month
 codelens-ai daily --breakdown      # nest per-model rows under each period
 codelens-ai daily --json           # structured export (pipe to jq)
+
+codelens-ai blocks                 # group usage into Claude's 5-hour billing windows
+codelens-ai blocks --active        # just the open block: burn rate, time left, projection
+codelens-ai blocks --recent        # only the last 3 days of blocks
+codelens-ai blocks -t max          # warn against a token limit (a number, or "max")
 ```
 
 ### Usage tables (`codelens-ai daily|weekly|monthly`)
@@ -131,6 +136,16 @@ ccusage-style token accounting over the same analyzed window — Input / Output 
 Cache Read / Total / Cost per period — plus the two ROI columns a pure usage tool can't give you:
 **Commits** and **$/Commit**. All the shared analysis flags (`--days`, `--source`, `--project`,
 `--claude-dir`, `--codex-dir`) apply.
+
+### Billing blocks (`codelens-ai blocks`)
+
+Claude bills usage in rolling **5-hour windows** (the window opens with your first message and lasts
+exactly 5 hours). `blocks` groups every session's usage into those windows and shows per-block
+tokens and cost, your **burn rate** (tokens/min and $/hr), and — for the block that's still open — a
+linear **projection** of where it lands plus an optional quota gauge (`-t <n>` or `-t max`). Add
+`--active` for just the current window, `--recent` for the last 3 days, `--session-length <hours>` to
+change the window size, or `--json` for a structured export. Costs use Codelens's version-aware
+per-token pricing, so the numbers match the rest of the tool.
 
 ### ROI report (`codelens-ai report`)
 
@@ -148,14 +163,16 @@ All analysis flags (`--days`, `--source`, `--plan`, `--project`, ...) work on `r
 
 ### Claude Code statusline (`codelens-ai statusline`)
 
-A one-line always-on HUD inside Claude Code, and the only statusline that can show **ROI**, not just burn:
+A one-line always-on HUD inside Claude Code, and the only statusline that shows **ROI** alongside burn:
 
 ```text
-$4.20 session │ today $12.40 · 3 commits · $4.13/commit · A │ 5h 84% (resets 1h15m) · wk 41% │ ctx 23%
+$4.20 session │ today $12.40 · 3 commits · $4.13/commit · A │ burn 2.6K/min · $0.23/hr │ 5h 84% (resets 1h15m) · wk 41% │ ctx 23%
 ```
 
 - **Session cost** straight from Claude Code (exact, not estimated)
 - **Today's spend, commits, and $/commit** from your last pipeline run
+- **Burn rate** of the open 5-hour block — tokens/min (colored by the cache-excluded indicator) and
+  $/hr — snapshotted by your last pipeline run and hidden once the window closes
 - **Official 5-hour and weekly rate-limit usage** with a reset countdown when you're close — the
   numbers Anthropic's limiter actually enforces, not token-math estimates
 - **Context-window pressure**
@@ -189,6 +206,7 @@ The dashboard includes:
 - **Session length analysis** — which session sizes have the best ROI
 - **Productivity heatmap** — GitHub-style grid showing when you're most productive
 - **Agent Autonomy** — autonomy score badge, autopilot ratio, self-heal score, commit velocity, and top verification commands
+- **Projects** — per-repository ROI: which repo your spend goes to, ranked by cost, with its share of spend, commits, $/commit, lines, and % on the default branch
 - **Sessions table** — sortable, expandable table with per-session metrics, matched commits, and autopilot ratio
 
 ## How It Works
