@@ -14,6 +14,7 @@ import {
   parseAllProjects,
   toRelativePath,
 } from '../../src/claude-parser.js';
+import { __resetOverlayForTest, __setOverlayForTest } from '../../src/pricing.js';
 
 test('getModelFamily maps common Claude model strings', () => {
   assert.equal(getModelFamily('claude-opus-4-7'), 'opus');
@@ -134,12 +135,26 @@ test('1-hour cache writes cost more than the 5-minute default', () => {
 });
 
 test('calculateCost returns 0 for unknown/missing model', () => {
-  // Unknown models fall back to sonnet pricing — so it won't be 0, but should be deterministic.
+  // With no external overlay loaded, unknown models fall back to sonnet pricing
+  // — so it won't be 0, but should be deterministic.
+  __resetOverlayForTest();
   const unknown = calculateCost(1000, 1000, 0, 0, 'gpt-4');
   const sonnet = calculateCost(1000, 1000, 0, 0, 'claude-sonnet-4-5');
   assert.equal(unknown, sonnet);
-  // Null model → 0 (no tier)
+  // Null model → 0 (no rates resolvable)
   assert.equal(calculateCost(1000, 1000, 0, 0, null), 0);
+});
+
+test('calculateCost prices unknown models from the external overlay when loaded', () => {
+  // A model the hardcoded table doesn't know, but the overlay does.
+  __setOverlayForTest({ 'gpt-4o': { input: 2.5, output: 10, cacheRead: 1.25, cacheWrite: 3.125 } });
+  const cost = calculateCost(1_000_000, 1_000_000, 0, 0, 'gpt-4o');
+  assert.ok(Math.abs(cost - (2.5 + 10)) < 1e-9, `overlay-priced: ${cost}`);
+  // A model in BOTH the table and the overlay still uses the table (hardcoded wins).
+  __setOverlayForTest({ 'claude-sonnet-4-5': { input: 999, output: 999, cacheRead: 999, cacheWrite: 999 } });
+  const sonnet = calculateCost(1_000_000, 0, 0, 0, 'claude-sonnet-4-5');
+  assert.equal(sonnet, PRICING.sonnet.input); // $3, not the overlay's $999
+  __resetOverlayForTest();
 });
 
 test('calculateCostBreakdown splits costs and sums correctly', () => {

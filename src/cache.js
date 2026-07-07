@@ -51,7 +51,10 @@ function cacheFileFor(options = {}) {
 // 15: filesRead and non-verification bashCommands dropped from sessions (no
 //     consumers; pure cache/memory ballast) — cached sessions from 14 still
 //     carry them and would keep the bloat alive.
-const CACHE_VERSION = 15;
+// 16: external LiteLLM pricing overlay auto-prices models the hardcoded tables
+//     don't know — cached sessions from 15 priced those at the Sonnet estimate,
+//     so a re-parse is needed to pick up the real per-model rate.
+const CACHE_VERSION = 16;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);
