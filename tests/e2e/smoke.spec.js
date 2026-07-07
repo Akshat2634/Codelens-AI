@@ -280,9 +280,12 @@ test.describe('UI modernization (brand marks, face-off, command palette)', () =>
     page.on('pageerror', (err) => errors.push(err.message));
     await page.goto('/');
     await page.waitForSelector('#refresh-btn');
+    // Await the /api/refresh round trip via the network — asserting the
+    // transient disabled state races a fast re-parse (esp. with the --offline
+    // e2e server, where no pricing fetch slows the refresh) and flakes.
+    const refreshed = page.waitForResponse((r) => r.url().includes('/api/refresh'));
     await page.click('#refresh-btn');
-    // Disabled + spinning while the /api/refresh round trip is in flight.
-    await expect(page.locator('#refresh-btn')).toBeDisabled();
+    expect((await refreshed).ok()).toBe(true);
     await expect(page.locator('#toast-root')).toContainText(/refresh/i, { timeout: 10_000 });
     await expect(page.locator('#refresh-btn')).toBeEnabled();
     expect(errors, 'refresh JS errors: ' + errors.join(' | ')).toEqual([]);
