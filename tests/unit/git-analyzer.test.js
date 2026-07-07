@@ -4,13 +4,28 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { analyzeGitRepo, resolveMovedRepoPaths } from '../../src/git-analyzer.js';
+import { analyzeGitRepo, normalizeRemoteUrl, resolveMovedRepoPaths } from '../../src/git-analyzer.js';
 
 function makeRepo(root, ...segments) {
   const dir = path.join(root, ...segments);
   mkdirSync(path.join(dir, '.git'), { recursive: true });
   return dir;
 }
+
+test('normalizeRemoteUrl canonicalizes https / ssh / scp forms to one identity', () => {
+  const expected = { id: 'github.com/akshat2634/techops', slug: 'akshat2634/techops' };
+  // Every clone-URL form for the same repo must map to the same identity so
+  // clones/worktrees/moves collapse into one Projects entry.
+  assert.deepEqual(normalizeRemoteUrl('https://github.com/Akshat2634/techops.git'), expected);
+  assert.deepEqual(normalizeRemoteUrl('git@github.com:Akshat2634/techops.git'), expected);
+  assert.deepEqual(normalizeRemoteUrl('ssh://git@github.com/Akshat2634/techops'), expected);
+  assert.deepEqual(normalizeRemoteUrl('https://user:token@github.com/akshat2634/techops/'), expected);
+  // Different owner → different identity (kept separate), even with the same name.
+  assert.equal(normalizeRemoteUrl('git@github.com:someoneelse/techops.git').id, 'github.com/someoneelse/techops');
+  // Empty / missing → null (repo has no origin remote → falls back to path).
+  assert.equal(normalizeRemoteUrl(''), null);
+  assert.equal(normalizeRemoteUrl(null), null);
+});
 
 // Real repo with tracked files, for the filesWritten corroboration path
 // (git ls-files needs an actual index, not just a .git folder).

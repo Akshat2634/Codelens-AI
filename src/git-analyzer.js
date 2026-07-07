@@ -17,6 +17,43 @@ export function getGitUser(repoPath = null) {
   }
 }
 
+// Canonical repo identity from the `origin` remote URL. Lets the Projects
+// breakdown collapse clones, git worktrees, and moved/renamed checkouts of the
+// SAME repo into one entry (they share a remote) while keeping genuinely
+// different repos that merely share a folder name apart (different remotes).
+// Handles https, ssh://, and scp-style (git@host:owner/repo) URLs; strips
+// credentials, a trailing `.git`, and case. Returns { id, slug } or null when
+// the repo has no origin remote (purely local).
+// Pure URL → canonical identity, split out so it's testable without a repo.
+export function normalizeRemoteUrl(url) {
+  if (!url || !url.trim()) return null;
+  let s = url.trim().replace(/\.git$/i, '').replace(/\/+$/, '');
+  const scp = s.match(/^[^/@]+@([^:]+):(.+)$/); // git@github.com:owner/repo
+  if (scp) {
+    s = `${scp[1]}/${scp[2]}`;
+  } else {
+    s = s.replace(/^[a-z]+:\/\//i, '').replace(/^[^/@]+@/, ''); // strip scheme + credentials
+  }
+  s = s.toLowerCase();
+  const parts = s.split('/').filter(Boolean); // [host, owner, repo, ...]
+  if (parts.length === 0) return null;
+  const slug = parts.length >= 2 ? parts.slice(-2).join('/') : parts[0];
+  return { id: s, slug };
+}
+
+export function getRepoRemote(repoPath) {
+  let url;
+  try {
+    url = execSync(`git -C "${repoPath}" remote get-url origin`, {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'], // silence "no such remote" on stderr
+    }).trim();
+  } catch {
+    return null;
+  }
+  return normalizeRemoteUrl(url);
+}
+
 function detectDefaultBranch(repoPath) {
   // 1. Check what the remote HEAD points to (most reliable)
   try {
@@ -291,8 +328,9 @@ export function resolveMovedRepoPaths(repoPaths, sessions = []) {
 }
 
 export function analyzeGitRepo(repoPath, days) {
+  const remote = getRepoRemote(repoPath);
   if (!existsSync(path.join(repoPath, '.git'))) {
-    return { repoPath, commits: [], defaultBranch: null };
+    return { repoPath, commits: [], defaultBranch: null, remote: remote?.id || null, remoteSlug: remote?.slug || null };
   }
 
   const user = getGitUser(repoPath);
@@ -390,9 +428,9 @@ export function analyzeGitRepo(repoPath, days) {
       Number.isFinite(c.timestampMs) && c.timestampMs >= cutoffMs
     );
 
-    return { repoPath, commits: userCommits, defaultBranch: branchName };
+    return { repoPath, commits: userCommits, defaultBranch: branchName, remote: remote?.id || null, remoteSlug: remote?.slug || null };
   } catch (err) {
     process.stderr.write(`Warning: Git analysis failed for ${repoPath}: ${err.message}\n`);
-    return { repoPath, commits: [], defaultBranch: null };
+    return { repoPath, commits: [], defaultBranch: null, remote: remote?.id || null, remoteSlug: remote?.slug || null };
   }
 }

@@ -1059,13 +1059,21 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   }
 
   // ---- Per-project breakdown ----
+  // Group by the repo's `origin` remote when known, so clones, git worktrees,
+  // and moved/renamed checkouts of the SAME repo collapse into one entry
+  // (otherwise each distinct on-disk path became its own card, showing the same
+  // folder name twice). Repos with no remote fall back to their path.
   const projectMap = new Map();
   for (const session of correlatedSessions) {
-    const key = session.repoPath || 'unknown';
+    const analysis = commitsByRepo?.[session.repoPath];
+    const remoteId = analysis?.remote || null;
+    const key = remoteId || session.repoPath || 'unknown';
     if (!projectMap.has(key)) {
       projectMap.set(key, {
-        repoPath: key,
-        repoName: session.projectName || key.split('/').pop(),
+        repoPath: session.repoPath || 'unknown',
+        repoName: session.projectName || (session.repoPath || 'unknown').split('/').pop(),
+        remote: remoteId,
+        remoteSlug: analysis?.remoteSlug || null,
         totalCost: 0, sessions: 0, commits: 0, linesAdded: 0, commitsOnMain: 0,
       });
     }
@@ -1075,6 +1083,20 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     p.commits += session.commitCount;
     p.linesAdded += session.linesAdded;
     p.commitsOnMain += session.commitsOnMain;
+  }
+  // Disambiguate any remaining same-name entries (genuinely different repos
+  // that merely share a folder name): remote-backed ones show `owner/repo`,
+  // local ones `parentdir/name`, so no two cards read identically.
+  const projectNameCounts = new Map();
+  for (const p of projectMap.values()) projectNameCounts.set(p.repoName, (projectNameCounts.get(p.repoName) || 0) + 1);
+  for (const p of projectMap.values()) {
+    if (projectNameCounts.get(p.repoName) > 1) {
+      if (p.remoteSlug) p.repoName = p.remoteSlug;
+      else {
+        const parts = p.repoPath.split('/').filter(Boolean);
+        if (parts.length >= 2) p.repoName = parts.slice(-2).join('/');
+      }
+    }
   }
   const projects = [...projectMap.values()].map(p => ({
     ...p,
