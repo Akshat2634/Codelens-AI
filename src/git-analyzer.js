@@ -26,7 +26,7 @@ export function getGitUser(repoPath = null) {
 // the repo has no origin remote (purely local).
 // Pure URL → canonical identity, split out so it's testable without a repo.
 export function normalizeRemoteUrl(url) {
-  if (!url || !url.trim()) return null;
+  if (!url?.trim()) return null;
   let s = url.trim().replace(/\.git$/i, '').replace(/\/+$/, '');
   const scp = s.match(/^[^/@]+@([^:]+):(.+)$/); // git@github.com:owner/repo
   if (scp) {
