@@ -44,6 +44,37 @@ function mkCorrelated(overrides = {}) {
   };
 }
 
+test('projects merge by git remote across paths; same-name repos disambiguate', () => {
+  // Same repo at two on-disk paths (a clone + a worktree) sharing one remote,
+  // plus a genuinely different repo that happens to share the folder name.
+  const sessions = [
+    mkCorrelated({ sessionId: 'a', repoPath: '/home/me/techops', projectName: 'techops', commitCount: 8, commitsOnMain: 8 }),
+    mkCorrelated({ sessionId: 'b', repoPath: '/tmp/wt/techops', projectName: 'techops', commitCount: 2, commitsOnMain: 1 }),
+    mkCorrelated({ sessionId: 'c', repoPath: '/home/me/other/techops', projectName: 'techops', commitCount: 1, commitsOnMain: 1 }),
+  ];
+  const commitsByRepo = {
+    '/home/me/techops': { remote: 'github.com/me/techops', remoteSlug: 'me/techops', commits: [], defaultBranch: 'main' },
+    '/tmp/wt/techops': { remote: 'github.com/me/techops', remoteSlug: 'me/techops', commits: [], defaultBranch: 'main' },
+    '/home/me/other/techops': { remote: 'github.com/acme/techops', remoteSlug: 'acme/techops', commits: [], defaultBranch: 'main' },
+  };
+  const m = computeMetrics(sessions, [], commitsByRepo, 30);
+  // Two entries, not three: the two same-remote paths collapsed into one.
+  assert.equal(m.projects.length, 2);
+  const merged = m.projects.find(p => p.remote === 'github.com/me/techops');
+  assert.equal(merged.commits, 10); // 8 + 2
+  assert.equal(merged.sessions, 2);
+  // Both surviving entries share the folder name "techops", so they get the
+  // disambiguated owner/repo label instead of two identical "techops" cards.
+  const names = m.projects.map(p => p.repoName).sort();
+  assert.deepEqual(names, ['acme/techops', 'me/techops']);
+});
+
+test('projects with no remote fall back to path keying (unchanged behavior)', () => {
+  const m = computeMetrics([mkCorrelated({ repoPath: '/repo', projectName: 'repo' })], [], {}, 30);
+  assert.equal(m.projects.length, 1);
+  assert.equal(m.projects[0].repoName, 'repo');
+});
+
 test('computeMetrics on empty input returns a well-formed payload', () => {
   const m = computeMetrics([], [], {}, 30);
   assert.equal(m.summary.totalCost, 0);

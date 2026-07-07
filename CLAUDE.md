@@ -69,7 +69,7 @@ All GET routes accept `?source=all|claude|codex` (default `all`; per-agent views
 - `GET /api/sessions` — paginated sessions with sorting
 - `GET /api/models` — model breakdown
 - `GET /api/heatmap` — productivity heatmap
-- `GET /api/projects` — per-repository ROI (cost, commits, $/commit, lines, main %); drives the dashboard's Projects section
+- `GET /api/projects` — per-repository ROI (cost, commits, $/commit, lines, main %); drives the dashboard's Projects section. Grouped by the repo's `origin` remote (via `git-analyzer.getRepoRemote`) so clones / worktrees / moved checkouts of one repo collapse into a single entry; repos with no remote fall back to path, and same-named distinct repos get an `owner/repo` label
 - `GET /api/tools` — tool usage breakdown
 - `GET /api/skills` — Skill invocations, by skill name
 - `GET /api/mcp-servers` — MCP server usage, grouped from `mcp__<server>__<tool>` calls
