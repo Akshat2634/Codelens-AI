@@ -57,6 +57,30 @@ yarn install
 node src/index.js
 ```
 
+### Troubleshooting: `npx codelens-ai` runs an old version
+
+`npx codelens-ai` (no version pin) can resolve to an old copy instead of the
+latest release — either a stale entry in npx's local cache, or a global
+install already on your `$PATH` that npx reuses without checking the
+registry. Old enough versions predate whole subcommands, so you'll see a
+confusing error like:
+
+```
+error: too many arguments. Expected 0 arguments but got 1.
+```
+
+Every current release prints an "Update available" hint when this happens,
+but if you're stuck on a version from before that check existed, fix it with
+one of:
+
+```bash
+npx codelens-ai@latest report       # pin the version explicitly
+
+npm uninstall -g codelens-ai        # remove a shadowing global install
+# or
+npm install -g codelens-ai@latest   # ...or just update it
+```
+
 ## Prerequisites
 
 - **Node.js >= 22.12** — [Download](https://nodejs.org/) (Node >= 22.15 to also read Codex's zstd-compressed archive rollouts)

@@ -15,6 +15,7 @@ import { renderReportHtml, renderReportMarkdown, renderReportText, reportModel }
 import { createServer } from './server.js';
 import { installStatusline, runStatusline } from './statusline.js';
 import { buildPeriodTable, periodTableJson, renderPeriodTableText } from './tables.js';
+import { checkForUpdate } from './update-check.js';
 
 const { version: VERSION } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8')
@@ -566,6 +567,19 @@ async function runBlocks(opts) {
 }
 
 async function main() {
+  // A stale global install or npx cache runs old code with none of the
+  // current subcommands — which fails with a cryptic Commander parse error
+  // instead of a hint to upgrade. Cached to disk (~24h TTL) so this is a
+  // registry hit at most once a day; capped at 400ms so a slow/broken network
+  // never meaningfully delays a real command, and --offline skips it outright.
+  const update = await Promise.race([
+    checkForUpdate({ currentVersion: VERSION, offline: process.argv.includes('--offline') }).catch(() => null),
+    new Promise((resolve) => setTimeout(() => resolve(null), 400)),
+  ]);
+  if (update) {
+    console.error(`  ${icon.warn} ${c.yellow}Update available:${c.reset} v${update.current} → v${update.latest} ${c.dim}── npx codelens-ai@latest, or: npm install -g codelens-ai@latest${c.reset}\n`);
+  }
+
   const program = new Command();
   program
     .name('codelens-ai')
