@@ -1660,7 +1660,7 @@
       list = list.filter((x) =>
         (x.projectName || '').toLowerCase().includes(q) ||
         fmtModel(x.model).toLowerCase().includes(q) ||
-        x.commits.some((cm) => cm.subject.toLowerCase().includes(q)));
+        x.commits.some((cm) => cm.subject.toLowerCase().includes(q) || (cm.branch || '').toLowerCase().includes(q)));
     }
     const sortVal = (x) => {
       const col = state.sortCol;
@@ -1713,9 +1713,14 @@
         const commitRows = x.commits.map((cm) => {
           const branchColor = cm.onMain ? 'var(--green)' : 'var(--ink3)';
           const branchBg = cm.onMain ? 'color-mix(in srgb, var(--green) 12%, transparent)' : 'var(--hover)';
+          // Off-main commits show the containing branch's name when git gave
+          // us one (cm.branch); uppercase styling is reserved for the generic
+          // MAIN/BRANCH chips so real branch names keep their casing.
+          const branchName = cm.onMain ? null : cm.branch;
+          const branchTitle = cm.onMain ? 'On the default branch' : (branchName ? `Branch containing this commit: ${esc(branchName)}` : 'Off the default branch');
           return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px dashed var(--line2);font-size:12px;">
             <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--amber-hi);">${esc(cm.hash)}</span>
-            <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;padding:2px 8px;border-radius:5px;color:${branchColor};background:${branchBg};">${cm.onMain ? 'main' : 'branch'}</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:${branchName ? '0.02em' : '0.08em'};text-transform:${branchName ? 'none' : 'uppercase'};padding:2px 8px;border-radius:5px;color:${branchColor};background:${branchBg};max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${branchTitle}">${esc(branchName || (cm.onMain ? 'main' : 'branch'))}</span>
             ${cm.aiTrailer ? '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:9.5px;color:var(--green);" title="Carries an agent Co-authored-by trailer">✓ AI-stamped</span>' : ''}
             <span style="color:var(--ink2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(cm.subject)}</span>
             <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink3);white-space:nowrap;">+${(cm.totalAdded || 0).toLocaleString()}/−${(cm.totalDeleted || 0).toLocaleString()}</span>
