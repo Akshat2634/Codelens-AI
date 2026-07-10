@@ -40,7 +40,7 @@ import { lookupExternalRate } from './pricing.js';
 // but 'gpt-5.1-codex-max' matches 'gpt-5.1-codex-max' before 'gpt-5.1-codex').
 // Every OpenAI price change so far shipped as a NEW model id, so a flat map
 // covers 2025–2026 history — except o3's 80% price cut on 2025-06-10, which is
-// date-tiered below. GPT-5.5 / GPT-5.4 publish separate long-context rates,
+// date-tiered below. GPT-5.6 / GPT-5.5 / GPT-5.4 publish separate long-context rates,
 // carried as `longContext` on the same entry. `estimate: true` marks rates that
 // are informed proxies (no published API price); their cost is surfaced as
 // estimated spend.
@@ -58,12 +58,17 @@ const CODEX_PRICING = [
   // Mainline GPT models selectable in Codex
   // Pro variants do not publish a cached-input discount; if a rollout ever
   // reports cached tokens for them, bill those tokens at full input rate.
+  ['gpt-5.6-sol',         { input: 5,    cachedInput: 0.50,  output: 30,  longContext: { input: 10, cachedInput: 1, output: 45 } }],
+  ['gpt-5.6-terra',       { input: 2.50, cachedInput: 0.25,  output: 15,  longContext: { input: 5, cachedInput: 0.50, output: 22.5 } }],
+  ['gpt-5.6-luna',        { input: 1,    cachedInput: 0.10,  output: 6,   longContext: { input: 2, cachedInput: 0.20, output: 9 } }],
+  ['gpt-5.6',             { input: 5,    cachedInput: 0.50,  output: 30,  longContext: { input: 10, cachedInput: 1, output: 45 } }], // alias routes to gpt-5.6-sol
   ['gpt-5.5-pro',         { input: 30,   cachedInput: 30,    output: 180, longContext: { input: 60, cachedInput: 60, output: 270 } }],
   ['gpt-5.5',             { input: 5,    cachedInput: 0.50,  output: 30,  longContext: { input: 10, cachedInput: 1, output: 45 } }],
   ['gpt-5.4-pro',         { input: 30,   cachedInput: 30,    output: 180, longContext: { input: 60, cachedInput: 60, output: 270 } }],
   ['gpt-5.4-mini',        { input: 0.75, cachedInput: 0.075, output: 4.5 }],
   ['gpt-5.4-nano',        { input: 0.20, cachedInput: 0.02,  output: 1.25 }],
   ['gpt-5.4',             { input: 2.50, cachedInput: 0.25,  output: 15,  longContext: { input: 5, cachedInput: 0.50, output: 22.5 } }],
+  ['gpt-5.2-pro',         { input: 21,   cachedInput: 21,    output: 168 }],
   ['gpt-5.2',             { input: 1.75, cachedInput: 0.175, output: 14 }],
   ['gpt-5.1',             { input: 1.25, cachedInput: 0.125, output: 10 }],
   ['gpt-5-nano',          { input: 0.05, cachedInput: 0.005, output: 0.40 }],
@@ -79,11 +84,11 @@ const CODEX_PRICING = [
   // otherwise be swallowed by a shorter prefix at the wrong rate
   ['o4-mini-deep-research', { input: 2,  cachedInput: 0.50,  output: 8 }],
   ['o4-mini',             { input: 1.10, cachedInput: 0.275, output: 4.40 }],
-  ['o3-pro',              { input: 20,   cachedInput: 5,     output: 80 }],
+  ['o3-pro',              { input: 20,   cachedInput: 20,    output: 80 }],
   ['o3-mini',             { input: 1.10, cachedInput: 0.55,  output: 4.40 }],
   ['o3-deep-research',    { input: 10,   cachedInput: 2.50,  output: 40 }],
   ['o3',                  { input: 2,    cachedInput: 0.50,  output: 8 }], // post-2025-06-10 (80% cut); earlier dates tiered below
-  ['o1-pro',              { input: 150,  cachedInput: 37.50, output: 600 }],
+  ['o1-pro',              { input: 150,  cachedInput: 150,   output: 600 }],
   ['o1-mini',             { input: 1.10, cachedInput: 0.55,  output: 4.40 }],
   ['o1',                  { input: 15,   cachedInput: 7.50,  output: 60 }],
 ];
@@ -92,7 +97,7 @@ const CODEX_PRICING = [
 const O3_PRICE_CUT_MS = Date.UTC(2025, 5, 10); // 2025-06-10T00:00:00Z
 const O3_EARLY = { input: 10, cachedInput: 2.50, output: 40 };
 
-// Unknown/future models (e.g. a new gpt-5.6) are priced at the current Codex
+// Unknown/future models (e.g. a new gpt-5.7) are priced at the current Codex
 // default's rates and flagged as estimated spend, mirroring claude-parser's
 // Sonnet fallback — a silent $0 would understate spend with no warning.
 const CODEX_FALLBACK = { input: 5, cachedInput: 0.50, output: 30, estimate: true };
@@ -101,7 +106,7 @@ const PER_MIL = 1_000_000;
 // OpenAI web search is $10 per 1,000 calls; search content tokens are already
 // included in normal token_count events when they are billed.
 const WEB_SEARCH_COST_PER_REQUEST = 10 / 1000;
-// GPT-5.5/GPT-5.4 charge long-context rates only when a SINGLE request's
+// GPT-5.6/GPT-5.5/GPT-5.4 charge long-context rates only when a SINGLE request's
 // input EXCEEDS 272K tokens (OpenAI bills per request, not per session).
 // 272K is those models' standard input cap — the long tier exists for their
 // 1M-context capability, and real Codex CLI rollouts report a
