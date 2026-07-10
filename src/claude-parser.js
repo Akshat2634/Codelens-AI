@@ -65,49 +65,67 @@ function getModelFamily(modelName) {
 function getPricingTier(modelName, usageDateMs = Date.now()) {
   if (!modelName) return null;
   const lower = modelName.toLowerCase();
-  // Fable 5 / Mythos 5 share $10/$50 pricing
-  if (lower.includes('fable') || lower.includes('mythos')) return 'fable';
+  const version = (family, major, minor) => {
+    const suffix = minor === undefined ? `${major}` : `${major}[-.]${minor}`;
+    return new RegExp(`${family}-${suffix}(?:-|@|\\[|$)`).test(lower);
+  };
+  // Only the documented version 5 models share $10/$50. Mythos Preview and
+  // future Fable/Mythos versions must use the external overlay (or estimated
+  // fallback), not silently inherit a different model's price.
+  if (version('fable', 5) || version('mythos', 5)) return 'fable';
   // Opus: check most specific version first. '[fast]' is our usage-bucket marker
   // for requests served in fast mode (usage.speed === 'fast'), which bills at
   // premium rates on Opus 4.8/4.7. On other models fast requests run (and bill)
   // at standard speed, so they fall through to the standard tier.
   const fast = lower.includes('[fast]');
   if (lower.includes('opus')) {
-    if (lower.includes('4-8') || lower.includes('4.8')) return fast ? 'opus-48-fast' : 'opus-48';
-    if (lower.includes('4-7') || lower.includes('4.7')) return fast ? 'opus-47-fast' : 'opus-47';
-    if (lower.includes('4-6') || lower.includes('4.6')) return 'opus-46';
-    if (lower.includes('4-5') || lower.includes('4.5')) return 'opus-45';
-    return 'opus-old';
+    if (version('opus', 4, 8)) return fast ? 'opus-48-fast' : 'opus-48';
+    if (version('opus', 4, 7)) return fast ? 'opus-47-fast' : 'opus-47';
+    if (version('opus', 4, 6)) return 'opus-46';
+    if (version('opus', 4, 5)) return 'opus-45';
+    if (version('opus', 4, 1) || version('opus', 4, 0)
+      || /opus-4(?:-\d{8})?(?:\[|$)/.test(lower)
+      || /(?:claude-3(?:-\d+)?-opus|opus-3)/.test(lower)) return 'opus-old';
+    return null;
   }
   if (lower.includes('sonnet')) {
     // Sonnet 5 has date-dependent pricing: introductory $2/$10 through 2026-08-31,
     // then standard $3/$15 (the `sonnet` tier). `sonnet-5` won't match `sonnet-4-5`
     // (substring is `sonnet-4-5`, not `sonnet-5`), so older Sonnets are unaffected.
-    if (lower.includes('sonnet-5') || lower.includes('sonnet5')) {
+    if (version('sonnet', 5) || lower.includes('sonnet5')) {
       return usageDateMs >= SONNET5_STANDARD_START_MS ? 'sonnet' : 'sonnet-5-intro';
     }
-    // All older Sonnet versions (3.7, 4.0, 4.5, 4.6) share flat $3/$15 pricing
-    return 'sonnet';
+    // Documented older Sonnet versions share flat $3/$15 pricing.
+    if (version('sonnet', 4, 6) || version('sonnet', 4, 5) || version('sonnet', 4, 0)
+      || /sonnet-4(?:-\d{8})?(?:\[|$)/.test(lower)
+      || version('sonnet', 3, 7) || version('sonnet', 3, 5)
+      || /claude-3(?:-(?:5|7))?-sonnet/.test(lower)) return 'sonnet';
+    return null;
   }
   // Haiku version detection
   if (lower.includes('haiku')) {
-    if (lower.includes('4-5') || lower.includes('4.5') || lower.includes('4-6') || lower.includes('4.6')) return 'haiku-new';
-    if (lower.includes('3-5') || lower.includes('3.5')) return 'haiku-35';
-    return 'haiku-3'; // Haiku 3 (claude-3-haiku)
+    if (version('haiku', 4, 5)) return 'haiku-new';
+    if (version('haiku', 3, 5) || /claude-3-5-haiku/.test(lower)) return 'haiku-35';
+    if (version('haiku', 3) || /claude-3-haiku/.test(lower)) return 'haiku-3';
+    return null;
   }
   return null; // unknown — resolveRates tries the external overlay, then Sonnet
 }
 
 // Resolve a model to per-million rates: hardcoded tier wins (most precise);
-// otherwise the external LiteLLM overlay (a real published rate, so NOT
-// estimated); otherwise the Sonnet last-resort (flagged estimated). Returns
+// otherwise the external LiteLLM overlay (a published standard rate; estimated
+// only when an unknown model also requests fast mode); otherwise the Sonnet
+// last-resort (flagged estimated). Returns
 // null only for a missing model name, so callers still cost it as $0.
 function resolveClaudeRates(modelName, usageDateMs = Date.now()) {
   if (!modelName) return null;
   const tier = getPricingTier(modelName, usageDateMs);
   if (tier) return { p: PRICING[tier], estimated: false };
   const ext = lookupExternalRate(modelName);
-  if (ext) return { p: ext, estimated: false };
+  // The public overlay carries standard rates, not an undocumented future
+  // model's fast-mode premium. Use its closer base rate but surface the spend
+  // as estimated until an explicit fast tier is known.
+  if (ext) return { p: ext, estimated: modelName.toLowerCase().includes('[fast]') };
   return { p: PRICING.sonnet, estimated: true };
 }
 

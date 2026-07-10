@@ -221,6 +221,41 @@ test('model breakdown attributes whole commits to the dominant family', () => {
   assert.ok(Number.isInteger(m.modelBreakdown.opus.commits));
 });
 
+test('exact model breakdown keeps distinct Codex models without changing family totals', () => {
+  const luna = mkCorrelated({
+    sessionId: 'luna', source: 'codex', model: 'gpt-5.6-luna',
+    modelBreakdown: { 'gpt-5.6-luna': { tokens: 1000, cost: 1 } },
+    cost: { totalCost: 1 }, commitCount: 2,
+  });
+  const sol = mkCorrelated({
+    sessionId: 'sol', source: 'codex', model: 'gpt-5.6-sol',
+    modelBreakdown: { 'gpt-5.6-sol': { tokens: 2000, cost: 4 } },
+    cost: { totalCost: 4 }, commitCount: 1,
+  });
+
+  const m = computeMetrics([luna, sol], [], {}, 30);
+  assert.equal(m.modelBreakdown.gpt.cost, 5, 'existing family aggregation remains intact');
+  assert.deepEqual(Object.keys(m.modelDetailBreakdown).sort(), ['gpt-5.6-luna', 'gpt-5.6-sol']);
+  assert.equal(m.modelDetailBreakdown['gpt-5.6-luna'].commits, 2);
+  assert.equal(m.modelDetailBreakdown['gpt-5.6-sol'].commits, 1);
+  assert.equal(m.modelDetailBreakdown['gpt-5.6-luna'].family, 'gpt');
+});
+
+test('exact model breakdown merges Claude billing markers into one displayed model', () => {
+  const session = mkCorrelated({
+    source: 'claude', model: 'claude-opus-4-8[fast][us]', commitCount: 1,
+    modelBreakdown: {
+      'claude-opus-4-8': { tokens: 1000, cost: 1 },
+      'claude-opus-4-8[fast][us]': { tokens: 2000, cost: 4 },
+    },
+    cost: { totalCost: 5 },
+  });
+  const m = computeMetrics([session], [], {}, 30);
+  assert.deepEqual(Object.keys(m.modelDetailBreakdown), ['claude-opus-4-8']);
+  assert.equal(m.modelDetailBreakdown['claude-opus-4-8'].cost, 5);
+  assert.equal(m.modelDetailBreakdown['claude-opus-4-8'].tokens, 3000);
+});
+
 test('reconciliation aggregates commit confidence and line populations', () => {
   const sessionHigh = mkCorrelated({
     sessionId: 'h', attributionConfidence: 'high',

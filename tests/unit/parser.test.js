@@ -32,9 +32,14 @@ test('getPricingTier resolves version-specific tiers', () => {
   assert.equal(getPricingTier('claude-opus-4-5'), 'opus-45');
   assert.equal(getPricingTier('claude-opus-4-1-20250805'), 'opus-old');
   assert.equal(getPricingTier('claude-sonnet-4-6'), 'sonnet');
+  assert.equal(getPricingTier('claude-3-sonnet-20240229'), 'sonnet');
   assert.equal(getPricingTier('claude-haiku-4-5'), 'haiku-new');
   assert.equal(getPricingTier('claude-haiku-3-5'), 'haiku-35');
   assert.equal(getPricingTier('claude-3-haiku-20240307'), 'haiku-3');
+  assert.equal(getPricingTier('claude-opus-5'), null, 'future Opus must not inherit legacy Opus pricing');
+  assert.equal(getPricingTier('claude-haiku-5'), null, 'future Haiku must not inherit Haiku 3 pricing');
+  assert.equal(getPricingTier('claude-fable-6'), null, 'future Fable must not inherit Fable 5 pricing');
+  assert.equal(getPricingTier('claude-mythos-preview'), null, 'private preview pricing is not publicly documented');
   assert.equal(getPricingTier(null), null);
 });
 
@@ -108,7 +113,7 @@ test('Sonnet 5 session straddling the cutover: session.cost reconciles with the 
 });
 
 test('PRICING table covers every exported tier', () => {
-  for (const key of ['opus-48', 'opus-47', 'opus-46', 'opus-45', 'opus-old', 'sonnet', 'sonnet-5-intro', 'haiku-new', 'haiku-35', 'haiku-3']) {
+  for (const key of ['fable', 'opus-48', 'opus-47', 'opus-46', 'opus-45', 'opus-old', 'opus-48-fast', 'opus-47-fast', 'sonnet', 'sonnet-5-intro', 'haiku-new', 'haiku-35', 'haiku-3']) {
     assert.ok(PRICING[key], `missing pricing tier ${key}`);
     const p = PRICING[key];
     assert.ok(p.input > 0 && p.output > 0, `invalid pricing for ${key}`);
@@ -165,6 +170,59 @@ test('calculateCostBreakdown splits costs and sums correctly', () => {
   assert.ok(b.cacheCreationCost > 0);
   const sum = b.inputCost + b.outputCost + b.cacheReadCost + b.cacheCreationCost;
   assert.ok(Math.abs(sum - b.totalCost) < 0.0001);
+});
+
+test('fast mode, US inference, cache TTL, and web search modifiers stack correctly', () => {
+  const b = calculateCostBreakdown(
+    1_000_000, 1_000_000, 1_000_000, 1_000_000,
+    'claude-opus-4-8[fast][us]', 1_000_000, Date.now(), 2,
+  );
+  assert.equal(b.inputCost, 11);          // $10 fast input × 1.1 US
+  assert.equal(b.outputCost, 55);        // $50 fast output × 1.1 US
+  assert.equal(b.cacheReadCost, 1.1);    // $1 fast cache read × 1.1 US
+  assert.equal(b.cacheCreationCost, 22); // $20 fast 1h write × 1.1 US
+  assert.equal(b.serverToolCost, 0.02);   // fixed $10 / 1,000 searches
+  assert.ok(Math.abs(b.totalCost - 89.12) < 1e-9);
+});
+
+test('Claude Code usage fields drive billing markers and reconcile through parsing', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codelens-claude-billing-fields-'));
+  try {
+    const proj = path.join(root, 'proj');
+    mkdirSync(proj, { recursive: true });
+    const sid = 'aaaaaaaa-1111-2222-3333-999999999999';
+    const now = new Date().toISOString();
+    const lines = [
+      { type: 'user', sessionId: sid, cwd: '/tmp/x', gitBranch: 'main', entrypoint: 'claude-vscode', timestamp: now, message: { content: [{ type: 'text', text: 'go' }] } },
+      {
+        type: 'assistant', requestId: 'r1', timestamp: now,
+        message: {
+          model: 'claude-opus-4-8',
+          usage: {
+            input_tokens: 1_000_000, output_tokens: 1_000_000,
+            cache_read_input_tokens: 1_000_000, cache_creation_input_tokens: 1_000_000,
+            cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 1_000_000 },
+            server_tool_use: { web_search_requests: 2, web_fetch_requests: 3 },
+            speed: 'fast', inference_geo: 'us', service_tier: 'standard',
+          },
+          content: [{ type: 'text', text: 'done' }],
+        },
+      },
+    ];
+    writeFileSync(path.join(proj, sid + '.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions } = await parseAllProjects(root, 30);
+    const s = sessions.find(x => x.sessionId === sid);
+    assert.ok(s);
+    assert.equal(s.entrypoint, 'claude-vscode');
+    assert.equal(s.webSearchRequests, 2, 'bill only recorded server searches; web fetch is free');
+    assert.equal(s.cacheCreation1hTokens, 1_000_000);
+    assert.deepEqual(Object.keys(s.modelBreakdown), ['claude-opus-4-8[fast][us]']);
+    assert.ok(Math.abs(s.cost.totalCost - 89.12) < 1e-9);
+    assert.ok(Math.abs(s.cost.totalCost - Object.values(s.dailyUsage)[0].cost) < 1e-9);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('isVerificationCommand identifies common test/lint invocations', () => {

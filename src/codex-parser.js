@@ -248,8 +248,7 @@ function createEmptyCodexSession(sessionId) {
     repoPath: null,
     projectName: null,
     gitBranch: null,
-    // Codex CLI has no other surface today (no VS Code/web entrypoint field
-    // like Claude Code's) — fixed so clientBreakdown is meaningful once it is.
+    // Fallback for older rollouts; modern session_meta.source can refine this.
     entrypoint: 'codex-cli',
     startTime: null,
     endTime: null,
@@ -268,9 +267,6 @@ function createEmptyCodexSession(sessionId) {
     model: null,
     modelBreakdown: {},
     toolCalls: {},
-    // Codex has no Skill-tool or subagent-transcript concept — kept empty/zero
-    // so the uniform session shape holds and skill/agent-type metrics degrade
-    // gracefully instead of needing source-specific branches downstream.
     skillCalls: {},
     subagentTranscriptCount: 0,
     filesWritten: [],
@@ -355,6 +351,32 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
   // moves past the replay burst's first second.
   let spawnReplay = false;
   let replaySecond = null;
+
+  const trackToolCall = (name) => {
+    if (!name) return;
+    session.toolCalls[name] = (session.toolCalls[name] || 0) + 1;
+    if (name === 'spawn_agent') session.subagentTranscriptCount++;
+  };
+
+  // Code mode records one outer `exec` call whose JavaScript invokes the real
+  // tools through tools.<name>(...). Preserve the outer call and also expose
+  // those logical calls so MCP/tool adoption is not hidden by the wrapper.
+  const trackCodeModeTools = (code) => {
+    if (typeof code !== 'string') return;
+    const re = /\btools\.([A-Za-z0-9_]+)\s*\(/g;
+    let match;
+    while ((match = re.exec(code)) !== null) trackToolCall(match[1]);
+  };
+
+  const trackSkillBlocks = (text) => {
+    if (typeof text !== 'string') return;
+    const re = /<skill>[\s\S]*?<name>([^<]+)<\/name>[\s\S]*?<\/skill>/g;
+    let match;
+    while ((match = re.exec(text)) !== null) {
+      const name = match[1].trim();
+      if (name) session.skillCalls[name] = (session.skillCalls[name] || 0) + 1;
+    }
+  };
 
   // Compare timestamps numerically — one rollout can mix precisions (legacy
   // meta lines lack milliseconds), where lexicographic order is wrong.
@@ -489,6 +511,8 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
       session.sessionId = payload.session_id || payload.id || session.sessionId;
       if (payload.cwd) session.repoPath = payload.cwd;
       if (payload.git?.branch) session.gitBranch = payload.git.branch;
+      if (payload.source === 'vscode') session.entrypoint = 'codex-vscode';
+      else if (payload.source === 'cli') session.entrypoint = 'codex-cli';
       // A structured `source` (vs the plain "cli"/"vscode" string) marks a
       // subagent thread spawned from a parent session — its rollout begins
       // with a replay of the parent history (usage, messages, tool calls all
@@ -619,9 +643,10 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
           ? payload.content.map(c => c?.text || '').join('')
           : String(payload.content || '');
         if (payload.role === 'user') {
+          trackSkillBlocks(text);
           // Skip injected context blocks so legacy counting matches the
           // event_msg 'plain' rule.
-          if (!/^\s*<(user_instructions|environment_context|ENVIRONMENT_CONTEXT)/i.test(text)) {
+          if (!/^\s*<(skill|user_instructions|environment_context|ENVIRONMENT_CONTEXT)/i.test(text)) {
             itemUserMessages++;
           }
         } else if (payload.role === 'assistant') {
@@ -630,7 +655,8 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
         touchTimestamp(ts);
       } else if (it === 'function_call' || it === 'custom_tool_call') {
         const name = payload.name || 'unknown';
-        session.toolCalls[name] = (session.toolCalls[name] || 0) + 1;
+        trackToolCall(name);
+        if (name === 'exec') trackCodeModeTools(payload.input);
         touchTimestamp(ts);
         if (name === 'exec_command' || name === 'shell' || name === 'container.exec') {
           let args = null;

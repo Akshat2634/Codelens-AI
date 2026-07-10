@@ -914,6 +914,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   // credited to that session's dominant family (most tokens) — so per-family
   // avgCostPerCommit is computed from integer commits, not fractional ones.
   const modelBreakdown = {};
+  const modelDetailBreakdown = {};
   const ensureFamily = (family) => {
     if (!modelBreakdown[family]) {
       modelBreakdown[family] = { cost: 0, tokens: 0, sessions: 0, commits: 0, dominantCost: 0, dominantTokens: 0, avgCostPerCommit: null, subModels: {} };
@@ -923,6 +924,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   for (const session of correlatedSessions) {
     // Aggregate this session's usage by family
     const famAgg = {};
+    const modelAgg = {};
     for (const [model, data] of Object.entries(session.modelBreakdown)) {
       const family = getModelFamily(model) || 'unknown';
       if (!famAgg[family]) famAgg[family] = { cost: 0, tokens: 0, models: {} };
@@ -931,6 +933,13 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
       if (!famAgg[family].models[model]) famAgg[family].models[model] = { cost: 0, tokens: 0 };
       famAgg[family].models[model].cost += data.cost;
       famAgg[family].models[model].tokens += data.tokens;
+
+      // Long-context pricing is a billing tier, not a different model in the
+      // dashboard. Merge its marker back into the exact model id.
+      const modelId = model.replace(/\[(?:long|fast|us)\]/g, '');
+      if (!modelAgg[modelId]) modelAgg[modelId] = { family, cost: 0, tokens: 0 };
+      modelAgg[modelId].cost += data.cost;
+      modelAgg[modelId].tokens += data.tokens;
     }
     // Dominant family for this session (by token volume)
     let domFamily = null;
@@ -948,6 +957,27 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
         fam.subModels[model].cost += md.cost;
         fam.subModels[model].tokens += md.tokens;
       }
+    }
+
+    let domModel = null;
+    let domModelTokens = -1;
+    for (const [model, agg] of Object.entries(modelAgg)) {
+      if (agg.tokens > domModelTokens) { domModelTokens = agg.tokens; domModel = model; }
+      if (!modelDetailBreakdown[model]) {
+        modelDetailBreakdown[model] = { family: agg.family, cost: 0, tokens: 0, sessions: 0, commits: 0, dominantCost: 0, dominantTokens: 0, avgCostPerCommit: null, subModels: { [model]: { cost: 0, tokens: 0 } } };
+      }
+      const detail = modelDetailBreakdown[model];
+      detail.cost += agg.cost;
+      detail.tokens += agg.tokens;
+      detail.sessions++;
+      detail.subModels[model].cost += agg.cost;
+      detail.subModels[model].tokens += agg.tokens;
+    }
+    if (domModel) {
+      const detail = modelDetailBreakdown[domModel];
+      detail.commits += session.commitCount;
+      detail.dominantCost += session.cost.totalCost;
+      detail.dominantTokens += Object.values(modelAgg).reduce((sum, agg) => sum + agg.tokens, 0);
     }
     if (domFamily) {
       const fam = ensureFamily(domFamily);
@@ -968,6 +998,10 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     data.subModels = Object.fromEntries(
       Object.entries(data.subModels).sort(([, a], [, b]) => b.cost - a.cost)
     );
+  }
+  for (const data of Object.values(modelDetailBreakdown)) {
+    data.avgCostPerCommit = data.commits > 0 ? data.dominantCost / data.commits : null;
+    data.tokensPerCommit = data.commits > 0 ? Math.round(data.dominantTokens / data.commits) : null;
   }
 
   // ---- Tool breakdown ----
@@ -1010,7 +1044,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   const delegatedCount = correlatedSessions.filter((s) => (s.subagentTranscriptCount || 0) > 0).length;
   const skillSessions = correlatedSessions.filter((s) => Object.keys(s.skillCalls || {}).length > 0).length;
   const mcpSessions = correlatedSessions.filter((s) => Object.keys(s.toolCalls || {}).some((t) => t.startsWith('mcp__'))).length;
-  const planModeSessions = correlatedSessions.filter((s) => (s.toolCalls?.ExitPlanMode || 0) > 0).length;
+  const planModeSessions = correlatedSessions.filter((s) => (s.toolCalls?.ExitPlanMode || 0) > 0 || (s.toolCalls?.update_plan || 0) > 0).length;
 
   const agentTypeBreakdown = {
     main_only: { sessions: correlatedSessions.length - delegatedCount, pct: adoptionPct(correlatedSessions.length - delegatedCount) },
@@ -1311,6 +1345,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     projects,
     sessions: sessionsWithGrades,
     modelBreakdown,
+    modelDetailBreakdown,
     toolBreakdown,
     skillBreakdown,
     mcpServerBreakdown,

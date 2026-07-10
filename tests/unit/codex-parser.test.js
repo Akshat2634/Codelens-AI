@@ -305,6 +305,40 @@ test('tool_search_call response items are counted as tool calls with no fee', as
   }
 });
 
+test('code-mode logical tools, skills, subagents, and VS Code source are preserved', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-features-'));
+  try {
+    const ts = iso(2);
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-features.jsonl', [
+      meta('features', ts, { source: 'vscode' }),
+      turnContext(ts, 'gpt-5.6-luna'),
+      { timestamp: ts, type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Review this dashboard.' }] } },
+      { timestamp: ts, type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<skill>\n<name>karpathy-guidelines</name>\n<path>/tmp/SKILL.md</path>\n</skill>' }] } },
+      {
+        timestamp: iso(1.9), type: 'response_item', payload: {
+          type: 'custom_tool_call', name: 'exec', call_id: 'code-1',
+          input: 'const a = await tools.exec_command({cmd:"pwd"}); await tools.mcp__playwright__browser_click({}); await tools.update_plan({}); await tools.spawn_agent({});',
+        },
+      },
+      tokenCount(iso(1.8), usage(1000, 0, 100), usage(1000, 0, 100)),
+    ]);
+
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    assert.equal(s.entrypoint, 'codex-vscode');
+    assert.equal(s.userMessageCount, 1, 'injected skill metadata is not a user prompt');
+    assert.deepEqual(s.skillCalls, { 'karpathy-guidelines': 1 });
+    assert.equal(s.toolCalls.exec, 1, 'outer code-mode call remains visible');
+    assert.equal(s.toolCalls.exec_command, 1);
+    assert.equal(s.toolCalls.mcp__playwright__browser_click, 1);
+    assert.equal(s.toolCalls.update_plan, 1);
+    assert.equal(s.toolCalls.spawn_agent, 1);
+    assert.equal(s.subagentTranscriptCount, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('codex --oss models resolve to the free tier in dash and colon (Ollama) forms', () => {
   for (const id of ['gpt-oss', 'gpt-oss-20b', 'gpt-oss:20b', 'gpt-oss:120b']) {
     const p = getCodexPricing(id);

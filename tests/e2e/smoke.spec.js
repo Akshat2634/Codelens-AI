@@ -111,6 +111,29 @@ test.describe('Dashboard smoke (fixtures)', () => {
     const claude = await (await request.get('/api/all?source=claude')).json();
     expect(claude.meta.source).toBe('claude');
     expect(claude.sessions.every((s) => (s.source || 'claude') === 'claude')).toBe(true);
+
+    // The combined view is a true sum of both providers for capability/tool
+    // counts, while retaining every provider's exact model rows.
+    for (const field of ['toolBreakdown', 'skillBreakdown', 'mcpServerBreakdown']) {
+      const keys = new Set([...Object.keys(claude[field] || {}), ...Object.keys(codex[field] || {})]);
+      for (const key of keys) {
+        expect(all[field]?.[key] || 0).toBe((claude[field]?.[key] || 0) + (codex[field]?.[key] || 0));
+      }
+    }
+    for (const model of Object.keys(codex.modelDetailBreakdown)) {
+      expect(all.modelDetailBreakdown[model].cost).toBeCloseTo(codex.modelDetailBreakdown[model].cost, 10);
+    }
+  });
+
+  test('All Agents model view renders exact Claude and Codex models together', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+    await page.goto('/');
+    await expect(page.locator('.source-tabs .source-tab.active')).toContainText(/All Agents/i);
+    await expect(page.locator('#sec-models')).toContainText('Sonnet 4.6');
+    await expect(page.locator('#sec-models')).toContainText('GPT-5.3 Codex');
+    await expect(page.locator('#sec-models')).toContainText('GPT-5.1 Codex Max');
+    expect(errors, 'JS errors in combined model view: ' + errors.join(' | ')).toEqual([]);
   });
 
   test('source tabs render and switching to Codex re-renders the dashboard', async ({ page }) => {
@@ -124,6 +147,8 @@ test.describe('Dashboard smoke (fixtures)', () => {
 
     await page.locator('.source-tabs .source-tab', { hasText: 'OpenAI Codex' }).click();
     await expect(page.locator('.source-tabs .source-tab.active')).toContainText(/OpenAI Codex/i, { timeout: 10_000 });
+    await expect(page.locator('#sec-models')).toContainText('GPT-5.3 Codex');
+    await expect(page.locator('#sec-models')).toContainText('GPT-5.1 Codex Max');
     // Sessions table now shows only Codex sessions (GPT / Codex / o-series models).
     await page.waitForSelector('.sessions-section .session-row');
     const rows = page.locator('.sessions-section .session-row');
