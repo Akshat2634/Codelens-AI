@@ -70,12 +70,18 @@ test('getCodexModelFamily maps OpenAI model ids', () => {
 });
 
 test('getCodexPricing resolves most-specific id first', () => {
-  // gpt-5.5 must not fall into the gpt-5 bucket
+  // Newer GPT-5.x models must not fall into the gpt-5 bucket
+  assert.deepEqual(getCodexPricing('gpt-5.6-sol'), { input: 5, cachedInput: 0.5, output: 30, longContext: { input: 10, cachedInput: 1, output: 45 } });
+  assert.equal(getCodexPricing('gpt-5.6').input, 5, 'gpt-5.6 alias uses Sol pricing');
+  assert.equal(getCodexPricing('gpt-5.6-terra').input, 2.5);
+  assert.equal(getCodexPricing('gpt-5.6-luna').output, 6);
+  assert.equal(getCodexPricing('gpt-5.6-luna[long]').output, 9);
   assert.equal(getCodexPricing('gpt-5.5').input, 5);
   assert.equal(getCodexPricing('gpt-5').input, 1.25);
   assert.equal(getCodexPricing('gpt-5.4-pro').output, 180);
   assert.equal(getCodexPricing('gpt-5.4-pro').cachedInput, 30, 'pro models have no cached-input discount');
   assert.equal(getCodexPricing('gpt-5.4-nano').input, 0.20);
+  assert.equal(getCodexPricing('gpt-5.2-pro').cachedInput, 21, 'pro models have no cached-input discount');
   assert.equal(getCodexPricing('gpt-5.5[long]').input, 10, 'long-context marker uses long-context rates');
   assert.equal(getCodexPricing('gpt-5.4-pro[long]').output, 270);
   // codex variants
@@ -113,6 +119,8 @@ test('sibling models are not swallowed by shorter prefixes at the wrong rate', (
   assert.equal(getCodexPricing('gpt-5-pro').input, 15);
   // o3-pro / o1 family must not bill at o3 rates or fall to the gpt fallback
   assert.equal(getCodexPricing('o3-pro').input, 20);
+  assert.equal(getCodexPricing('o3-pro').cachedInput, 20, 'pro models have no cached-input discount');
+  assert.equal(getCodexPricing('o1-pro').cachedInput, 150, 'pro models have no cached-input discount');
   assert.equal(getCodexPricing('o1').input, 15);
   assert.equal(getCodexPricing('o1-mini').input, 1.10);
   // local open-weight models (codex --oss) are free, not fallback-priced

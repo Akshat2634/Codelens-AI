@@ -56,7 +56,8 @@ function cacheFileFor(options = {}) {
 // 17: external LiteLLM pricing overlay auto-prices models the hardcoded tables
 //     don't know — cached sessions from 16 priced those at the Sonnet estimate,
 //     so a re-parse is needed to pick up the real per-model rate.
-const CACHE_VERSION = 17;
+// 18: GPT-5.6 family and corrected GPT-5.2/o-series Pro pricing.
+const CACHE_VERSION = 18;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);
