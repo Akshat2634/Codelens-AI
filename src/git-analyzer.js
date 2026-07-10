@@ -190,6 +190,20 @@ function detectAiTrailer(coAuthorValues) {
   return null;
 }
 
+// %S (the ref by which `git log --all` reached the commit) arrives as a full
+// refname — refs/heads/x, refs/remotes/origin/x, refs/tags/x. Reduce it to a
+// display name. Git doesn't record the branch a commit was CREATED on; for
+// off-main commits this is a ref that currently contains it, which in
+// practice is the feature branch. null when there's no usable name: git
+// < 2.21 echoes the %S token verbatim, and bare HEAD is detached work.
+function normalizeSourceRef(ref) {
+  if (!ref || ref.startsWith('%')) return null;
+  const name = ref
+    .replace(/^refs\/remotes\/[^/]+\//, '')
+    .replace(/^refs\/(heads|tags)\//, '');
+  return (!name || name === 'HEAD') ? null : name;
+}
+
 // One-time note when git predates %(trailers:...) options (git < 2.22): the
 // placeholder passes through unparsed, so trailer attribution is unavailable
 // but everything else still works.
@@ -203,9 +217,10 @@ function parseGitLog(raw) {
     if (line.startsWith('COMMIT:')) {
       if (current) commits.push(current);
       // Format: hash \x01 email \x01 timestamp \x01 subject \x01 co-author
-      // trailers (\x02-separated). Control-char separators instead of `|`:
-      // subjects and trailer values can legitimately contain pipes, but never
-      // control characters, so splitting is exact instead of best-effort.
+      // trailers (\x02-separated) \x01 source ref (%S). Control-char
+      // separators instead of `|`: subjects and trailer values can
+      // legitimately contain pipes, but never control characters, so
+      // splitting is exact instead of best-effort.
       const parts = line.slice(7).split('\x01');
       if (parts.length < 4) continue;
 
@@ -230,6 +245,10 @@ function parseGitLog(raw) {
         // Near-ground-truth AI attribution: agents stamp their commits with
         // Co-authored-by trailers. null when no known agent trailer is present.
         aiTrailer: detectAiTrailer(coAuthors),
+        // A ref containing this commit — the feature branch name for off-main
+        // work. Which ref wins for on-main commits is traversal-order
+        // dependent (main, a tag, ...), so display defers to onMain there.
+        branch: normalizeSourceRef(parts[5] || ''),
         onMain: false,
         files: [],
         totalAdded: 0,
@@ -337,7 +356,7 @@ export function analyzeGitRepo(repoPath, days) {
 
   try {
     const raw = execSync(
-      `git -C "${repoPath}" log --no-merges --exclude=refs/stash --all --since="${days} days ago" --format="COMMIT:%H%x01%ae%x01%aI%x01%s%x01%(trailers:key=Co-authored-by,valueonly,separator=%x02)" --numstat`,
+      `git -C "${repoPath}" log --no-merges --exclude=refs/stash --all --since="${days} days ago" --format="COMMIT:%H%x01%ae%x01%aI%x01%s%x01%(trailers:key=Co-authored-by,valueonly,separator=%x02)%x01%S" --numstat`,
       { encoding: 'utf-8', maxBuffer: 256 * 1024 * 1024 }
     );
 

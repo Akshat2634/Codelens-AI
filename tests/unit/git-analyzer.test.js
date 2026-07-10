@@ -208,6 +208,31 @@ test('analyzeGitRepo collapses a squash-merge twin, keeping the on-main copy', (
   }
 });
 
+test('analyzeGitRepo records the containing branch name for off-main commits', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'git-branch-'));
+  try {
+    const dir = path.join(root, 'repo');
+    mkdirSync(dir, { recursive: true });
+    execSync('git init -q -b main', { cwd: dir });
+    execSync('git config user.email a@b.com', { cwd: dir });
+    execSync('git config user.name A', { cwd: dir });
+    const base = new Date(Date.now() - 5 * 86400000);
+    const iso = (m) => new Date(base.getTime() + m * 60000).toISOString();
+
+    gitCommit(dir, 'base.txt', 'base\n', 'base', iso(0));
+    execSync('git checkout -q -b feature/PLA-1-branch-names', { cwd: dir });
+    gitCommit(dir, 'feat.txt', 'work\n', 'feature work', iso(60));
+
+    const { commits } = analyzeGitRepo(dir, 3650);
+    const featureCommit = commits.find(c => c.subject === 'feature work');
+    assert.equal(featureCommit.onMain, false);
+    assert.equal(featureCommit.branch, 'feature/PLA-1-branch-names',
+      'off-main commits carry the full refs/heads/-stripped branch name');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('analyzeGitRepo does NOT merge same-subject commits with different diffstats', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'git-squash-'));
   try {
