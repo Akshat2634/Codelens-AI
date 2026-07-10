@@ -247,7 +247,7 @@
     }
     return m.charAt(0).toUpperCase() + m.slice(1);
   }
-  const CLIENT_LABELS = { cli: 'CLI', 'claude-vscode': 'VS Code', 'codex-cli': 'Codex CLI', web: 'Claude Code on the Web', 'claude-web': 'Claude Code on the Web', unknown: 'Unknown' };
+  const CLIENT_LABELS = { cli: 'CLI', 'claude-vscode': 'VS Code', 'codex-cli': 'Codex CLI', 'codex-vscode': 'Codex VS Code', web: 'Claude Code on the Web', 'claude-web': 'Claude Code on the Web', unknown: 'Unknown' };
   const clientLabel = (entrypoint) => CLIENT_LABELS[entrypoint] || entrypoint;
   const GRADE_MAP = { A: 'var(--grade-a)', B: 'var(--grade-b)', C: 'var(--grade-c)', D: 'var(--grade-d)', F: 'var(--grade-f)' };
   const gradeColor = (g) => GRADE_MAP[g] || 'var(--ink3)';
@@ -289,6 +289,11 @@
     const special = { gpt: 'GPT', codex: 'Codex', 'o-series': 'o-series', unknown: 'Unknown' };
     return special[fam] || fam.charAt(0).toUpperCase() + fam.slice(1);
   }
+  // Mixed and Codex views need exact model ids so Codex models are not folded
+  // into a generic GPT/Codex family. Keep the established Claude-only view.
+  const displayedModels = (v) => state.source !== 'claude' && v.modelDetailBreakdown
+    ? v.modelDetailBreakdown
+    : v.modelBreakdown;
 
   // ── Theme / motion / view transitions ──
   function applyThemeAttr(theme) {
@@ -472,7 +477,7 @@
     }
 
     const famColor = { opus: T.purple, sonnet: T.blue, haiku: T.green, fable: T.pink, codex: T.cyan, gpt: T.orange, 'o-series': T.red, unknown: T.muted };
-    const models = v.modelBreakdown;
+    const models = displayedModels(v);
     const fams = Object.keys(models).filter((k) => models[k].cost > 0);
 
     // Model donut
@@ -484,7 +489,7 @@
           type: 'doughnut',
           data: {
             labels: fams.map((f) => famLabel(models, f)),
-            datasets: [{ data: fams.map((f) => models[f].cost), backgroundColor: fams.map((f) => famColor[f] || T.muted), borderColor: T.card, borderWidth: 2, hoverOffset: 8 }],
+            datasets: [{ data: fams.map((f) => models[f].cost), backgroundColor: fams.map((f) => famColor[models[f].family || f] || T.muted), borderColor: T.card, borderWidth: 2, hoverOffset: 8 }],
           },
           options: {
             responsive: true, maintainAspectRatio: false, cutout: '72%',
@@ -507,7 +512,7 @@
           type: 'bar',
           data: {
             labels: effFams.map((f) => [famLabel(models, f), models[f].commits + ' commits']),
-            datasets: [{ data: effFams.map((f) => models[f].avgCostPerCommit), backgroundColor: effFams.map((f) => withAlpha(famColor[f] || T.muted, 0.85)), hoverBackgroundColor: effFams.map((f) => famColor[f] || T.muted), borderRadius: 4, barPercentage: 0.55 }],
+            datasets: [{ data: effFams.map((f) => models[f].avgCostPerCommit), backgroundColor: effFams.map((f) => withAlpha(famColor[models[f].family || f] || T.muted, 0.85)), hoverBackgroundColor: effFams.map((f) => famColor[models[f].family || f] || T.muted), borderRadius: 4, barPercentage: 0.55 }],
           },
           options: {
             responsive: true, maintainAspectRatio: false,
@@ -1228,14 +1233,15 @@
     const v = view();
     const sum = v.summary;
     const famColorVar = { opus: 'var(--purple)', sonnet: 'var(--blue)', haiku: 'var(--green)', fable: 'var(--pink)', codex: 'var(--cyan)', gpt: 'var(--amber)', 'o-series': 'var(--red)', unknown: 'var(--ink3)' };
-    const fams = Object.keys(v.modelBreakdown).filter((k) => v.modelBreakdown[k].cost > 0).sort((a, b) => v.modelBreakdown[b].cost - v.modelBreakdown[a].cost);
-    const famPcts = pctTo100(fams.map((fm) => v.modelBreakdown[fm].cost));
+    const models = displayedModels(v);
+    const fams = Object.keys(models).filter((k) => models[k].cost > 0).sort((a, b) => models[b].cost - models[a].cost);
+    const famPcts = pctTo100(fams.map((fm) => models[fm].cost));
     const modelLegend = fams.map((fm, i) =>
       `<div style="display:flex;align-items:center;gap:8px;font-size:12px;">
-        <span style="width:8px;height:8px;border-radius:3px;background:${famColorVar[fm] || 'var(--ink3)'};"></span>
-        <span style="color:var(--ink2);flex:1;">${esc(famLabel(v.modelBreakdown, fm))}</span>
+        <span style="width:8px;height:8px;border-radius:3px;background:${famColorVar[models[fm].family || fm] || 'var(--ink3)'};"></span>
+        <span style="color:var(--ink2);flex:1;">${esc(famLabel(models, fm))}</span>
         <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink3);">${famPcts[i]}%</span>
-        <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;width:62px;text-align:right;">${esc(fmtMoney(v.modelBreakdown[fm].cost))}</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;width:62px;text-align:right;">${esc(fmtMoney(models[fm].cost))}</span>
       </div>`).join('');
 
     const toolEntries = Object.entries(v.toolBreakdown).sort((a, b) => b[1] - a[1]).slice(0, 9);

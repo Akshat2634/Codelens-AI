@@ -271,6 +271,8 @@ Token costs are version-aware and calculated per model, accounting for the two p
 > **Note — Claude Fable 5 / Mythos 5:** Claude Fable 5 / Mythos 5 is generally available again — Anthropic [restored access](https://platform.claude.com/docs/en/about-claude/models/introducing-claude-fable-5) on Jul 1, 2026 after a temporary suspension (Jun 12–30, 2026). The $10 / $50 per-MTok rates apply to both live and historical Fable 5 usage in your session logs.
 >
 > **Note — legacy tiers:** The 0.1× / 1.25× / 2× multipliers describe current models. Claude 3 Haiku predates them and uses Anthropic's originally-published cache rates ($0.30 write / $0.03 read), and 1-hour cache-write rates for retired tiers (e.g. Sonnet 3.7, Haiku 3) are derived at 2× input. These legacy rows are kept only to cost older session logs accurately.
+>
+> **Note — billing modifiers and tools:** Claude Code usage rows carry `speed` and `inference_geo` when applicable. Opus 4.8/4.7 fast-mode rates and the 1.1× US-only inference multiplier stack with cache pricing. Server-side web search is charged only from the logged `server_tool_use.web_search_requests` count at $10 per 1,000 searches; a client-side `WebSearch` tool call alone is not assumed billable, and web fetch has no per-call fee.
 
 #### OpenAI Codex models
 
