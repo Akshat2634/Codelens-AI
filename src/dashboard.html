@@ -570,7 +570,7 @@
   }
 
   // ── Share report card — draws a self-contained canvas summary (grade,
-  // headline stats, efficiency bars, heatmap, top insights) for copy/download. ──
+  // headline stats, AI footprint, efficiency bars, heatmap, top insights) for copy/download. ──
   function srcTitle() {
     return state.source === 'all' ? 'All Agents' : state.source === 'claude' ? 'Claude Code' : 'OpenAI Codex';
   }
@@ -594,6 +594,20 @@
       cTeal = isLight ? '#14936B' : '#1FA97C', cRed = isLight ? '#D64444' : '#E66767';
     const gradeHex = { A: cGreen, B: cBlue, C: cOrange, D: isLight ? '#C24E1D' : '#D95926', F: cRed };
     const s = v.summary, t = v.tokenAnalytics, ls = v.lineSurvival;
+    const models = displayedModels(v) || {};
+    const [topModelId, topModel] = Object.entries(models)
+      .sort(([, a], [, b]) => (b.tokens || 0) - (a.tokens || 0))[0] || [];
+    const totalModelTokens = Object.values(models).reduce((sum, model) => sum + (model.tokens || 0), 0);
+    const topModelShare = totalModelTokens > 0 ? Math.round((topModel?.tokens || 0) / totalModelTokens * 100) : 0;
+    const providerSessions = (v.sessions || []).reduce((counts, session) => {
+      const provider = session.source === 'codex' ? 'Codex' : 'Claude';
+      counts[provider] = (counts[provider] || 0) + 1;
+      return counts;
+    }, { Claude: 0, Codex: 0 });
+    const agentMix = ['Codex', 'Claude']
+      .filter((provider) => providerSessions[provider] > 0)
+      .map((provider) => `${providerSessions[provider]} ${provider}`);
+    if (agentMix.length === 0) agentMix.push('No sessions');
     const W = 600, ctx = canvas.getContext('2d');
     const mono = (w) => `${w} 10px 'IBM Plex Mono', monospace`;
 
@@ -614,7 +628,7 @@
     const insightLines = topInsights.map((i) => wrap(i.text, W - 64 - 26));
     const insightsH = topInsights.length ? 26 + insightLines.reduce((a, l) => a + l.length * LINE_H + 12, 0) : 0;
     const heatH = 7 * 12;
-    const H = 136 + 20 + 116 + 24 + 18 + 34 * 3 + 34 + 16 + heatH + insightsH + 62;
+    const H = 136 + 20 + 116 + 24 + 70 + 18 + 34 * 3 + 34 + 16 + heatH + insightsH + 62;
 
     canvas.width = W * 2; canvas.height = H * 2;
     canvas.style.width = '100%'; canvas.style.height = 'auto'; canvas.style.display = 'block';
@@ -681,6 +695,37 @@
     };
 
     y += 116 + 24;
+    section('AI FOOTPRINT', y);
+    y += 14;
+    const footprint = [
+      { label: 'TOP MODEL', value: topModelId ? fmtModel(topModelId) : 'No model data', sub: topModelId ? `${topModelShare}% of token use` : '—', color: cBlue },
+      { label: 'TOKENS PROCESSED', value: fmtTokens(t.totalAllTokens), sub: 'input · output · cache', color: cTeal },
+      { label: 'AGENT MIX', lines: agentMix, color: cPurple },
+    ];
+    const footprintW = (W - 64) / footprint.length;
+    footprint.forEach((item, index) => {
+      const x = 32 + index * footprintW;
+      if (index > 0) {
+        ctx.strokeStyle = th.sep; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, y - 3); ctx.lineTo(x, y + 43); ctx.stroke();
+      }
+      ctx.font = mono(600); ctx.fillStyle = th.ink3;
+      ctx.fillText(item.label, x + (index ? 14 : 0), y + 7);
+      if (item.lines) {
+        ctx.font = "700 11px 'IBM Plex Mono', monospace"; ctx.fillStyle = item.color;
+        item.lines.slice(0, 2).forEach((line, lineIndex) => ctx.fillText(line, x + (index ? 14 : 0), y + 24 + lineIndex * 15));
+      } else {
+        ctx.font = "700 13px 'IBM Plex Mono', monospace"; ctx.fillStyle = item.color;
+        const maxValueW = footprintW - 14 - (index ? 14 : 0);
+        let value = item.value;
+        while (value.length > 1 && ctx.measureText(value).width > maxValueW) value = value.slice(0, -2).trimEnd() + '…';
+        ctx.fillText(value, x + (index ? 14 : 0), y + 26);
+        ctx.font = "400 9px 'Instrument Sans', sans-serif"; ctx.fillStyle = th.ink3;
+        ctx.fillText(item.sub, x + (index ? 14 : 0), y + 41);
+      }
+    });
+
+    y += 70;
     section('EFFICIENCY', y);
     y += 18;
     const bar = (label, pct, col) => {
