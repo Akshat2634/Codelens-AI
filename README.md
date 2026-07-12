@@ -152,6 +152,8 @@ codelens-ai blocks                 # group usage into Claude's 5-hour billing wi
 codelens-ai blocks --active        # just the open block: burn rate, time left, projection
 codelens-ai blocks --recent        # only the last 3 days of blocks
 codelens-ai blocks -t max          # warn against a token limit (a number, or "max")
+
+codelens-ai mcp                    # serve usage & ROI reports as MCP tools over stdio
 ```
 
 ### Usage tables (`codelens-ai daily|weekly|monthly`)
@@ -170,6 +172,23 @@ linear **projection** of where it lands plus an optional quota gauge (`-t <n>` o
 `--active` for just the current window, `--recent` for the last 3 days, `--session-length <hours>` to
 change the window size, or `--json` for a structured export. Costs use Codelens's version-aware
 per-token pricing, so the numbers match the rest of the tool.
+
+### MCP server (`codelens-ai mcp`)
+
+Serve the same reports as **MCP tools over stdio**, so Claude Code / Claude Desktop can query your
+usage and ROI in-chat ("what did my AI coding cost this week?", "which repo has the worst
+$/commit?"). Add it to Claude Code with:
+
+```bash
+claude mcp add codelens -- npx -y codelens-ai mcp
+```
+
+Exposed tools: **`roi_summary`** (grade, spend, $/commit, survival, value leak — the scorecard),
+**`usage`** (daily/weekly/monthly token & cost table), **`blocks`** (5-hour billing windows + burn
+rate), **`sessions`**, **`projects`** (per-repo ROI), and **`refresh`** (force a re-parse). Most
+tools take an optional `source` (`all | claude | codex`), and all the shared analysis flags
+(`--days`, `--project`, `--claude-dir`, ...) apply to the server itself. Analysis runs once at
+startup and is served from memory; the `refresh` tool re-runs it on demand.
 
 ### ROI report (`codelens-ai report`)
 

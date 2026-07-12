@@ -9,6 +9,7 @@ import { parseAllProjects } from './claude-parser.js';
 import { parseCodexSessions } from './codex-parser.js';
 import { correlateSessions } from './correlator.js';
 import { analyzeGitRepo, getGitUser, resolveMovedRepoPaths } from './git-analyzer.js';
+import { serveMcpStdio } from './mcp.js';
 import { computeMetrics } from './metrics.js';
 import { loadPricingOverlay, overlayInfo } from './pricing.js';
 import { renderReportHtml, renderReportMarkdown, renderReportText, reportModel } from './report.js';
@@ -566,6 +567,35 @@ async function runBlocks(opts) {
   process.stdout.write(`${title}${renderBlocksText(result, { active: opts.active })}\n\n`, () => process.exit(0));
 }
 
+// `codelens-ai mcp` — serve the reports as MCP tools over stdio, for MCP
+// clients like Claude Code (`claude mcp add codelens -- npx -y codelens-ai mcp`).
+async function runMcp(opts) {
+  // Stdout carries ONLY JSON-RPC frames — a single stray console.log corrupts
+  // the transport — so every bit of progress/banner output goes to stderr.
+  progress = console.error;
+  printBanner(' mcp');
+
+  const { payloads: initial, days, claudeDir, codexDir, planConfigs, sourceFilter } = await runAnalysis(opts);
+  if (!initial) {
+    // Still serve: an MCP client has already spawned us, so exiting here reads
+    // as a broken server. Tools answer with a clear "no sessions" message.
+    printNoSessions(sourceFilter, days, claudeDir, codexDir);
+  }
+
+  let payloads = initial;
+  const ctx = {
+    days,
+    getPayloads: () => payloads,
+    refresh: async () => {
+      const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline);
+      if (fresh) payloads = fresh;
+      return fresh;
+    },
+  };
+  await serveMcpStdio(ctx, VERSION);
+  progress(`  ${icon.ok} ${c.green}MCP server ready${c.reset} ${c.dim}── ${payloads ? payloads.all.sessions.length : 0} sessions loaded, serving on stdio${c.reset}`);
+}
+
 async function main() {
   // A stale global install or npx cache runs old code with none of the
   // current subcommands — which fails with a cryptic Commander parse error
@@ -633,14 +663,21 @@ async function main() {
   addAnalysisOptions(blocksCmd);
   blocksCmd.action(async (opts) => runBlocks(opts));
 
+  // `codelens-ai mcp` — MCP server over stdio for Claude Code / Claude Desktop.
+  const mcpCmd = program
+    .command('mcp')
+    .description('serve usage & ROI reports as MCP tools over stdio (add with: claude mcp add codelens -- npx -y codelens-ai mcp)');
+  addAnalysisOptions(mcpCmd);
+  mcpCmd.action(async (opts) => runMcp(opts));
+
   // `codelens-ai --days 90 report` places analysis flags on the PARENT (with
   // positional options, they'd otherwise be parsed there and silently ignored
   // while report runs with defaults). Forward parent CLI values into the
   // subcommand before it parses its own flags — its own flags still win.
-  const ANALYSIS_SUBCOMMANDS = new Set(['report', 'daily', 'weekly', 'monthly', 'blocks']);
+  const ANALYSIS_SUBCOMMANDS = new Set(['report', 'daily', 'weekly', 'monthly', 'blocks', 'mcp']);
   program.hook('preSubcommand', (thisCommand, subcommand) => {
     if (!ANALYSIS_SUBCOMMANDS.has(subcommand.name())) return;
-    for (const key of ['days', 'project', 'refresh', 'claudeDir', 'codexDir', 'source', 'plan', 'planCost', 'codexPlan', 'codexPlanCost']) {
+    for (const key of ['days', 'project', 'refresh', 'claudeDir', 'codexDir', 'source', 'offline', 'plan', 'planCost', 'codexPlan', 'codexPlanCost']) {
       if (thisCommand.getOptionValueSource(key) === 'cli') {
         subcommand.setOptionValueWithSource(key, thisCommand.getOptionValue(key), 'cli');
       }
