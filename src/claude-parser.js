@@ -807,6 +807,10 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
     gitRoot = findGitRoot(gitRoot) || gitRoot;
   }
   if (gitRoot) {
+    // Snapshot the pre-normalization absolute paths so the workspace-parent
+    // explosion (--depth) can bucket files into nested sub-repos. The
+    // downstream pipeline uses only `filesWritten`; this field is auxiliary.
+    session.filesWrittenAbsolute = [...session.filesWritten];
     session.filesWritten = session.filesWritten
       .map(fp => toRelativePath(fp, gitRoot))
       .filter(Boolean);
@@ -959,6 +963,12 @@ function mergeSubagentIntoSession(parent, sub) {
   // Merge files
   for (const f of sub.filesWritten) {
     if (!parent.filesWritten.includes(f)) parent.filesWritten.push(f);
+  }
+  if (sub.filesWrittenAbsolute?.length) {
+    if (!parent.filesWrittenAbsolute) parent.filesWrittenAbsolute = [];
+    for (const f of sub.filesWrittenAbsolute) {
+      if (!parent.filesWrittenAbsolute.includes(f)) parent.filesWrittenAbsolute.push(f);
+    }
   }
 }
 

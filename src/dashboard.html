@@ -1808,7 +1808,7 @@
             <span style="width:7px;height:7px;border-radius:50%;background:${confColor};" title="${esc(confLabel)}"></span>
           </div>
           <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:right;padding-right:14px;"><span style="color:var(--green);">+${x.linesAdded.toLocaleString()}</span> <span style="color:var(--ink3);">/</span> <span style="color:var(--red);">−${x.linesDeleted.toLocaleString()}</span></span>
-          <span style="display:inline-flex;justify-content:center;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;color:${gradeColor(x.grade)};background:${gradeBg(x.grade)};">${esc(x.grade)}</span></span>
+          <span style="display:inline-flex;justify-content:center;"><span title="${x.grade ? '' : 'Cost booked to a sibling sub-repo session — not independently graded'}" style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;color:${gradeColor(x.grade)};background:${gradeBg(x.grade)};">${esc(x.grade || '—')}</span></span>
         </div>
         ${expandBlock}
       </div>`;

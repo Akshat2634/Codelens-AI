@@ -587,6 +587,11 @@ function computeEfficiencyScore(costPerCommit, survivalRate, orphanedRate, total
 }
 
 function computeSessionGrade(session) {
+  // --depth's workspace-explosion zeroes cost on every clone but the one
+  // carrying the sub-repo with the most files (index.js), so a real commit
+  // landing on a zeroed clone would otherwise grade as a fabricated 'A'
+  // ($0/commit) — this session's cost isn't a real, independent outcome.
+  if (session.costZeroed) return null;
   if (session.commitCount === 0) return 'F';
   // Grade on cost-per-commit only. We don't compute reliable per-session survival
   // (single-session samples are too small), so plugging in a fake constant would
