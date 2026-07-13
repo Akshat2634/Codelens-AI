@@ -59,6 +59,16 @@ test.describe('Dashboard smoke (fixtures)', () => {
     expect(insightCount).toBeLessThanOrEqual(8);
   });
 
+  test('Feature Adoption explains its denominator and overlapping percentages', async ({ page, request }) => {
+    const payload = await (await request.get('/api/all')).json();
+    await page.goto('/');
+    const note = page.locator('#sec-skills .adoption-overlap-note');
+    await expect(note).toContainText(`${payload.summary.totalSessions} total sessions in this window`);
+    await expect(note).toContainText('Every row uses the same denominator');
+    await expect(note).toContainText('percentages do not add to 100%');
+    await expect(page.locator('#sec-skills [title$="total sessions"]')).toHaveCount(payload.featureAdoption.length);
+  });
+
   test('sessions table renders fixture sessions', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('.sessions-section .session-row');

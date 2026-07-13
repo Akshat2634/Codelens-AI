@@ -27,6 +27,13 @@ async function apiAll(request, source) {
   return res.json();
 }
 
+function formatTokens(n) {
+  if (n >= 999.95e6) return (n / 1e9).toFixed(1) + 'B';
+  if (n >= 999.95e3) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 999.5) return (n / 1e3).toFixed(1) + 'K';
+  return String(Math.round(n));
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await page.waitForSelector('.stats-section .hero-stats', { timeout: 15_000 });
@@ -95,13 +102,21 @@ test.describe('Overview — briefing, score, tiles, periods, insights', () => {
     await expect(overview).toContainText(`${p.summary.aiCodeSharePct}%`);
   });
 
-  test('period strip shows Today / 7d / month / full window', async ({ page }) => {
+  test('period strip prominently shows token burn for each window', async ({ page, request }) => {
+    const p = await apiAll(request);
     const strip = page.locator('.roi-headlines');
     await expect(strip).toContainText('Today');
     await expect(strip).toContainText('Last 7 days');
     await expect(strip).toContainText('This month');
     await expect(strip).toContainText('Full window');
-    await expect(strip.getByText(/tokens$/)).toHaveCount(4);
+    await expect(strip.getByText('Tokens burned', { exact: true })).toHaveCount(4);
+
+    const week = strip.locator('[data-period="week"]');
+    const month = strip.locator('[data-period="month"]');
+    await expect(week.locator('.period-token-value')).toHaveText(formatTokens(p.summary.costByPeriod.week.tokens));
+    await expect(month.locator('.period-token-value')).toHaveText(formatTokens(p.summary.costByPeriod.month.tokens));
+    await expect(week.locator('.period-spend')).toHaveText(/\$\d/);
+    await expect(month.locator('.period-spend')).toHaveText(/\$\d/);
   });
 
   test('insights feed renders 1–8 cards', async ({ page }) => {

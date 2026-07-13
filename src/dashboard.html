@@ -1166,17 +1166,24 @@
     // Period strip
     const p = sum.costByPeriod;
     const periodDefs = [
-      ['Today', p.today, 'var(--green)', '0.15s'],
-      ['Last 7 days', p.week, 'var(--blue)', '0.2s'],
-      ['This month', p.month, 'var(--purple)', '0.25s'],
-      ['Full window', p.allTime, 'var(--amber)', '0.3s'],
+      ['today', 'Today', p.today, 'var(--green)', '0.15s'],
+      ['week', 'Last 7 days', p.week, 'var(--blue)', '0.2s'],
+      ['month', 'This month', p.month, 'var(--purple)', '0.25s'],
+      ['all-time', 'Full window', p.allTime, 'var(--amber)', '0.3s'],
     ];
-    const periodStrip = `<div class="roi-headlines" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-top:14px;overflow:visible;">${periodDefs.map(([label, d, top, delay]) => `
-      <div style="border:1px solid var(--line2);border-radius:13px;background:var(--card);padding:14px 17px;animation:riseSm .55s cubic-bezier(0.22,1,0.36,1) both;animation-delay:${delay};border-top:2px solid ${top};">
+    const periodStrip = `<div class="roi-headlines" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-top:14px;overflow:visible;">${periodDefs.map(([key, label, d, top, delay]) => `
+      <div class="period-card" data-period="${key}" style="border:1px solid var(--line2);border-radius:13px;background:linear-gradient(155deg,color-mix(in srgb,${top} 7%,var(--card)),var(--card) 58%);padding:15px 17px 14px;animation:riseSm .55s cubic-bezier(0.22,1,0.36,1) both;animation-delay:${delay};border-top:2px solid ${top};">
         <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:var(--ink3);">${esc(label)}</div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:21px;font-weight:700;margin-top:6px;">${esc(fmtMoney(d.cost))}</div>
-        <div style="font-size:11px;color:var(--ink2);margin-top:3px;">${d.sessions} sessions · ${d.commits} commits</div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink3);margin-top:2px;">${esc(fmtTokens(d.tokens))} tokens</div>
+        <div class="period-token-label" style="display:flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:${top};margin-top:11px;">
+          <span style="width:6px;height:6px;border-radius:2px;background:${top};box-shadow:0 0 10px color-mix(in srgb,${top} 60%,transparent);"></span>
+          Tokens burned
+        </div>
+        <div class="period-token-value" style="font-family:'IBM Plex Mono',monospace;font-size:clamp(24px,2.4vw,30px);font-weight:700;letter-spacing:-0.035em;line-height:1.1;color:${top};margin-top:4px;">${esc(fmtTokens(d.tokens))}</div>
+        <div style="border-top:1px solid var(--line2);margin-top:12px;padding-top:9px;display:flex;align-items:baseline;justify-content:space-between;gap:10px;">
+          <span class="period-spend" style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700;color:var(--ink);">${esc(fmtMoney(d.cost))}</span>
+          <span style="font-size:10px;color:var(--ink3);">agent spend</span>
+        </div>
+        <div style="font-size:10.5px;color:var(--ink2);margin-top:4px;">${d.sessions} sessions · ${d.commits} commits</div>
       </div>`).join('')}</div>`;
 
     // Insights feed
@@ -1592,12 +1599,16 @@
     const mcpRows = rankedBarRows(mcpEntries, Math.max(1, ...mcpEntries.map(([, c]) => c)), 'var(--green)', 'No MCP tool calls recorded yet.');
 
     const adoptionDefs = v.featureAdoption || [];
+    const adoptionDenominator = v.summary?.totalSessions || 0;
+    const adoptionExplanation = adoptionDenominator > 0
+      ? `<strong style="color:var(--ink);font-weight:600;">How it’s calculated:</strong> matching sessions ÷ ${adoptionDenominator} total sessions in this window. Every row uses the same denominator. Categories overlap, so percentages do not add to 100%.`
+      : 'No sessions in this window yet.';
     const adoptionRows = adoptionDefs.length ? adoptionDefs.map((f, i) => `<div style="display:grid;grid-template-columns:1fr 1fr 84px;align-items:center;gap:10px;">
       <span style="font-size:12px;color:var(--ink2);">${esc(f.feature)}</span>
       <div style="height:8px;border-radius:5px;background:var(--hover);overflow:hidden;">
         <div style="height:100%;width:${f.pct}%;border-radius:5px;background:linear-gradient(90deg, color-mix(in srgb, var(--cyan) 70%, transparent), var(--cyan));transform-origin:left;animation:growX .9s cubic-bezier(0.22,1,0.36,1) both;animation-delay:${(i * 0.05).toFixed(2)}s;"></div>
       </div>
-      <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink3);text-align:right;">${f.pct}% · ${f.sessions}</span>
+      <span title="${f.sessions} of ${adoptionDenominator} total sessions" style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink3);text-align:right;">${f.pct}% · ${adoptionDenominator > 0 ? f.sessions + '/' + adoptionDenominator : f.sessions}</span>
     </div>`).join('') : `<div style="font-size:12px;color:var(--ink3);padding:6px 0;">No sessions yet.</div>`;
 
     const clientEntries = Object.entries(v.clientBreakdown || {}).sort((a, b) => b[1] - a[1]);
@@ -1631,8 +1642,12 @@
         </div>
         <div style="border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:20px 22px;box-shadow:var(--shadow);">
           <h3 style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink2);margin:0;">Feature Adoption</h3>
-          <div style="font-size:11px;color:var(--ink3);margin-top:6px;">Share of your sessions using each capability.</div>
+          <div style="font-size:11px;color:var(--ink3);margin-top:6px;">Independent share of all sessions using each capability.</div>
           <div style="display:flex;flex-direction:column;gap:9px;margin-top:14px;">${adoptionRows}</div>
+          <div class="adoption-overlap-note" style="display:flex;align-items:flex-start;gap:8px;margin-top:14px;padding:9px 10px;border:1px solid color-mix(in srgb,var(--cyan) 22%,var(--line2));border-radius:9px;background:color-mix(in srgb,var(--cyan) 7%,var(--bg2));font-size:10.5px;line-height:1.45;color:var(--ink2);">
+            <span aria-hidden="true" style="flex:0 0 auto;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;color:var(--cyan);background:color-mix(in srgb,var(--cyan) 14%,transparent);">i</span>
+            <span>${adoptionExplanation}</span>
+          </div>
         </div>
         <div style="border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:20px 22px;box-shadow:var(--shadow);">
           <h3 style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink2);margin:0;">Sessions by Client &amp; Agent Type</h3>
