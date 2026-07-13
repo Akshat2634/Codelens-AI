@@ -13,6 +13,7 @@
 - **Runtime:** Node.js >= 22.12, ES modules (`"type": "module"`)
 - **Backend:** Express.js 5.0.0
 - **CLI:** Commander.js 13.0.0
+- **MCP:** `@modelcontextprotocol/sdk` — `codelens-ai mcp` serves the reports as MCP tools over stdio (`src/mcp.js`); stdout carries only JSON-RPC, so all progress output must go to stderr there
 - **Frontend:** Single-file HTML (`src/dashboard.html`) with vanilla JS + Chart.js 4.5.1. The UMD bundle is **committed at `src/vendor/chart.umd.min.js`** and served at `/vendor/chart.umd.min.js` — no CDN, works offline, and does not depend on `chart.js` being resolvable at the user's runtime (npx caches have shipped partial `node_modules`). `chart.js` is a **devDependency**; refresh the vendored copy with `npm run vendor:chart` after upgrading it (also runs on `prepublishOnly`).
 - **Testing:** `node --test` unit + server-route tests (`tests/unit/`), a packaging smoke test (`npm run test:package` — packs → clean-installs → boots → asserts the dashboard and vendored chart serve), and Playwright (E2E)
 - **Styling:** Inline CSS design tokens, "warm-ink instrument panel" (dark) / "warm-paper ledger" (light) theme; fonts: Bricolage Grotesque (display), Instrument Sans (body), IBM Plex Mono (data). Chart palette is CVD-validated per theme — don't swap chart hues casually.
@@ -31,6 +32,7 @@ src/
 ├── tables.js          # `codelens-ai daily|weekly|monthly` — usage/cost tables + ROI columns
 ├── blocks.js          # `codelens-ai blocks` — 5-hour billing windows, burn rate, projection
 ├── statusline.js      # `codelens-ai statusline` — Claude Code statusline (stdin JSON + quickstats: ROI, burn rate)
+├── mcp.js             # `codelens-ai mcp` — MCP server over stdio (roi_summary, usage, blocks, sessions, projects, refresh tools)
 ├── server.js          # Express REST API routes (?source= selects per-agent views)
 ├── cache.js           # Smart caching with per-source stale file detection + statusline quickstats
 ├── pricing.js         # External LiteLLM pricing overlay — auto-prices models the hardcoded tables don't know
@@ -100,6 +102,7 @@ npx codelens-ai report          # terminal ROI scorecard (--md / --html to expor
 npx codelens-ai daily           # usage/cost table by day (+ commits, $/commit); -b per-model, --json
 npx codelens-ai weekly          # ...by week (--start-of-week monday|sunday); `monthly` = by month
 npx codelens-ai blocks          # Claude's 5-hour billing windows + burn rate (--active, --recent, -t max)
+npx codelens-ai mcp             # MCP server over stdio (claude mcp add codelens -- npx -y codelens-ai mcp)
 npx codelens-ai statusline      # Claude Code statusline (--install to configure)
 npx claude-roi                  # backward-compatible alias
 ```
