@@ -266,12 +266,19 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   }
   progress(`  ${icon.ok} Analyzing git repos ${c.dim}── ${repoPathsSet.size} repos (${fmt(Date.now() - startGit)})${c.reset}`);
   const resolvedInView = [...repoPathsSet].filter(p => aliasMap.has(p));
-  const unresolvedInView = unresolved.filter(p => repoPathsSet.has(p));
+  // Of the paths that couldn't be aliased, warn ONLY about the ones genuinely
+  // gone from disk — a moved/deleted repo whose sessions really do lose their
+  // commits. A path that still EXISTS but has no `.git` is a workspace parent
+  // (its repos live in sub-folders) or otherwise not a repo: the nested-repo
+  // explosion already handles the correlatable ones, and a session it couldn't
+  // split (read-only, or edits outside any sub-repo) has no commits to show
+  // regardless. Flagging those as "no longer exist" is a false alarm.
+  const missingInView = unresolved.filter(p => repoPathsSet.has(p) && !existsSync(p));
   if (resolvedInView.length > 0) {
     progress(`  ${icon.ok} Resolved ${resolvedInView.length} moved repo path(s) by folder name ${c.dim}(sessions recorded a path that no longer exists)${c.reset}`);
   }
-  if (unresolvedInView.length > 0) {
-    progress(`  ${icon.warn} ${c.yellow}${unresolvedInView.length} repo path(s) no longer exist and couldn't be auto-resolved — their sessions won't show commits:${c.reset} ${unresolvedInView.join(', ')}`);
+  if (missingInView.length > 0) {
+    progress(`  ${icon.warn} ${c.yellow}${missingInView.length} repo path(s) no longer exist and couldn't be auto-resolved — their sessions won't show commits:${c.reset} ${missingInView.join(', ')}`);
   }
 
   // Step 3: Correlate sessions with commits. All sources correlate together so
