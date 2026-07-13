@@ -575,24 +575,35 @@ async function runMcp(opts) {
   progress = console.error;
   printBanner(' mcp');
 
-  const { payloads: initial, days, claudeDir, codexDir, planConfigs, sourceFilter } = await runAnalysis(opts);
+  // Start analysis and connect the transport concurrently. MCP clients can
+  // complete initialize/tools-list immediately even when parsing a large local
+  // history takes a while; tool calls wait on this shared initial load.
+  let payloads = null;
+  const initialLoad = runAnalysis(opts).then((result) => {
+    payloads = result.payloads;
+    return result;
+  });
+  const ctx = {
+    days: parseInt(opts.days, 10),
+    ready: () => initialLoad,
+    getPayloads: () => payloads,
+    refresh: async () => {
+      const { days, claudeDir, codexDir, planConfigs, sourceFilter } = await initialLoad;
+      const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline);
+      // Clearing all source logs is a real state transition: do not keep
+      // serving the pre-refresh snapshot after reporting that nothing remains.
+      payloads = fresh;
+      return fresh;
+    },
+  };
+  await serveMcpStdio(ctx, VERSION);
+
+  const { payloads: initial, days, claudeDir, codexDir, sourceFilter } = await initialLoad;
   if (!initial) {
     // Still serve: an MCP client has already spawned us, so exiting here reads
     // as a broken server. Tools answer with a clear "no sessions" message.
     printNoSessions(sourceFilter, days, claudeDir, codexDir);
   }
-
-  let payloads = initial;
-  const ctx = {
-    days,
-    getPayloads: () => payloads,
-    refresh: async () => {
-      const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline);
-      if (fresh) payloads = fresh;
-      return fresh;
-    },
-  };
-  await serveMcpStdio(ctx, VERSION);
   progress(`  ${icon.ok} ${c.green}MCP server ready${c.reset} ${c.dim}── ${payloads ? payloads.all.sessions.length : 0} sessions loaded, serving on stdio${c.reset}`);
 }
 

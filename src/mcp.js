@@ -8,7 +8,8 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ErrorCode, ListToolsRequestSchema, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import { blocksJson, buildBlocks, filterRecentBlocks } from './blocks.js';
 import { reportModel } from './report.js';
 import { buildPeriodTable, periodTableJson } from './tables.js';
@@ -26,11 +27,14 @@ const SOURCE_PROP = {
 export const MCP_TOOLS = [
   {
     name: 'roi_summary',
+    title: 'ROI Summary',
     description: 'ROI scorecard for AI coding agents: grade, efficiency score, total spend, commits shipped, cost per commit, line survival, AI code share, value leak, per-agent and per-model breakdowns, and insights. The headline "is my AI subscription paying for itself" answer.',
     inputSchema: { type: 'object', properties: { ...SOURCE_PROP }, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: 'usage',
+    title: 'Usage by Period',
     description: 'Token usage and cost table aggregated by day, week, or month — input/output/cache tokens, cost, sessions, plus commits and cost-per-commit per period, with a per-model breakdown.',
     inputSchema: {
       type: 'object',
@@ -41,9 +45,11 @@ export const MCP_TOOLS = [
       },
       additionalProperties: false,
     },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: 'blocks',
+    title: 'Billing Blocks',
     description: "Usage grouped into Claude's rolling 5-hour billing windows: per-block tokens and cost, burn rate (tokens/min, $/hr), and a projection for the currently open block.",
     inputSchema: {
       type: 'object',
@@ -53,9 +59,11 @@ export const MCP_TOOLS = [
       },
       additionalProperties: false,
     },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: 'sessions',
+    title: 'Recent Sessions',
     description: 'Recent AI coding sessions with cost, commits shipped, lines added, and an efficiency grade per session, newest first.',
     inputSchema: {
       type: 'object',
@@ -65,21 +73,39 @@ export const MCP_TOOLS = [
       },
       additionalProperties: false,
     },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: 'projects',
+    title: 'Project ROI',
     description: 'Per-repository ROI: cost, sessions, commits, cost per commit, lines added, and % of commits on the default branch, per repo, ranked by spend.',
     inputSchema: { type: 'object', properties: { ...SOURCE_PROP }, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: 'refresh',
+    title: 'Refresh Reports',
     description: 'Force a full re-parse of agent session logs and git history, then report the refreshed session counts. Use when data seems stale.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
 ];
 
-const json = (data) => ({ content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] });
+const schemaValidator = new AjvJsonSchemaValidator();
+const toolValidators = new Map(MCP_TOOLS.map((tool) => [tool.name, schemaValidator.getValidator(tool.inputSchema)]));
+
+const json = (data) => ({
+  content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+  structuredContent: data,
+});
 const err = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
+
+function validateToolCall(name, args) {
+  const validate = toolValidators.get(name);
+  if (!validate) return `Unknown tool: ${name}`;
+  const result = validate(args);
+  return result.valid ? null : `Invalid arguments for ${name}: ${result.errorMessage}`;
+}
 
 function pickView(payloads, source) {
   if (source && source !== 'all' && !payloads[source]) return null;
@@ -94,6 +120,14 @@ function pickView(payloads, source) {
  * Pure of transport concerns, so tests can drive it directly.
  */
 export async function callMcpTool(name, args, ctx) {
+  // A stdio client can initialize and list tools while the initial analysis is
+  // still running. Tool calls wait for that shared load instead of observing a
+  // misleading transient "no sessions" state.
+  if (ctx.ready) await ctx.ready();
+
+  const validationError = validateToolCall(name, args);
+  if (validationError) return err(validationError);
+
   if (name === 'refresh') {
     const fresh = await ctx.refresh();
     if (!fresh) return err('Refresh completed, but no AI coding agent sessions were found in the analyzed window.');
@@ -180,9 +214,12 @@ export function createMcpServer(ctx, version) {
     { capabilities: { tools: {} } }
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: MCP_TOOLS }));
-  server.setRequestHandler(CallToolRequestSchema, async (req) =>
-    callMcpTool(req.params.name, req.params.arguments || {}, ctx)
-  );
+  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    const args = req.params.arguments || {};
+    const validationError = validateToolCall(req.params.name, args);
+    if (validationError) throw new McpError(ErrorCode.InvalidParams, validationError);
+    return callMcpTool(req.params.name, args, ctx);
+  });
   return server;
 }
 

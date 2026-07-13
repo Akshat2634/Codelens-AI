@@ -75,17 +75,54 @@ const mkCtx = (payloads, { refreshed = null } = {}) => ({
 
 const parse = (result) => {
   assert.ok(!result.isError, `expected success, got: ${result.content[0].text}`);
-  return JSON.parse(result.content[0].text);
+  const text = JSON.parse(result.content[0].text);
+  assert.deepEqual(result.structuredContent, text);
+  return text;
 };
 
 const PAYLOADS = { all: fakeView('all', [fakeSession()]) };
 
-test('MCP_TOOLS: every tool has a name, description, and object schema', () => {
+test('MCP_TOOLS: every tool has metadata, an object schema, and safety annotations', () => {
   assert.ok(MCP_TOOLS.length >= 6);
   for (const t of MCP_TOOLS) {
-    assert.ok(t.name && t.description, t.name);
+    assert.ok(t.name && t.title && t.description, t.name);
     assert.equal(t.inputSchema.type, 'object');
+    assert.equal(typeof t.annotations.readOnlyHint, 'boolean');
+    assert.equal(t.annotations.destructiveHint, false);
+    assert.equal(t.annotations.openWorldHint, false);
   }
+});
+
+test('tool arguments are validated against the advertised input schema', async () => {
+  for (const [name, args] of [
+    ['usage', { period: 'yearly' }],
+    ['sessions', { limit: 0 }],
+    ['blocks', { recent: 'yes' }],
+    ['roi_summary', { unexpected: true }],
+  ]) {
+    const result = await callMcpTool(name, args, mkCtx(PAYLOADS));
+    assert.equal(result.isError, true, name);
+    assert.match(result.content[0].text, /Invalid arguments/, name);
+  }
+});
+
+test('tool calls wait for the initial analysis before reading payloads', async () => {
+  let payloads = null;
+  let loaded = false;
+  const ctx = {
+    days: 30,
+    ready: async () => {
+      payloads = PAYLOADS;
+      loaded = true;
+    },
+    getPayloads: () => {
+      assert.equal(loaded, true);
+      return payloads;
+    },
+    refresh: async () => payloads,
+  };
+  const doc = parse(await callMcpTool('roi_summary', {}, ctx));
+  assert.equal(doc.grade, 'B');
 });
 
 test('roi_summary returns the report model', async () => {
