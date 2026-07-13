@@ -130,3 +130,88 @@ test('full pipeline: session + real repo -> trailer-confirmed commit, AI share, 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('nested workspace-parent sessions automatically explode into per-sub-repo clones (no flag needed)', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'pipeline-depth-'));
+  try {
+    // Workspace directory with TWO nested git repos — the parent has no .git.
+    const workspace = path.join(root, 'workspace');
+    mkdirSync(workspace, { recursive: true });
+    const repoA = path.join(workspace, 'repo-a');
+    const repoB = path.join(workspace, 'repo-b');
+    for (const repo of [repoA, repoB]) {
+      mkdirSync(repo, { recursive: true });
+      execSync('git init -q -b main', { cwd: repo });
+      execSync('git config user.email test@codelens.dev', { cwd: repo });
+      execSync('git config user.name Test', { cwd: repo });
+    }
+
+    const now = Date.now();
+    const iso = (minAgo) => new Date(now - minAgo * 60_000).toISOString();
+
+    // One commit per sub-repo, both within the session window.
+    mkdirSync(path.join(repoA, 'src'), { recursive: true });
+    writeFileSync(path.join(repoA, 'src', 'a.js'), 'a\n'.repeat(10));
+    gitCommit(repoA, 'repo-a feature', null, iso(30));
+
+    mkdirSync(path.join(repoB, 'src'), { recursive: true });
+    writeFileSync(path.join(repoB, 'src', 'b.js'), 'b\n'.repeat(5));
+    gitCommit(repoB, 'repo-b tweak', null, iso(25));
+
+    // Session with cwd at the WORKSPACE PARENT, editing files in both repos.
+    const claudeDir = path.join(root, 'claude-projects');
+    const projDir = path.join(claudeDir, 'workspace-project');
+    mkdirSync(projDir, { recursive: true });
+    const sid = 'dddddddd-aaaa-bbbb-cccc-eeeeeeeeeeee';
+    const lines = [
+      {
+        type: 'user', sessionId: sid, cwd: workspace, gitBranch: 'main', timestamp: iso(60),
+        message: { content: [{ type: 'text', text: 'Work in both repos.' }] },
+      },
+      {
+        type: 'assistant', requestId: 'req-1', timestamp: iso(50),
+        message: {
+          model: 'claude-sonnet-4-6-20250929',
+          usage: { input_tokens: 3000, output_tokens: 700, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+          content: [
+            { type: 'tool_use', id: 't1', name: 'Edit', input: { file_path: path.join(repoA, 'src', 'a.js') } },
+            { type: 'tool_use', id: 't2', name: 'Edit', input: { file_path: path.join(repoB, 'src', 'b.js') } },
+          ],
+        },
+      },
+    ];
+    writeFileSync(path.join(projDir, `${sid}.jsonl`), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const codexDir = path.join(root, 'codex-sessions');
+    mkdirSync(codexDir, { recursive: true });
+
+    // No --depth flag, no special options — a workspace-parent cwd is
+    // detected automatically and exploded into per-sub-repo clones.
+    const result = JSON.parse(execFileSync(process.execPath, [
+      INDEX, '--json', '--claude-dir', claudeDir, '--codex-dir', codexDir, '--days', '30',
+    ], { encoding: 'utf-8', env: { ...process.env, HOME: root } }));
+    assert.equal(result.summary.totalSessions, 2, 'session automatically exploded into two clones');
+    assert.equal(result.summary.totalCommits, 2, 'both sub-repo commits correlated');
+    assert.ok(result.summary.totalCost > 0);
+
+    // Sub-repo names surface as project names.
+    const projectNames = new Set(result.sessions.map(s => s.projectName));
+    assert.ok(projectNames.has('repo-a'));
+    assert.ok(projectNames.has('repo-b'));
+
+    // Cost is CONSERVED: only one clone keeps it, the other reads $0.
+    const costs = result.sessions.map(s => s.cost.totalCost).sort((a, b) => a - b);
+    assert.equal(costs[0], 0);
+    assert.ok(costs[1] > 0);
+    assert.equal(costs[0] + costs[1], result.summary.totalCost);
+
+    // The zeroed clone still has its own real commit, but must not be graded —
+    // a $0-cost session with a real commit would otherwise read as a
+    // fabricated 'A', purely an artifact of the cost-conservation split.
+    const zeroedSession = result.sessions.find(s => s.cost.totalCost === 0);
+    assert.equal(zeroedSession.commitCount, 1, 'the zeroed clone still gets its own real commit');
+    assert.equal(zeroedSession.grade, null, 'a zeroed clone must not be graded');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

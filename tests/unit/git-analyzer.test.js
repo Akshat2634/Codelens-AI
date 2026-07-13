@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { analyzeGitRepo, normalizeRemoteUrl, resolveMovedRepoPaths } from '../../src/git-analyzer.js';
+import { analyzeGitRepo, findNestedGitRepos, normalizeRemoteUrl, resolveMovedRepoPaths } from '../../src/git-analyzer.js';
 
 function makeRepo(root, ...segments) {
   const dir = path.join(root, ...segments);
@@ -313,6 +313,118 @@ test('analyzeGitRepo detects agent Co-authored-by trailers as aiTrailer', () => 
     const piped = commits.find(c => c.subject.includes('with pipes'));
     assert.equal(piped.subject, 'add e | with pipes | everywhere', 'pipes in subject survive parsing');
     assert.equal(piped.aiTrailer, 'claude');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('findNestedGitRepos discovers direct-child repos at depth 1', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'nested-repos-'));
+  try {
+    const a = makeRepo(root, 'repo-a');
+    const b = makeRepo(root, 'repo-b');
+    const found = findNestedGitRepos(root, 1);
+    assert.deepEqual(new Set(found), new Set([a, b]));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('findNestedGitRepos respects max depth', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'nested-repos-'));
+  try {
+    // repo at depth 3: root/lvl1/lvl2/repo
+    const deep = makeRepo(root, 'lvl1', 'lvl2', 'deep-repo');
+    assert.deepEqual(findNestedGitRepos(root, 2), [], 'depth 2 does not find repo at depth 3');
+    assert.deepEqual(findNestedGitRepos(root, 3), [deep], 'depth 3 finds it');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('findNestedGitRepos skips node_modules, virtualenv, hidden dirs', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'nested-repos-'));
+  try {
+    // Bogus repos in dirs that must be ignored — every npm package with a
+    // stray .git would otherwise show up.
+    makeRepo(root, 'node_modules', 'some-pkg');
+    makeRepo(root, '.venv', 'lib');
+    makeRepo(root, '.hidden', 'secret-repo');
+    const good = makeRepo(root, 'legit-repo');
+    assert.deepEqual(findNestedGitRepos(root, 3), [good]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('findNestedGitRepos does not follow symlinks', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'nested-repos-'));
+  try {
+    const real = makeRepo(root, 'real-repo');
+    // Symlink pointing back at root would cycle if followed.
+    try {
+      symlinkSync(root, path.join(root, 'link-back'));
+    } catch {
+      return; // symlink perms unavailable — skip this assertion
+    }
+    const found = findNestedGitRepos(root, 3);
+    assert.deepEqual(found, [real]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('findNestedGitRepos does not recurse INTO a discovered repo', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'nested-repos-'));
+  try {
+    const outer = makeRepo(root, 'outer');
+    // A repo inside a repo — submodule/worktree; must not be reported.
+    makeRepo(root, 'outer', 'inner');
+    const found = findNestedGitRepos(root, 3);
+    assert.deepEqual(found, [outer]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('findNestedGitRepos returns [] for missing / invalid input', () => {
+  assert.deepEqual(findNestedGitRepos(null, 1), []);
+  assert.deepEqual(findNestedGitRepos('/nonexistent-path-xyz-12345', 1), []);
+  const root = mkdtempSync(path.join(os.tmpdir(), 'nested-repos-'));
+  try {
+    assert.deepEqual(findNestedGitRepos(root, 0), [], 'depth 0 is off');
+    assert.deepEqual(findNestedGitRepos(root, -1), [], 'negative depth is off');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('findNestedGitRepos skips .claude/worktrees (they resolve to the outer repo already)', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'nested-repos-'));
+  try {
+    // Real git worktrees mark themselves with a `.git` FILE (not a directory)
+    // pointing back at the main repo's git dir — existsSync doesn't
+    // distinguish, so the walk must special-case the `worktrees` dir itself.
+    const worktreeDir = path.join(root, '.claude', 'worktrees', 'feature-x');
+    mkdirSync(worktreeDir, { recursive: true });
+    writeFileSync(path.join(worktreeDir, '.git'), 'gitdir: /some/other/repo/.git/worktrees/feature-x\n');
+    const good = makeRepo(root, 'legit-repo');
+    const found = findNestedGitRepos(root, 3);
+    assert.deepEqual(found, [good]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('findNestedGitRepos still finds a real repo under an unrelated "worktrees"-named dir', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'nested-repos-'));
+  try {
+    // The .claude/worktrees skip must be scoped to that exact parent — a
+    // project directory that happens to be named "worktrees" elsewhere in
+    // the tree is unrelated and must still be discovered.
+    const repo = makeRepo(root, 'myproject', 'worktrees', 'some-repo');
+    const found = findNestedGitRepos(root, 3);
+    assert.deepEqual(found, [repo]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

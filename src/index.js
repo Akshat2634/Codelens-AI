@@ -8,7 +8,7 @@ import { DEFAULT_CLAUDE_DIR, DEFAULT_CODEX_DIR, deleteCache, getCodexStaleFiles,
 import { parseAllProjects } from './claude-parser.js';
 import { parseCodexSessions } from './codex-parser.js';
 import { correlateSessions } from './correlator.js';
-import { analyzeGitRepo, getGitUser, resolveMovedRepoPaths } from './git-analyzer.js';
+import { analyzeGitRepo, findNestedGitRepos, getGitUser, resolveMovedRepoPaths } from './git-analyzer.js';
 import { serveMcpStdio } from './mcp.js';
 import { computeMetrics } from './metrics.js';
 import { loadPricingOverlay, overlayInfo } from './pricing.js';
@@ -38,6 +38,112 @@ const fmt = (ms) => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 // Progress/banner output. main() reroutes this to stderr under --json so
 // stdout carries only the JSON document.
 let progress = console.log;
+
+// Bucket a session's absolute filesWritten paths across a set of nested
+// sub-repos. Returns Map<subRepo, string[]> of RELATIVE paths per sub-repo.
+// A file that lives directly in the workspace parent (outside any sub-repo)
+// is dropped from every clone — nothing to correlate against.
+function bucketFilesBySubRepo(filesAbs, subRepos) {
+  const buckets = new Map(subRepos.map(s => [s, []]));
+  for (const abs of filesAbs || []) {
+    let best = null;
+    for (const sub of subRepos) {
+      const prefix = sub.endsWith(path.sep) ? sub : sub + path.sep;
+      if (abs.startsWith(prefix)) {
+        if (!best || sub.length > best.length) best = sub;
+      }
+    }
+    if (best) buckets.get(best).push(abs.slice(best.length + 1));
+  }
+  return buckets;
+}
+
+// Fields zeroed on non-winner clones so total session spend/tokens is
+// conserved after explosion. The clones still carry filesWritten + repoPath +
+// timestamps so commit correlation works — they just don't double-count cost.
+function zeroedMetricsFields() {
+  return {
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    cacheCreation1hTokens: 0,
+    webSearchRequests: 0,
+    cost: { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, serverToolCost: 0, totalCost: 0 },
+    cacheSavingsDollars: 0,
+    estimatedCost: 0,
+    modelBreakdown: {},
+    usageEvents: [],
+    dailyUsage: {},
+    toolCalls: {},
+    skillCalls: {},
+    userMessageCount: 0,
+    assistantMessageCount: 0,
+    totalBashCalls: 0,
+    readOnlyBashCalls: 0,
+    subagentTranscriptCount: 0,
+    bashCommands: [],
+  };
+}
+
+// How many levels to walk into a workspace-parent cwd looking for nested git
+// repos. Fixed rather than user-configurable — zero-config, like the rest of
+// the pipeline's discovery — since the walk only ever runs for sessions whose
+// cwd itself has no `.git` (an ordinary single-repo session is untouched), and
+// the skip-list in findNestedGitRepos already bounds it away from noise/perf
+// traps (node_modules, build output, venvs, symlink cycles).
+const NESTED_REPO_DEPTH = 3;
+
+// Split any session whose cwd is a workspace parent (not a git repo itself,
+// but containing nested repos within NESTED_REPO_DEPTH levels) into
+// per-sub-repo virtual sessions. Full session cost is assigned to the
+// sub-repo with the most files; the rest carry files + timestamps only so
+// their commits still correlate.
+export function explodeWorkspaceSessions(sessions, depth = NESTED_REPO_DEPTH) {
+  if (!(depth > 0)) return sessions;
+  const out = [];
+  for (const session of sessions) {
+    if (!session.repoPath || !session.filesWrittenAbsolute?.length) {
+      out.push(session);
+      continue;
+    }
+    if (existsSync(path.join(session.repoPath, '.git'))) {
+      out.push(session);
+      continue;
+    }
+    const nested = findNestedGitRepos(session.repoPath, depth);
+    if (nested.length === 0) {
+      out.push(session);
+      continue;
+    }
+    const buckets = bucketFilesBySubRepo(session.filesWrittenAbsolute, nested);
+    const populated = nested
+      .filter(sub => buckets.get(sub).length > 0)
+      .sort((a, b) => buckets.get(b).length - buckets.get(a).length);
+    if (populated.length === 0) {
+      out.push(session);
+      continue;
+    }
+    let first = true;
+    for (const subRepo of populated) {
+      const files = buckets.get(subRepo);
+      const suffix = path.basename(subRepo);
+      const clone = first
+        ? { ...session }
+        // costZeroed marks this clone's cost/tokens as a conservation artifact,
+        // not a real outcome — computeSessionGrade (metrics.js) must not grade
+        // it, or a real commit landing on a $0 clone reads as a fabricated 'A'.
+        : { ...session, ...zeroedMetricsFields(), costZeroed: true };
+      clone.sessionId = `${session.sessionId}#${suffix}`;
+      clone.repoPath = subRepo;
+      clone.projectName = suffix;
+      clone.filesWritten = files;
+      out.push(clone);
+      first = false;
+    }
+  }
+  return out;
+}
 
 async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null, offline = false) {
   // Step 0: Load the external pricing overlay before any costing happens, so
@@ -112,12 +218,23 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
     if (!cached) parseNotes.push(`codex: ${codexSessions.length} parsed`);
   }
 
-  const allParsed = [...claudeSessions, ...codexSessions];
+  const rawParsed = [...claudeSessions, ...codexSessions];
   progress(`  ${icon.ok} Parsing sessions ${c.dim}── ${parseNotes.join(' · ')} (${fmt(Date.now() - startParse)})${c.reset}`);
 
   // Save the cache as soon as parsing is done — even if the run then bails
   // (e.g. a --source filter that matches nothing), the parse work is kept.
-  saveCache(allParsed, claudeIndex, codexIndex, cacheOptions);
+  saveCache(rawParsed, claudeIndex, codexIndex, cacheOptions);
+
+  // When a session's cwd is a WORKSPACE PARENT of git repos (not a repo
+  // itself), split it into per-sub-repo virtual sessions so nested repos are
+  // actually correlated. Always on (see NESTED_REPO_DEPTH) — a no-op for the
+  // common case of a session whose cwd is itself a repo. Runs post-cache so
+  // the raw parse is preserved.
+  const allParsed = explodeWorkspaceSessions(rawParsed);
+  const addedByExplosion = allParsed.length - rawParsed.length;
+  if (addedByExplosion > 0) {
+    progress(`  ${icon.ok} Nested repos ${c.dim}── expanded ${addedByExplosion} workspace session${addedByExplosion === 1 ? '' : 's'} into sub-repo sessions${c.reset}`);
+  }
 
   // Optional --source filter: analyze a single agent's sessions only. The cache
   // still stores everything parsed, so switching sources doesn't re-parse.
