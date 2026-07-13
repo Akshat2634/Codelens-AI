@@ -209,6 +209,20 @@ test('refresh with still-no-sessions reports it as an error message', async () =
   assert.equal(res.isError, true);
 });
 
+test('a failed analysis (ctx.getError) is surfaced instead of the generic no-sessions message', async () => {
+  const ctx = { days: 30, getPayloads: () => null, getError: () => 'ENOTDIR: not a directory' };
+  const res = await callMcpTool('roi_summary', {}, ctx);
+  assert.equal(res.isError, true);
+  assert.match(res.content[0].text, /ENOTDIR/);
+});
+
+test('refresh surfaces ctx.getError over the generic message when the retry also failed', async () => {
+  const ctx = { days: 30, getPayloads: () => null, getError: () => 'boom', refresh: async () => null };
+  const res = await callMcpTool('refresh', {}, ctx);
+  assert.equal(res.isError, true);
+  assert.match(res.content[0].text, /boom/);
+});
+
 test('unknown tool name returns an error result', async () => {
   const res = await callMcpTool('nope', {}, mkCtx(PAYLOADS));
   assert.equal(res.isError, true);

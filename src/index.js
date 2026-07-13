@@ -577,32 +577,46 @@ async function runMcp(opts) {
 
   // Start analysis and connect the transport concurrently. MCP clients can
   // complete initialize/tools-list immediately even when parsing a large local
-  // history takes a while; tool calls wait on this shared initial load.
+  // history takes a while; tool calls wait on this shared load. Unlike a
+  // one-shot CLI command, an analysis failure must not take this long-lived
+  // server down with it — `load` captures it instead of rethrowing, so tool
+  // calls report a clear error and `refresh` still gets a chance to recover.
   let payloads = null;
-  const initialLoad = runAnalysis(opts).then((result) => {
-    payloads = result.payloads;
-    return result;
-  });
+  let lastError = null;
+  const load = (forceRefresh) => runAnalysis(forceRefresh ? { ...opts, refresh: true } : opts)
+    .then((result) => {
+      payloads = result.payloads;
+      lastError = null;
+      return result;
+    })
+    .catch((error) => {
+      lastError = error;
+      return null;
+    });
+  const initialLoad = load();
   const ctx = {
     days: parseInt(opts.days, 10),
     ready: () => initialLoad,
     getPayloads: () => payloads,
+    getError: () => lastError?.message,
     refresh: async () => {
-      const { days, claudeDir, codexDir, planConfigs, sourceFilter } = await initialLoad;
-      const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline);
       // Clearing all source logs is a real state transition: do not keep
       // serving the pre-refresh snapshot after reporting that nothing remains.
-      payloads = fresh;
-      return fresh;
+      await load(true);
+      return payloads;
     },
   };
   await serveMcpStdio(ctx, VERSION);
 
-  const { payloads: initial, days, claudeDir, codexDir, sourceFilter } = await initialLoad;
-  if (!initial) {
-    // Still serve: an MCP client has already spawned us, so exiting here reads
-    // as a broken server. Tools answer with a clear "no sessions" message.
-    printNoSessions(sourceFilter, days, claudeDir, codexDir);
+  const initial = await initialLoad;
+  if (!payloads) {
+    if (lastError) {
+      progress(`  ${icon.err} ${c.red}Initial analysis failed:${c.reset} ${lastError.message}`);
+    } else {
+      // Still serve: an MCP client has already spawned us, so exiting here reads
+      // as a broken server. Tools answer with a clear "no sessions" message.
+      printNoSessions(initial.sourceFilter, initial.days, initial.claudeDir, initial.codexDir);
+    }
   }
   progress(`  ${icon.ok} ${c.green}MCP server ready${c.reset} ${c.dim}── ${payloads ? payloads.all.sessions.length : 0} sessions loaded, serving on stdio${c.reset}`);
 }

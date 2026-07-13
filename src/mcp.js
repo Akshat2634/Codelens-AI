@@ -130,7 +130,7 @@ export async function callMcpTool(name, args, ctx) {
 
   if (name === 'refresh') {
     const fresh = await ctx.refresh();
-    if (!fresh) return err('Refresh completed, but no AI coding agent sessions were found in the analyzed window.');
+    if (!fresh) return err(ctx.getError?.() ?? 'Refresh completed, but no AI coding agent sessions were found in the analyzed window.');
     return json({
       refreshed: true,
       daysAnalyzed: ctx.days,
@@ -140,7 +140,7 @@ export async function callMcpTool(name, args, ctx) {
   }
 
   const payloads = ctx.getPayloads();
-  if (!payloads) return err(`No AI coding agent sessions found in the last ${ctx.days} days. Nothing to report.`);
+  if (!payloads) return err(ctx.getError?.() ?? `No AI coding agent sessions found in the last ${ctx.days} days. Nothing to report.`);
   const view = pickView(payloads, args.source);
   if (!view) return err(`No ${args.source} sessions in the analyzed window — that per-agent view was not computed. Use source "all".`);
 
