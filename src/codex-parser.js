@@ -818,6 +818,9 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
   const resolved = [...rawFiles].map(f =>
     path.isAbsolute(f) ? f : path.join(session.repoPath || '/', f)
   );
+  // Snapshot absolute paths for the --depth explosion pass before we
+  // collapse them to repo-relative form.
+  session.filesWrittenAbsolute = [...new Set(resolved)];
   session.filesWritten = [...new Set(
     resolved.map(f => toRelativePath(f, gitRoot)).filter(Boolean)
   )];

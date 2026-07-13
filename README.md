@@ -136,6 +136,7 @@ codelens-ai --codex-plan plus      # ChatGPT/Codex subscription: free | go | plu
 codelens-ai --codex-plan-cost 40   # custom Codex monthly subscription cost (USD)
 codelens-ai --claude-dir <path>    # override ~/.claude/projects (testing/CI)
 codelens-ai --codex-dir <path>     # override ~/.codex/sessions (testing/CI)
+codelens-ai --depth 2              # walk sub-folders up to N levels for nested repos (0-5, default 0)
 
 codelens-ai report                 # print an ROI scorecard to the terminal
 codelens-ai report --md            # export codelens-report.md (or --md <path>)

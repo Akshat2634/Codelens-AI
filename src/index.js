@@ -8,7 +8,7 @@ import { DEFAULT_CLAUDE_DIR, DEFAULT_CODEX_DIR, deleteCache, getCodexStaleFiles,
 import { parseAllProjects } from './claude-parser.js';
 import { parseCodexSessions } from './codex-parser.js';
 import { correlateSessions } from './correlator.js';
-import { analyzeGitRepo, getGitUser, resolveMovedRepoPaths } from './git-analyzer.js';
+import { analyzeGitRepo, findNestedGitRepos, getGitUser, resolveMovedRepoPaths } from './git-analyzer.js';
 import { serveMcpStdio } from './mcp.js';
 import { computeMetrics } from './metrics.js';
 import { loadPricingOverlay, overlayInfo } from './pricing.js';
@@ -39,7 +39,101 @@ const fmt = (ms) => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 // stdout carries only the JSON document.
 let progress = console.log;
 
-async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null, offline = false) {
+// Bucket a session's absolute filesWritten paths across a set of nested
+// sub-repos. Returns Map<subRepo, string[]> of RELATIVE paths per sub-repo.
+// A file that lives directly in the workspace parent (outside any sub-repo)
+// is dropped from every clone — nothing to correlate against.
+function bucketFilesBySubRepo(filesAbs, subRepos) {
+  const buckets = new Map(subRepos.map(s => [s, []]));
+  for (const abs of filesAbs || []) {
+    let best = null;
+    for (const sub of subRepos) {
+      const prefix = sub.endsWith(path.sep) ? sub : sub + path.sep;
+      if (abs.startsWith(prefix)) {
+        if (!best || sub.length > best.length) best = sub;
+      }
+    }
+    if (best) buckets.get(best).push(abs.slice(best.length + 1));
+  }
+  return buckets;
+}
+
+// Fields zeroed on non-winner clones so total session spend/tokens is
+// conserved after explosion. The clones still carry filesWritten + repoPath +
+// timestamps so commit correlation works — they just don't double-count cost.
+function zeroedMetricsFields() {
+  return {
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    cacheCreation1hTokens: 0,
+    webSearchRequests: 0,
+    cost: { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, serverToolCost: 0, totalCost: 0 },
+    cacheSavingsDollars: 0,
+    estimatedCost: 0,
+    modelBreakdown: {},
+    usageEvents: [],
+    dailyUsage: {},
+    toolCalls: {},
+    skillCalls: {},
+    userMessageCount: 0,
+    assistantMessageCount: 0,
+    totalBashCalls: 0,
+    readOnlyBashCalls: 0,
+    subagentTranscriptCount: 0,
+    bashCommands: [],
+  };
+}
+
+// Split any session whose cwd is a workspace parent (not a git repo itself,
+// but containing nested repos within `depth` levels) into per-sub-repo virtual
+// sessions. Full session cost is assigned to the sub-repo with the most files;
+// the rest carry files + timestamps only so their commits still correlate.
+export function explodeWorkspaceSessions(sessions, depth) {
+  if (!(depth > 0)) return sessions;
+  const out = [];
+  for (const session of sessions) {
+    if (!session.repoPath || !session.filesWrittenAbsolute?.length) {
+      out.push(session);
+      continue;
+    }
+    if (existsSync(path.join(session.repoPath, '.git'))) {
+      out.push(session);
+      continue;
+    }
+    const nested = findNestedGitRepos(session.repoPath, depth);
+    if (nested.length === 0) {
+      out.push(session);
+      continue;
+    }
+    const buckets = bucketFilesBySubRepo(session.filesWrittenAbsolute, nested);
+    const populated = nested
+      .filter(sub => buckets.get(sub).length > 0)
+      .sort((a, b) => buckets.get(b).length - buckets.get(a).length);
+    if (populated.length === 0) {
+      out.push(session);
+      continue;
+    }
+    let first = true;
+    for (const subRepo of populated) {
+      const files = buckets.get(subRepo);
+      const suffix = path.basename(subRepo);
+      const clone = first
+        ? { ...session }
+        : { ...session, ...zeroedMetricsFields() };
+      clone.sessionId = `${session.sessionId}#${suffix}`;
+      clone.repoPath = subRepo;
+      clone.projectName = suffix;
+      clone.filesWritten = files;
+      out.push(clone);
+      first = false;
+    }
+  }
+  return out;
+}
+
+async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null, offline = false, depth = 0) {
   // Step 0: Load the external pricing overlay before any costing happens, so
   // models the hardcoded tables don't know get a real published rate instead of
   // the Sonnet estimate. Cached to disk (~24h TTL); --refresh forces a refetch,
@@ -58,7 +152,7 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   // cutoffDay keys the cache to the day it was built: sessions are clipped to
   // the rolling window at parse time, so yesterday's cache would serve
   // yesterday's clipping. Costs one full re-parse per day.
-  const cacheOptions = { days, project: project || null, claudeDir, codexDir, cutoffDay: cutoffDate.toDateString() };
+  const cacheOptions = { days, project: project || null, claudeDir, codexDir, cutoffDay: cutoffDate.toDateString(), depth };
 
   if (forceRefresh) {
     deleteCache(cacheOptions);
@@ -112,12 +206,23 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
     if (!cached) parseNotes.push(`codex: ${codexSessions.length} parsed`);
   }
 
-  const allParsed = [...claudeSessions, ...codexSessions];
+  const rawParsed = [...claudeSessions, ...codexSessions];
   progress(`  ${icon.ok} Parsing sessions ${c.dim}── ${parseNotes.join(' · ')} (${fmt(Date.now() - startParse)})${c.reset}`);
 
   // Save the cache as soon as parsing is done — even if the run then bails
   // (e.g. a --source filter that matches nothing), the parse work is kept.
-  saveCache(allParsed, claudeIndex, codexIndex, cacheOptions);
+  saveCache(rawParsed, claudeIndex, codexIndex, cacheOptions);
+
+  // --depth: when a session's cwd is a WORKSPACE PARENT of git repos (not a
+  // repo itself), split it into per-sub-repo virtual sessions so nested repos
+  // are actually correlated. Runs post-cache so the raw parse is preserved.
+  const allParsed = depth > 0 ? explodeWorkspaceSessions(rawParsed, depth) : rawParsed;
+  if (depth > 0) {
+    const added = allParsed.length - rawParsed.length;
+    if (added > 0) {
+      progress(`  ${icon.ok} Depth walk ${c.dim}── expanded ${added} workspace session${added === 1 ? '' : 's'} into nested sub-repos (depth ${depth})${c.reset}`);
+    }
+  }
 
   // Optional --source filter: analyze a single agent's sessions only. The cache
   // still stores everything parsed, so switching sources doesn't re-parse.
@@ -257,7 +362,8 @@ const addAnalysisOptions = (cmd) => cmd
   .option('--plan <tier>', 'Claude subscription mode — effective $/commit vs your flat plan: pro | max5 | max20')
   .option('--plan-cost <amount>', 'custom Claude monthly subscription cost in USD (overrides --plan)')
   .option('--codex-plan <tier>', 'Codex/ChatGPT subscription mode: free | go | plus | pro100 | pro | team | business | business-annual')
-  .option('--codex-plan-cost <amount>', 'custom Codex monthly subscription cost in USD (overrides --codex-plan)');
+  .option('--codex-plan-cost <amount>', 'custom Codex monthly subscription cost in USD (overrides --codex-plan)')
+  .option('--depth <n>', 'walk into subdirectories of a session cwd up to N levels to discover nested git repos (0 = off, max 5)', '0');
 
 // Validate the shared flags, run the full pipeline, and handle the byproducts
 // every command shares (invokedAs stamping, statusline quickstats). Returns
@@ -268,6 +374,12 @@ async function runAnalysis(opts) {
   // with days:NaN and die later with a cryptic "Invalid time value".
   if (!/^\d+$/.test(String(opts.days)) || days < 1) {
     console.error(`  ${icon.err} ${c.red}--days must be a positive integer, got "${opts.days}".${c.reset}`);
+    process.exit(1);
+  }
+
+  const depth = parseInt(opts.depth, 10);
+  if (!/^\d+$/.test(String(opts.depth)) || depth < 0 || depth > 5) {
+    console.error(`  ${icon.err} ${c.red}--depth must be an integer between 0 and 5, got "${opts.depth}".${c.reset}`);
     process.exit(1);
   }
 
@@ -321,7 +433,7 @@ async function runAnalysis(opts) {
     console.error(`  ${icon.warn} ${c.yellow}--codex-dir does not exist:${c.reset} ${codexDir}`);
   }
 
-  const payloads = await buildPayload(claudeDir, codexDir, days, opts.project, opts.refresh, planConfigs, sourceFilter, !!opts.offline);
+  const payloads = await buildPayload(claudeDir, codexDir, days, opts.project, opts.refresh, planConfigs, sourceFilter, !!opts.offline, depth);
   if (payloads) {
     const invokedAs = path.basename(process.argv[1]);
     for (const p of Object.values(payloads)) {
@@ -356,7 +468,7 @@ async function runAnalysis(opts) {
       }, { claudeDir, codexDir });
     }
   }
-  return { payloads, days, claudeDir, codexDir, planConfigs, sourceFilter };
+  return { payloads, days, claudeDir, codexDir, planConfigs, sourceFilter, depth };
 }
 
 // The deprecation nudge for the legacy claude-roi alias plus the version line.
@@ -388,7 +500,7 @@ async function runDashboard(opts) {
   }
   printBanner();
 
-  const { payloads, days, claudeDir, codexDir, planConfigs, sourceFilter } = await runAnalysis(opts);
+  const { payloads, days, claudeDir, codexDir, planConfigs, sourceFilter, depth } = await runAnalysis(opts);
 
   if (!payloads) {
     printNoSessions(sourceFilter, days, claudeDir, codexDir);
@@ -411,7 +523,7 @@ async function runDashboard(opts) {
 
   // Start server — pass a rebuild function so /api/refresh can re-run the pipeline
   const rebuild = async () => {
-    const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline);
+    const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline, depth);
     if (fresh) {
       for (const p of Object.values(fresh)) p.meta.invokedAs = payload.meta.invokedAs;
     }
@@ -702,7 +814,7 @@ async function main() {
   const ANALYSIS_SUBCOMMANDS = new Set(['report', 'daily', 'weekly', 'monthly', 'blocks', 'mcp']);
   program.hook('preSubcommand', (thisCommand, subcommand) => {
     if (!ANALYSIS_SUBCOMMANDS.has(subcommand.name())) return;
-    for (const key of ['days', 'project', 'refresh', 'claudeDir', 'codexDir', 'source', 'offline', 'plan', 'planCost', 'codexPlan', 'codexPlanCost']) {
+    for (const key of ['days', 'project', 'refresh', 'claudeDir', 'codexDir', 'source', 'offline', 'plan', 'planCost', 'codexPlan', 'codexPlanCost', 'depth']) {
       if (thisCommand.getOptionValueSource(key) === 'cli') {
         subcommand.setOptionValueWithSource(key, thisCommand.getOptionValue(key), 'cli');
       }

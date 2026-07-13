@@ -1,6 +1,57 @@
 import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+
+// Directory names that should never be recursed into when walking for nested
+// git repos: package/build dirs (some npm packages ship a stray `.git` — every
+// one would explode into a bogus repo), language virtualenvs, common caches.
+// `.claude/worktrees` is skipped because its worktrees resolve to the outer
+// repo via findGitRoot's upward walk — reporting them here double-counts.
+const NESTED_REPO_SKIP_NAMES = new Set([
+  '.git', 'node_modules', '.venv', 'venv', '__pycache__',
+  'dist', 'build', '.next', '.cache', '.turbo', '.parcel-cache',
+  'target', 'vendor',
+]);
+
+// Walk `rootPath` up to `maxDepth` levels deep and return every subdirectory
+// that IS a git repo (has a `.git` entry — dir for normal repos, file for
+// submodules). Does not recurse into a discovered repo (a repo inside a repo
+// is a submodule/worktree; its commits belong to the outer analysis).
+// Symlinks are skipped to prevent cycles and escape via a stray link.
+// Any readdir failure yields an empty walk — the feature is opt-in and must
+// never throw.
+export function findNestedGitRepos(rootPath, maxDepth) {
+  if (!rootPath || !Number.isFinite(maxDepth) || maxDepth < 1) return [];
+  if (!existsSync(rootPath)) return [];
+  const found = [];
+  const walk = (dir, depth) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue;
+      if (!entry.isDirectory()) continue;
+      const name = entry.name;
+      if (name.startsWith('.') && name !== '.claude') {
+        // Skip hidden dirs. `.claude` itself is not a repo but may contain
+        // worktrees which we skip below via NESTED_REPO_SKIP_NAMES.
+        continue;
+      }
+      if (NESTED_REPO_SKIP_NAMES.has(name)) continue;
+      const full = path.join(dir, name);
+      if (existsSync(path.join(full, '.git'))) {
+        found.push(full);
+        continue; // do not recurse into a discovered repo
+      }
+      if (depth < maxDepth) walk(full, depth + 1);
+    }
+  };
+  walk(rootPath, 1);
+  return found;
+}
 
 // Resolve the git user for a specific repo (repo-local config overrides global).
 // Without -C this reads config relative to the process CWD, which can be a

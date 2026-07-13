@@ -98,6 +98,7 @@ npx codelens-ai --claude-dir X  # override ~/.claude/projects (testing/CI)
 npx codelens-ai --codex-dir X   # override ~/.codex/sessions (testing/CI)
 npx codelens-ai --plan max20 --codex-plan plus   # per-agent subscription mode
 npx codelens-ai --host 0.0.0.0  # expose dashboard beyond localhost (default 127.0.0.1)
+npx codelens-ai --depth 2       # walk N levels into a session's cwd to discover nested git repos (0-5, default 0)
 npx codelens-ai report          # terminal ROI scorecard (--md / --html to export)
 npx codelens-ai daily           # usage/cost table by day (+ commits, $/commit); -b per-model, --json
 npx codelens-ai weekly          # ...by week (--start-of-week monday|sunday); `monthly` = by month

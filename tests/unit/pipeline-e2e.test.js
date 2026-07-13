@@ -130,3 +130,86 @@ test('full pipeline: session + real repo -> trailer-confirmed commit, AI share, 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('--depth explodes a workspace-parent session into per-sub-repo clones', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'pipeline-depth-'));
+  try {
+    // Workspace directory with TWO nested git repos — the parent has no .git.
+    const workspace = path.join(root, 'workspace');
+    mkdirSync(workspace, { recursive: true });
+    const repoA = path.join(workspace, 'repo-a');
+    const repoB = path.join(workspace, 'repo-b');
+    for (const repo of [repoA, repoB]) {
+      mkdirSync(repo, { recursive: true });
+      execSync('git init -q -b main', { cwd: repo });
+      execSync('git config user.email test@codelens.dev', { cwd: repo });
+      execSync('git config user.name Test', { cwd: repo });
+    }
+
+    const now = Date.now();
+    const iso = (minAgo) => new Date(now - minAgo * 60_000).toISOString();
+
+    // One commit per sub-repo, both within the session window.
+    mkdirSync(path.join(repoA, 'src'), { recursive: true });
+    writeFileSync(path.join(repoA, 'src', 'a.js'), 'a\n'.repeat(10));
+    gitCommit(repoA, 'repo-a feature', null, iso(30));
+
+    mkdirSync(path.join(repoB, 'src'), { recursive: true });
+    writeFileSync(path.join(repoB, 'src', 'b.js'), 'b\n'.repeat(5));
+    gitCommit(repoB, 'repo-b tweak', null, iso(25));
+
+    // Session with cwd at the WORKSPACE PARENT, editing files in both repos.
+    const claudeDir = path.join(root, 'claude-projects');
+    const projDir = path.join(claudeDir, 'workspace-project');
+    mkdirSync(projDir, { recursive: true });
+    const sid = 'dddddddd-aaaa-bbbb-cccc-eeeeeeeeeeee';
+    const lines = [
+      {
+        type: 'user', sessionId: sid, cwd: workspace, gitBranch: 'main', timestamp: iso(60),
+        message: { content: [{ type: 'text', text: 'Work in both repos.' }] },
+      },
+      {
+        type: 'assistant', requestId: 'req-1', timestamp: iso(50),
+        message: {
+          model: 'claude-sonnet-4-6-20250929',
+          usage: { input_tokens: 3000, output_tokens: 700, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+          content: [
+            { type: 'tool_use', id: 't1', name: 'Edit', input: { file_path: path.join(repoA, 'src', 'a.js') } },
+            { type: 'tool_use', id: 't2', name: 'Edit', input: { file_path: path.join(repoB, 'src', 'b.js') } },
+          ],
+        },
+      },
+    ];
+    writeFileSync(path.join(projDir, `${sid}.jsonl`), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const codexDir = path.join(root, 'codex-sessions');
+    mkdirSync(codexDir, { recursive: true });
+
+    // Without --depth: workspace parent has no .git, session gets zero commits.
+    const noDepth = JSON.parse(execFileSync(process.execPath, [
+      INDEX, '--json', '--claude-dir', claudeDir, '--codex-dir', codexDir, '--days', '30',
+    ], { encoding: 'utf-8', env: { ...process.env, HOME: root } }));
+    assert.equal(noDepth.summary.totalSessions, 1);
+    assert.equal(noDepth.summary.totalCommits, 0, 'without --depth, nested repos are invisible');
+    const baselineCost = noDepth.summary.totalCost;
+    assert.ok(baselineCost > 0);
+
+    // With --depth 1: session explodes into 2 clones, both sub-repo commits correlate.
+    const withDepth = JSON.parse(execFileSync(process.execPath, [
+      INDEX, '--json', '--claude-dir', claudeDir, '--codex-dir', codexDir, '--days', '30', '--depth', '1',
+    ], { encoding: 'utf-8', env: { ...process.env, HOME: root } }));
+    assert.equal(withDepth.summary.totalSessions, 2, 'session exploded into two clones');
+    assert.equal(withDepth.summary.totalCommits, 2, 'both sub-repo commits correlated');
+    // Cost is CONSERVED: only the "winner" clone carries cost.
+    assert.ok(
+      Math.abs(withDepth.summary.totalCost - baselineCost) < 1e-9,
+      `total spend preserved after explosion (baseline=${baselineCost}, depth=${withDepth.summary.totalCost})`
+    );
+    // Sub-repo names surface as project names.
+    const projectNames = new Set(withDepth.sessions.map(s => s.projectName));
+    assert.ok(projectNames.has('repo-a'));
+    assert.ok(projectNames.has('repo-b'));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -73,6 +73,14 @@ test('--json with zero sessions writes the literal null to stdout, progress to s
   }
 });
 
+test('rejects out-of-range and non-integer --depth', () => {
+  for (const bad of ['abc', '-1', '6', '10']) {
+    const r = runCli([`--depth=${bad}`]);
+    assert.equal(r.status, 1, `--depth=${bad} should exit 1`);
+    assert.match(r.stderr, /--depth must be an integer between 0 and 5/);
+  }
+});
+
 test('warns on stderr (without exiting) when an explicit override dir does not exist', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'cli-validation-'));
   try {
