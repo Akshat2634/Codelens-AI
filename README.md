@@ -108,7 +108,7 @@ This parses your `~/.claude/projects/` and `~/.codex/sessions/` data, analyzes y
 | **Orphaned Sessions** | Sessions with 10+ messages that produced zero commits           |
 | **ROI Grade (A-F)**   | Composite score based on tokens-per-commit and survival rate    |
 | **Trailer Attribution** | `Co-authored-by` agent trailers confirm commit attribution (near-ground-truth) |
-| **Model Comparison**  | Efficiency across Opus, Sonnet, Haiku, GPT-5 Codex, and more    |
+| **Model Comparison**  | Efficiency across Claude and Codex models, including GPT-5.6 Sol, Terra, and Luna |
 | **Agent Comparison**  | Per-agent dashboard tabs (All / Claude Code / OpenAI Codex)     |
 | **Branch Awareness**  | What % of AI commits landed on production                       |
 | **Peak Hours**        | Hour-of-day x day-of-week productivity heatmap                  |
@@ -245,17 +245,17 @@ The dashboard includes:
 - **Attribution & Coverage** — per-commit confidence (high/medium/low) that a commit was really the AI's, `Co-authored-by` trailer confirmations, plus a reconciliation of AI-attributed vs co-authored vs organic (manual) lines, so the ROI numbers are auditable rather than a black box
 - **Smart insights** — auto-generated observations about your usage patterns
 - **Cost vs Output timeline** — dual-axis chart of daily cost and lines added
-- **Model comparison** — cost breakdown by Claude model
+- **Model comparison** — cost and efficiency breakdown across Claude Code and OpenAI Codex models
 - **Session length analysis** — which session sizes have the best ROI
 - **Productivity heatmap** — GitHub-style grid showing when you're most productive
 - **Agent Autonomy** — autonomy score badge, autopilot ratio, self-heal score, commit velocity, and top verification commands
 - **Projects** — per-repository ROI: which repo your spend goes to, ranked by cost, with its share of spend, commits, $/commit, lines, and % on the default branch. Repos are identified by their git `origin` remote, so a clone, worktree, or moved checkout of the same repo counts as one project (not a duplicate card)
-- **Sessions table** — sortable, expandable table with per-session metrics, matched commits, and autopilot ratio
+- **Sessions table** — sortable, expandable table with per-session metrics, matched commits (including their containing branch when available), and autopilot ratio
 
 ## How It Works
 
 1. **Parses** JSONL session files from `~/.claude/projects/` (Claude Code) and rollout files from `~/.codex/sessions/` (OpenAI Codex CLI — including `.jsonl.zst` archives on Node >= 22.15)
-2. **Analyzes** git history from each repo you've worked in with either agent, including `Co-authored-by` agent trailers on each commit
+2. **Analyzes** git history from each repo you've worked in with either agent, including `Co-authored-by` agent trailers on each commit. If a session starts in a workspace parent that contains multiple git repos, Codelens automatically discovers nested repos (up to three levels) and correlates the touched files with the right repo — no flag or configuration required.
 3. **Correlates** sessions to commits by file overlap and timing — all agents correlate together, so a commit is attributed to at most one session; a commit stamped `Co-authored-by: Claude/Codex` is routed to the matching agent and counts as high-confidence attribution
 4. **Calculates** cost using each provider's published API pricing (input, output, cache, and server-side web search when logged)
 5. **Serves** an interactive dashboard on localhost with per-agent views
@@ -299,6 +299,9 @@ Codex sessions are costed from the `token_count` events in each rollout file. In
 
 | Model | Input | Cached Input | Output |
 | --- | --- | --- | --- |
+| GPT-5.6 Sol (`gpt-5.6` alias) | $5.00/M short, $10/M long context | $0.50/M short, $1/M long context | $30/M short, $45/M long context |
+| GPT-5.6 Terra | $2.50/M short, $5/M long context | $0.25/M short, $0.50/M long context | $15/M short, $22.50/M long context |
+| GPT-5.6 Luna | $1.00/M short, $2/M long context | $0.10/M short, $0.20/M long context | $6/M short, $9/M long context |
 | GPT-5.5 | $5.00/M short, $10/M long context | $0.50/M short, $1/M long context | $30/M short, $45/M long context |
 | GPT-5.5 Pro | $30/M short, $60/M long context | no published cached discount | $180/M short, $270/M long context |
 | GPT-5.4 / 5.4 Mini / 5.4 Nano | $2.50 / $0.75 / $0.20/M | $0.25 / $0.075 / $0.02/M | $15 / $4.50 / $1.25/M |
@@ -313,9 +316,9 @@ Codex sessions are costed from the `token_count` events in each rollout file. In
 
 > **Note — o3:** OpenAI cut o3 prices 80% on Jun 10, 2025; usage is priced by the rate in effect on its date.
 >
-> **Note — long context:** GPT-5.5 and GPT-5.4 publish separate short-context and long-context rates. Codex logs that use long-context billing are kept as separate model buckets (for example, `gpt-5.5[long]`) before aggregation so mixed sessions do not average incompatible rates.
+> **Note — long context:** GPT-5.6, GPT-5.5, and GPT-5.4 publish separate short-context and long-context rates. Codelens applies the long tier only when an individual request exceeds 272K input tokens, then keeps it as a separate model bucket (for example, `gpt-5.6-sol[long]`) so mixed sessions do not average incompatible rates.
 >
-> **Note — current Codex models:** OpenAI's Codex docs currently recommend GPT-5.5, GPT-5.4, and GPT-5.4 mini; `gpt-5.3-codex-spark` is a ChatGPT Pro research preview and is not available in the API at launch. `gpt-5.3-codex` remains priced for API/log history but is deprecated for ChatGPT sign-in.
+> **Note — current models:** OpenAI's current model guidance recommends GPT-5.6 Sol for complex coding and reasoning, GPT-5.6 Terra for a balance of capability and cost, and GPT-5.6 Luna for cost-sensitive workloads. The `gpt-5.6` alias resolves to Sol. Codelens also retains pricing for older Codex models so historical rollout costs stay accurate.
 >
 > **Note — web search:** Codex `web_search_call` entries are costed at OpenAI's $10 per 1,000 calls; search content tokens remain part of normal token usage when billed by the API.
 >
@@ -342,6 +345,7 @@ Codelens-AI/
     ├── git-analyzer.js   # Parse git log with branch awareness
     ├── correlator.js     # Match sessions to commits by file overlap + timing + trailers
     ├── metrics.js        # Calculate ROI metrics and insights
+    ├── mcp.js            # `codelens-ai mcp` — expose reports as MCP tools over stdio
     ├── report.js         # `codelens-ai report` — terminal / Markdown / HTML ROI scorecard
     ├── statusline.js     # `codelens-ai statusline` — Claude Code statusline integration
     ├── server.js         # Express server + API routes (?source= views)
