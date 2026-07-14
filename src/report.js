@@ -3,6 +3,9 @@
 // Markdown/HTML to hand to a manager. Everything is rendered from an
 // already-computed metrics payload — no parsing or git work happens here.
 
+// Family display names shared with the dashboard ('gpt' → 'GPT', not 'Gpt').
+import { capitalise as cap } from './metrics.js';
+
 const c = {
   reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m',
   green: '\x1b[32m', yellow: '\x1b[33m', cyan: '\x1b[36m', red: '\x1b[31m',
@@ -90,6 +93,10 @@ export function reportModel(payload, payloads = null) {
     } : null,
     agents,
     models,
+    // Nullable quality blocks, same contract as `attribution`: renderers gate
+    // on presence, MCP's roi_summary inherits them via this model.
+    regret: payload.regret ?? null,
+    advisor: payload.modelAdvisor ?? null,
     insights: (payload.insights || []).slice(0, 3),
   };
 }
@@ -139,6 +146,30 @@ export function renderReportText(model) {
     L.push(`  ${c.bold}Models${c.reset}`);
     for (const m of model.models) {
       L.push(`  ${label(m.family)}${fmtMoney(m.cost)}${m.costPerCommit != null ? ` ${c.dim}·${c.reset} ${fmtMoney(m.costPerCommit)}/commit (${m.commits})` : ''}`);
+    }
+  }
+
+  if (model.advisor?.verdict === 'switch') {
+    const a = model.advisor;
+    L.push(`  ${rule}`);
+    L.push(`  ${c.bold}Model advisor${c.reset}`);
+    L.push(`  ${label('Recommendation')}${c.yellow}route routine work to ${cap(a.recommended.family)}${c.reset} ${c.dim}(${a.confidence} confidence)${c.reset}`);
+    L.push(`  ${label('Why')}${fmtMoney(a.recommended.costPerCommit)}/commit vs ${fmtMoney(a.current.costPerCommit)} on ${cap(a.current.family)}${a.recommended.survivalRate != null && a.current.survivalRate != null ? `, survival ${a.recommended.survivalRate}% vs ${a.current.survivalRate}%` : ''}`);
+    L.push(`  ${label('Potential savings')}${c.green}~${fmtMoney(a.projectedSavings)}${c.reset} ${c.dim}over this window${c.reset}`);
+  } else if (model.advisor?.verdict === 'keep' && model.advisor.current) {
+    L.push(`  ${rule}`);
+    L.push(`  ${c.bold}Model advisor${c.reset}`);
+    L.push(`  ${label('Recommendation')}${c.green}keep ${cap(model.advisor.current.family)}${c.reset} ${c.dim}— no cheaper family ships comparable-quality commits${c.reset}`);
+  }
+
+  if (model.regret) {
+    const r = model.regret;
+    const rc = r.regretRate >= 15 ? c.red : r.regretRate >= 5 ? c.yellow : c.green;
+    L.push(`  ${rule}`);
+    L.push(`  ${c.bold}Regret detector${c.reset}`);
+    L.push(`  ${label('Regretted commits')}${rc}${r.regretted} of ${r.aiCommits} (${r.regretRate}%)${c.reset} ${c.dim}reverted or hot-fixed within ${r.fixWindowHours}h${c.reset}`);
+    if (r.regretted > 0) {
+      L.push(`  ${label('Breakdown')}${r.revertedCount} reverted ${c.dim}·${c.reset} ${r.quickFixedCount} quick-fixed${r.regrettedCost > 0 ? ` ${c.dim}·${c.reset} ~${fmtMoney(r.regrettedCost)} spend didn't stick` : ''}`);
     }
   }
 
@@ -212,6 +243,30 @@ export function renderReportMarkdown(model) {
     L.push('');
   }
 
+  if (model.advisor?.verdict === 'switch') {
+    const a = model.advisor;
+    L.push('## Model advisor');
+    L.push('');
+    L.push(`> **Route routine work to ${cap(a.recommended.family)}** (${a.confidence} confidence) — ${fmtMoney(a.recommended.costPerCommit)}/commit vs ${fmtMoney(a.current.costPerCommit)} on ${cap(a.current.family)}${a.recommended.survivalRate != null && a.current.survivalRate != null ? `, at comparable survival (${a.recommended.survivalRate}% vs ${a.current.survivalRate}%)` : ''}. Potential savings this window: ~${fmtMoney(a.projectedSavings)}.`);
+    L.push('');
+  } else if (model.advisor?.verdict === 'keep' && model.advisor.current) {
+    L.push('## Model advisor');
+    L.push('');
+    L.push(`> **Keep ${cap(model.advisor.current.family)}** — no cheaper model family ships comparable-quality commits on your work.`);
+    L.push('');
+  }
+
+  if (model.regret) {
+    const r = model.regret;
+    L.push('## Regret detector');
+    L.push('');
+    L.push(`- **${r.regretted} of ${r.aiCommits} AI commits (${r.regretRate}%)** were reverted or hot-fixed within ${r.fixWindowHours}h`);
+    if (r.regretted > 0) {
+      L.push(`- ${r.revertedCount} reverted · ${r.quickFixedCount} quick-fixed${r.regrettedCost > 0 ? ` · ~${fmtMoney(r.regrettedCost)} of agent spend didn't stick` : ''}`);
+    }
+    L.push('');
+  }
+
   if (model.attribution) {
     const at = model.attribution;
     L.push('## Attribution audit');
@@ -276,6 +331,25 @@ export function renderReportHtml(model) {
     ${at.trailerOrganic > 0 ? `<li>${fmtInt(at.trailerOrganic)} AI-stamped commits had no session logs in this window</li>` : ''}
   </ul>` : '';
 
+  let advisor = '';
+  if (model.advisor?.verdict === 'switch') {
+    const a = model.advisor;
+    advisor = `
+  <h2>Model advisor</h2>
+  <p><strong>Route routine work to ${escapeHtml(cap(a.recommended.family))}</strong> <span class="dim">(${escapeHtml(a.confidence)} confidence)</span> — ${fmtMoney(a.recommended.costPerCommit)}/commit vs ${fmtMoney(a.current.costPerCommit)} on ${escapeHtml(cap(a.current.family))}${a.recommended.survivalRate != null && a.current.survivalRate != null ? `, at comparable survival (${a.recommended.survivalRate}% vs ${a.current.survivalRate}%)` : ''}. Potential savings this window: <strong>~${fmtMoney(a.projectedSavings)}</strong>.</p>`;
+  } else if (model.advisor?.verdict === 'keep' && model.advisor.current) {
+    advisor = `
+  <h2>Model advisor</h2>
+  <p><strong>Keep ${escapeHtml(cap(model.advisor.current.family))}</strong> — no cheaper model family ships comparable-quality commits on your work.</p>`;
+  }
+
+  const regret = model.regret ? `
+  <h2>Regret detector</h2>
+  <ul>
+    <li><strong>${fmtInt(model.regret.regretted)} of ${fmtInt(model.regret.aiCommits)} AI commits (${model.regret.regretRate}%)</strong> were reverted or hot-fixed within ${model.regret.fixWindowHours}h</li>
+    ${model.regret.regretted > 0 ? `<li>${model.regret.revertedCount} reverted · ${model.regret.quickFixedCount} quick-fixed${model.regret.regrettedCost > 0 ? ` · ~${fmtMoney(model.regret.regrettedCost)} of agent spend didn't stick` : ''}</li>` : ''}
+  </ul>` : '';
+
   const insights = model.insights.length > 0
     ? `<h2>Insights</h2>\n<ul>\n${model.insights.map(i => `<li>${escapeHtml(i.text)}</li>`).join('\n')}\n</ul>`
     : '';
@@ -316,6 +390,8 @@ export function renderReportHtml(model) {
   <table>${rows.join('\n')}</table>
   ${model.agents.length > 0 ? `<h2>Agents</h2>\n<table><tr><th>Agent</th><th>Spend</th><th>Commits</th><th>$/commit</th><th>Grade</th></tr>\n${agentRows}</table>` : ''}
   ${model.models.length > 0 ? `<h2>Models</h2>\n<table><tr><th>Model family</th><th>Spend</th><th>$/commit</th><th>Commits</th></tr>\n${modelRows}</table>` : ''}
+  ${advisor}
+  ${regret}
   ${attribution}
   ${insights}
   <div class="footer">Costs are API-equivalent estimates from published per-token pricing${model.plan ? '; plan figures prorate your flat subscription fee' : ''}. All data computed locally from agent session logs and git history — nothing leaves your machine.</div>

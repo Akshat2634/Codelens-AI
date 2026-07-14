@@ -401,10 +401,49 @@ export function resolveMovedRepoPaths(repoPaths, sessions = []) {
   return { aliasMap, unresolved };
 }
 
+// ── revert detection (feeds the regret metric in metrics.js) ──
+// `git revert` writes "This reverts commit <sha>." into the BODY, which the
+// main log pass never fetches (it parses `%s` subjects line-by-line, and a
+// multi-line `%b` would corrupt its numstat scanning). Reverts are rare, so a
+// separate --grep pass with NUL-terminated records is simpler and cheap.
+
+// Parse `--format="%H%x01%aI%x01%B%x00"` output into
+// [{ hash, timestampMs, reverts: [sha, ...] }]. Pure, exported for tests.
+export function parseRevertLog(raw) {
+  const out = [];
+  for (const record of (raw || '').split('\x00')) {
+    // The body (%B) is free text and can itself contain \x01 — split only the
+    // two leading fields and keep the rest of the record intact.
+    const parts = record.split('\x01');
+    if (parts.length < 3 || !parts[0].trim()) continue;
+    const [hash, timestamp] = parts;
+    const body = parts.slice(2).join('\x01');
+    const reverts = [...body.matchAll(/This reverts commit ([0-9a-f]{7,40})/gi)].map(m => m[1].toLowerCase());
+    if (reverts.length > 0) {
+      out.push({ hash: hash.trim(), timestampMs: new Date(timestamp).getTime(), reverts });
+    }
+  }
+  return out;
+}
+
+// All revert commits in the window, by ANY author — a teammate reverting the
+// user's AI commit is the strongest regret signal there is, so no user filter.
+function getReverts(repoPath, days) {
+  try {
+    const raw = execSync(
+      `git -C "${repoPath}" log --no-merges --all --since="${days} days ago" --grep="This reverts commit" --format="%H%x01%aI%x01%B%x00"`,
+      { encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+    return parseRevertLog(raw);
+  } catch {
+    return [];
+  }
+}
+
 export function analyzeGitRepo(repoPath, days) {
   const remote = getRepoRemote(repoPath);
   if (!existsSync(path.join(repoPath, '.git'))) {
-    return { repoPath, commits: [], defaultBranch: null, remote: remote?.id || null, remoteSlug: remote?.slug || null };
+    return { repoPath, commits: [], defaultBranch: null, remote: remote?.id || null, remoteSlug: remote?.slug || null, reverts: [] };
   }
 
   const user = getGitUser(repoPath);
@@ -502,9 +541,9 @@ export function analyzeGitRepo(repoPath, days) {
       Number.isFinite(c.timestampMs) && c.timestampMs >= cutoffMs
     );
 
-    return { repoPath, commits: userCommits, defaultBranch: branchName, remote: remote?.id || null, remoteSlug: remote?.slug || null };
+    return { repoPath, commits: userCommits, defaultBranch: branchName, remote: remote?.id || null, remoteSlug: remote?.slug || null, reverts: getReverts(repoPath, days) };
   } catch (err) {
     process.stderr.write(`Warning: Git analysis failed for ${repoPath}: ${err.message}\n`);
-    return { repoPath, commits: [], defaultBranch: null, remote: remote?.id || null, remoteSlug: remote?.slug || null };
+    return { repoPath, commits: [], defaultBranch: null, remote: remote?.id || null, remoteSlug: remote?.slug || null, reverts: [] };
   }
 }

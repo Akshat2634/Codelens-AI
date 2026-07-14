@@ -346,10 +346,13 @@ function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics) {
   };
 }
 
-function computeLineSurvival(correlatedSessions) {
-  let totalAdded = 0;
-  let totalChurned = 0;
-
+// Optional groupOf(session) tags each ADDED line with a group (e.g. the
+// session's dominant model family) while churn is still computed over the
+// full shared timeline — a deletion from ANY session consumes live additions,
+// so per-group survival sees cross-group rewrites. With groupOf, returns
+// Map<group, stats> (a null group participates in churn but isn't reported);
+// without it, the single stats object as before.
+function computeLineSurvival(correlatedSessions, groupOf = null) {
   // Build a per-file edit timeline from AI-correlated commits ONLY, counting just
   // the lines in files the matched session actually wrote (overlap). This makes
   // survival an AI-quality signal (not "all of the user's code") and makes its
@@ -358,6 +361,7 @@ function computeLineSurvival(correlatedSessions) {
   for (const session of correlatedSessions) {
     const sessionFiles = new Set(session.filesWritten || []);
     const chatOnly = sessionFiles.size === 0;
+    const group = groupOf ? groupOf(session) : '';
     for (const commit of (session.commits || [])) {
       for (const file of commit.files) {
         if (!chatOnly && !sessionFiles.has(file.path)) continue;
@@ -369,6 +373,7 @@ function computeLineSurvival(correlatedSessions) {
           timestampMs: commit.timestampMs,
           added: file.added,
           deleted: file.deleted,
+          group,
         });
       }
     }
@@ -379,40 +384,53 @@ function computeLineSurvival(correlatedSessions) {
   // only deletions that land within CHURN_WINDOW_MS of an addition count as churn
   // (a deletion after the window is a legitimate later change, not rework). This
   // catches multi-edit rework that a naive next-edit-only comparison misses.
+  // Churned lines are charged to the group that ADDED them, whoever deleted them.
   const nowMs = Date.now();
-  let maturing = 0; // lines too young to have been observable for a full window
+  const acc = new Map(); // group -> { totalAdded, totalChurned, maturing }
+  const accFor = (g) => {
+    if (!acc.has(g)) acc.set(g, { totalAdded: 0, totalChurned: 0, maturing: 0 });
+    return acc.get(g);
+  };
   for (const entries of fileTimeline.values()) {
     entries.sort((a, b) => a.timestampMs - b.timestampMs);
-    const live = []; // { ts, n } additions not yet deleted
+    const live = []; // { ts, n, group } additions not yet deleted
     for (const e of entries) {
-      totalAdded += e.added;
+      accFor(e.group).totalAdded += e.added;
       let toDelete = e.deleted;
       while (toDelete > 0 && live.length > 0) {
         const block = live[live.length - 1];
         const take = Math.min(block.n, toDelete);
-        if (e.timestampMs - block.ts <= CHURN_WINDOW_MS) totalChurned += take;
+        if (e.timestampMs - block.ts <= CHURN_WINDOW_MS) accFor(block.group).totalChurned += take;
         block.n -= take;
         toDelete -= take;
         if (block.n === 0) live.pop();
       }
-      if (e.added > 0) live.push({ ts: e.timestampMs, n: e.added });
+      if (e.added > 0) live.push({ ts: e.timestampMs, n: e.added, group: e.group });
     }
     // Lines still live but younger than the window can't be judged yet — exclude
     // them from the rate (right-censoring) so recent work doesn't inflate survival.
     for (const block of live) {
-      if (nowMs - block.ts < CHURN_WINDOW_MS) maturing += block.n;
+      if (nowMs - block.ts < CHURN_WINDOW_MS) accFor(block.group).maturing += block.n;
     }
   }
 
-  const surviving = totalAdded - totalChurned; // raw lines that survived the window
-  const observed = totalAdded - maturing;      // lines old enough to judge
-  const survived = surviving - maturing;       // matured lines that weren't churned
-  // null when nothing is old enough to judge — a fabricated 100% would feed the
-  // efficiency score and grade with evidence that doesn't exist yet. Otherwise
-  // rounded to the nearest 5% to avoid false precision.
-  const survivalRate = observed > 0 ? Math.round((survived / observed) * 100 / 5) * 5 : null;
+  const finalize = ({ totalAdded, totalChurned, maturing }) => {
+    const surviving = totalAdded - totalChurned; // raw lines that survived the window
+    const observed = totalAdded - maturing;      // lines old enough to judge
+    const survived = surviving - maturing;       // matured lines that weren't churned
+    // null when nothing is old enough to judge — a fabricated 100% would feed the
+    // efficiency score and grade with evidence that doesn't exist yet. Otherwise
+    // rounded to the nearest 5% to avoid false precision.
+    const survivalRate = observed > 0 ? Math.round((survived / observed) * 100 / 5) * 5 : null;
+    return { totalAdded, totalChurned, surviving, maturing, survivalRate };
+  };
 
-  return { totalAdded, totalChurned, surviving, maturing, survivalRate };
+  if (!groupOf) return finalize(accFor(''));
+  const out = new Map();
+  for (const [g, s] of acc) {
+    if (g !== null) out.set(g, finalize(s));
+  }
+  return out;
 }
 
 // ---- Autonomy metrics ----
@@ -604,7 +622,232 @@ function computeSessionGrade(session) {
   return 'F';
 }
 
-function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, _tokenAnalytics, autonomyMetrics) {
+// ---- Regret detector ----
+// Survival says AI code was EDITED soon after; regret says it was UNDONE:
+// a git revert naming the commit (hard signal, parsed from revert bodies by
+// git-analyzer), or a fixup-looking commit from a DIFFERENT session touching
+// the same files within 48h (soft signal — same-session follow-ups are just
+// the agent iterating, so they don't count).
+const REGRET_FIX_WINDOW_MS = 48 * 60 * 60 * 1000;
+// Anchored inflections, not open prefixes — a bare /\bfix/ would flag
+// "fixtures" and /\btypo/ "typography".
+const REGRET_FIX_SUBJECT = /\b(fix(es|ed|ing)?|bugfix(es)?|bugs?|hotfix(es)?|typos?|oops|broken|breaks?|repair(s|ed|ing)?|regress(es|ed|ions?)?|revert(s|ed|ing)?)\b/i;
+
+// Reverts that still stand: git's revert-of-revert ("Reapply") re-lands the
+// work, so a revert record that a LATER still-active record names as a target
+// is neutralized — and its own target must not count as regretted. A revert
+// can only target an earlier commit, so one newest-first pass settles chains.
+function activeReverts(reverts) {
+  const sorted = [...(reverts || [])].sort((a, b) => b.timestampMs - a.timestampMs);
+  const active = [];
+  for (const r of sorted) {
+    const neutralized = active.some(a => a.reverts.some(t => r.hash.toLowerCase().startsWith(t)));
+    if (!neutralized) active.push(r);
+  }
+  return active;
+}
+
+function computeRegret(correlatedSessions, commitsByRepo) {
+  // Every AI-claimed commit, with its owning session (correlation guarantees
+  // at most one session per commit).
+  const aiByHash = new Map();
+  for (const session of correlatedSessions) {
+    for (const commit of session.commits || []) {
+      aiByHash.set(commit.hash, { commit, session });
+    }
+  }
+  if (aiByHash.size === 0) return null;
+
+  // Several map keys can alias one analysis (moved paths, clones of one
+  // remote) — walk each analysis once. A session belongs to an analysis when
+  // its own key resolves to the same object, or to another checkout of the
+  // same remote (a revert made in a second clone still undoes the work).
+  const analyses = [...new Set(Object.values(commitsByRepo || {}))].filter(Boolean);
+  const belongsTo = (session, analysis) =>
+    !session.repoPath ||
+    commitsByRepo[session.repoPath] === analysis ||
+    (!!analysis.remoteSlug && commitsByRepo[session.repoPath]?.remoteSlug === analysis.remoteSlug);
+
+  const regretted = new Map(); // hash -> { commit, session, kind, lagMs }
+
+  // Hard signal: still-standing revert commits (any author) whose body names
+  // an AI commit. Revert bodies may carry abbreviated hashes → prefix match.
+  for (const analysis of analyses) {
+    for (const revert of activeReverts(analysis.reverts)) {
+      for (const target of revert.reverts) {
+        for (const [hash, entry] of aiByHash) {
+          if (!hash.toLowerCase().startsWith(target)) continue;
+          if (!belongsTo(entry.session, analysis)) continue;
+          regretted.set(hash, { ...entry, kind: 'reverted', lagMs: revert.timestampMs - entry.commit.timestampMs });
+        }
+      }
+    }
+  }
+
+  // Soft signal: a later commit from another session (or organic) with a
+  // fixup-looking subject that touches the same files within the window.
+  const owningSession = new Map();
+  for (const [hash, entry] of aiByHash) owningSession.set(hash, entry.session.sessionId);
+  for (const analysis of analyses) {
+    const commits = [...(analysis.commits || [])].sort((a, b) => a.timestampMs - b.timestampMs);
+    for (const [hash, entry] of aiByHash) {
+      if (regretted.has(hash)) continue;
+      if (!belongsTo(entry.session, analysis)) continue;
+      const aiFiles = new Set((entry.commit.files || []).map(f => f.path));
+      if (aiFiles.size === 0) continue;
+      // Binary-search the first commit after this one, so a big window
+      // doesn't rescan the whole history per AI commit.
+      let lo = 0;
+      let hi = commits.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (commits[mid].timestampMs <= entry.commit.timestampMs) lo = mid + 1;
+        else hi = mid;
+      }
+      for (let i = lo; i < commits.length; i++) {
+        const later = commits[i];
+        if (later.timestampMs - entry.commit.timestampMs > REGRET_FIX_WINDOW_MS) break;
+        if (later.hash === hash) continue;
+        if (owningSession.get(later.hash) === entry.session.sessionId) continue;
+        if (!REGRET_FIX_SUBJECT.test(later.subject || '')) continue;
+        if (!(later.files || []).some(f => aiFiles.has(f.path))) continue;
+        regretted.set(hash, { ...entry, kind: 'quickFixed', lagMs: later.timestampMs - entry.commit.timestampMs });
+        break;
+      }
+    }
+  }
+
+  // Spend that didn't stick: each regretted commit costs its session's average
+  // per-commit spend. An estimate (session cost isn't split per commit), and
+  // costZeroed workspace clones contribute $0 by construction. Unrounded —
+  // renderers own formatting (fmtMoney shows sub-cent values as "<$0.01").
+  const entries = [...regretted.values()];
+  let regrettedCost = 0;
+  for (const e of entries) {
+    if (!e.session.costZeroed && e.session.commitCount > 0) {
+      regrettedCost += e.session.cost.totalCost / e.session.commitCount;
+    }
+  }
+  return {
+    aiCommits: aiByHash.size,
+    regretted: entries.length,
+    regretRate: Math.round((entries.length / aiByHash.size) * 100),
+    revertedCount: entries.filter(e => e.kind === 'reverted').length,
+    quickFixedCount: entries.filter(e => e.kind === 'quickFixed').length,
+    regrettedCost,
+    fixWindowHours: REGRET_FIX_WINDOW_MS / 3600000,
+    commits: entries
+      .sort((a, b) => b.commit.timestampMs - a.commit.timestampMs)
+      .slice(0, 5)
+      .map(e => ({
+        hash: e.commit.hash.slice(0, 7),
+        subject: e.commit.subject,
+        project: e.session.projectName || null,
+        source: e.session.source || 'claude',
+        kind: e.kind,
+        hoursToRegret: Math.round((e.lagMs / 3600000) * 10) / 10,
+      })),
+  };
+}
+
+// ---- Model advisor ----
+// "Which model is actually worth it on YOUR work": sessions are grouped by
+// dominant family (same attribution rule as modelBreakdown — the family with
+// the most tokens owns the session's cost and commits), each group gets its
+// own $/commit and line-survival rate, and the dominant-spend family is
+// challenged by any cheaper family that ships comparable-quality commits.
+const ADVISOR_MIN_COMMITS = 5;
+const ADVISOR_MIN_SESSIONS = 2;
+const ADVISOR_SURVIVAL_TOLERANCE = 10; // pct points a cheaper family may trail by
+const ADVISOR_MIN_SAVINGS_RATIO = 0.15; // <15% cheaper isn't worth a switch call
+
+// The family that owns a session: the one with the most tokens (same
+// attribution rule as modelBreakdown). null for sessions with no model data
+// and for costZeroed workspace clones, whose $0 cost isn't a real outcome.
+function dominantFamilyOf(session) {
+  if (session.costZeroed) return null;
+  const famTokens = new Map();
+  for (const [model, usage] of Object.entries(session.modelBreakdown || {})) {
+    const family = getModelFamily(model) || 'unknown';
+    famTokens.set(family, (famTokens.get(family) || 0) + (usage.tokens || 0));
+  }
+  let dominant = null;
+  for (const [family, tokens] of famTokens) {
+    if (dominant === null || tokens > famTokens.get(dominant)) dominant = family;
+  }
+  return dominant;
+}
+
+function computeModelAdvisor(correlatedSessions) {
+  const groups = new Map();
+  for (const session of correlatedSessions) {
+    const dominant = dominantFamilyOf(session);
+    if (!dominant) continue;
+    if (!groups.has(dominant)) groups.set(dominant, { sessions: [], cost: 0, commits: 0 });
+    const g = groups.get(dominant);
+    g.sessions.push(session);
+    g.cost += session.cost.totalCost;
+    g.commits += session.commitCount;
+  }
+  if (groups.size === 0) return null;
+
+  // Per-family survival over the FULL shared timeline, so lines one family
+  // wrote and another family (or a zeroed clone) immediately rewrote still
+  // count as churn against the writer — a per-group timeline would hide
+  // exactly the case the quality guard exists for.
+  const survivalByFamily = computeLineSurvival(correlatedSessions, dominantFamilyOf);
+
+  const families = [...groups.entries()]
+    .map(([family, g]) => ({
+      family,
+      cost: Math.round(g.cost * 100) / 100,
+      commits: g.commits,
+      sessions: g.sessions.length,
+      costPerCommit: g.commits > 0 ? g.cost / g.commits : null,
+      survivalRate: survivalByFamily.get(family)?.survivalRate ?? null,
+      // cost > 0 keeps free/locally-hosted models (priced $0) from deadlocking
+      // the comparison — value-per-dollar is undefined at $0.
+      eligible: g.commits >= ADVISOR_MIN_COMMITS && g.sessions.length >= ADVISOR_MIN_SESSIONS && g.cost > 0,
+    }))
+    .sort((a, b) => b.cost - a.cost);
+
+  const base = { families, minCommits: ADVISOR_MIN_COMMITS, projectedSavings: null, confidence: null, recommended: null };
+  const eligible = families.filter(f => f.eligible && f.costPerCommit > 0);
+  if (eligible.length < 2) return { ...base, verdict: 'insufficient', current: null };
+
+  // The family to beat is where the money ACTUALLY goes — families[0] is the
+  // top spender. If it hasn't shipped enough to be judged, don't adjudicate
+  // among runners-up as if it didn't exist.
+  const current = families[0];
+  if (!current.eligible || !(current.costPerCommit > 0)) return { ...base, verdict: 'insufficient', current: null };
+
+  const challengers = eligible.filter(f =>
+    f !== current &&
+    // Never point the recommendation at unrecognized model ids — "route work
+    // to Unknown" is not advice anyone can act on.
+    f.family !== 'unknown' &&
+    f.costPerCommit < current.costPerCommit * (1 - ADVISOR_MIN_SAVINGS_RATIO) &&
+    // Quality guard: never recommend a family whose survival is meaningfully worse.
+    (f.survivalRate == null || current.survivalRate == null ||
+      f.survivalRate >= current.survivalRate - ADVISOR_SURVIVAL_TOLERANCE)
+  );
+  const recommended = challengers.sort((a, b) => a.costPerCommit - b.costPerCommit)[0] || null;
+  if (!recommended) return { ...base, verdict: 'keep', current };
+
+  const surveyable = recommended.survivalRate != null && current.survivalRate != null;
+  return {
+    ...base,
+    verdict: 'switch',
+    current,
+    recommended,
+    // What the window's dominant-family commits would have cost at the
+    // challenger's rate — a like-for-like counterfactual, not a promise.
+    projectedSavings: Math.round((current.costPerCommit - recommended.costPerCommit) * current.commits * 100) / 100,
+    confidence: surveyable && recommended.commits >= 10 ? 'high' : surveyable ? 'medium' : 'low',
+  };
+}
+
+function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, _tokenAnalytics, autonomyMetrics, regret = null, modelAdvisor = null) {
   // Insights are deliberately curated to avoid repeating what's already shown
   // on hero cards (cost/tokens/cache), the weekly narrative (best day, autopilot,
   // dominant model), or the autonomy section (self-heal, bash counts).
@@ -680,11 +923,39 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
     });
   }
 
+  // 2b. Regret — AI work that had to be undone. Priority tracks severity: a
+  // double-digit regret rate is the single most actionable warning here. The
+  // cost clause is dropped below a cent — "roughly $0.00 didn't stick" would
+  // contradict the sentence it ends.
+  if (regret && regret.regretted > 0) {
+    const costClause = regret.regrettedCost >= 0.01 ? ` — roughly $${regret.regrettedCost.toFixed(2)} of agent spend didn't stick` : '';
+    candidates.push({
+      priority: regret.regretRate >= 10 ? 1 : 2,
+      type: regret.regretRate >= 10 ? 'warning' : 'info',
+      text: `${regret.regretted} of ${regret.aiCommits} AI commits (${regret.regretRate}%) were reverted or hot-fixed within ${regret.fixWindowHours}h${costClause}.`,
+    });
+  }
+
+  // 2c. Model advisor — supersedes the passive cost-ratio insight (rule 3)
+  // with an actionable switch call when a cheaper family ships
+  // comparable-survival commits. The survival claim only appears when both
+  // sides actually have a measured rate (a 'low'-confidence switch doesn't).
+  if (modelAdvisor?.verdict === 'switch') {
+    const ratio = modelAdvisor.current.costPerCommit / modelAdvisor.recommended.costPerCommit;
+    const surveyable = modelAdvisor.recommended.survivalRate != null && modelAdvisor.current.survivalRate != null;
+    candidates.push({
+      priority: 2,
+      type: 'tip',
+      text: `${capitalise(modelAdvisor.current.family)}-family models cost ${ratio.toFixed(1)}x more per commit than ${capitalise(modelAdvisor.recommended.family)}${surveyable ? ' at comparable survival' : ''} — routing routine work there could have saved ~$${modelAdvisor.projectedSavings.toFixed(2)} this window.`,
+    });
+  }
+
   // 3. Model cost efficiency — actionable comparison. One-commit samples
   // produce absurd ratios, so both compared families need a minimum of
-  // commits before the insight fires.
+  // commits before the insight fires. Skipped when the advisor already made
+  // the sharper, survival-aware version of this point.
   const MIN_COMMITS_FOR_COST_COMPARE = 3;
-  const modelFamilies = Object.entries(modelBreakdown)
+  const modelFamilies = modelAdvisor?.verdict === 'switch' ? [] : Object.entries(modelBreakdown)
     .filter(([, d]) => d.sessions > 0 && d.avgCostPerCommit && d.commits >= MIN_COMMITS_FOR_COST_COMPARE);
   if (modelFamilies.length > 1) {
     const sorted = [...modelFamilies].sort((a, b) => a[1].avgCostPerCommit - b[1].avgCostPerCommit);
@@ -799,9 +1070,10 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
     .map(({ priority, ...rest }) => rest);
 }
 
-function capitalise(s) {
-  // Display form of a model family. Codex families need casing that naive
-  // capitalization can't produce ('gpt' → 'GPT', 'o-series' → 'o-series').
+// Display form of a model family. Codex families need casing that naive
+// capitalization can't produce ('gpt' → 'GPT', 'o-series' → 'o-series').
+// Exported so report.js renders the same names the dashboard does.
+export function capitalise(s) {
   const special = { gpt: 'GPT', codex: 'Codex', 'o-series': 'o-series' };
   return special[s] || s.charAt(0).toUpperCase() + s.slice(1);
 }
@@ -1321,7 +1593,11 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   });
   delete autonomyMetrics.perSession;
 
-  const insights = generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics);
+  // ---- Regret + model advisor ----
+  const regret = computeRegret(correlatedSessions, commitsByRepo);
+  const modelAdvisor = computeModelAdvisor(correlatedSessions);
+
+  const insights = generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics, regret, modelAdvisor);
 
   const weeklyNarrative = buildWeeklyNarrative(correlatedSessions, autonomyMetrics);
 
@@ -1359,6 +1635,8 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     featureAdoption,
     sessionBuckets,
     lineSurvival,
+    regret,
+    modelAdvisor,
     heatmap: { commits: heatmap },
     weeklyNarrative,
     organicCommits,

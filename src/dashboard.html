@@ -1130,6 +1130,22 @@
       { label: 'Value Leak', value: fmtMoney(leak.cost), tick: ['money', (leak.cost || 0).toFixed(2)], unit: leak.pct + '% of spend', sub: `${leak.sessionCount} sessions shipped nothing`, color: leakColor, hoverLine: `color-mix(in srgb, ${leakColor} 45%, transparent)`, bar: leak.pct + '%', barLo: '0%', barHi: '100%', delay: '0.34s' },
       { label: 'Token Efficiency', value: tk.tokenEfficiencyRate + '%', unit: 'shipped code', sub: `${fmtTokens(tk.totalAllTokens)} tokens burned`, color: 'var(--cyan)', hoverLine: 'color-mix(in srgb, var(--cyan) 45%, transparent)', bar: tk.tokenEfficiencyRate + '%', barLo: '0%', barHi: '100%', delay: '0.4s' },
     ];
+    // Regret: AI commits that were reverted or hot-fixed shortly after landing.
+    // Only rendered when the window has AI commits to judge (regret is null
+    // otherwise), so the six-tile grid is untouched for empty windows.
+    const rg = v.regret;
+    if (rg) {
+      const rgColor = rg.regretRate >= 15 ? 'var(--red)' : rg.regretRate >= 5 ? 'var(--amber-hi)' : 'var(--green)';
+      tiles.push({
+        label: 'Regret Rate', value: rg.regretRate + '%',
+        unit: `${rg.regretted} of ${rg.aiCommits} commits`,
+        sub: rg.regretted > 0
+          ? `reverted or hot-fixed ≤${rg.fixWindowHours}h${rg.regrettedCost > 0 ? ` · ~${fmtMoney(rg.regrettedCost)} didn't stick` : ''}`
+          : `nothing reverted or hot-fixed within ${rg.fixWindowHours}h`,
+        color: rgColor, hoverLine: `color-mix(in srgb, ${rgColor} 45%, transparent)`,
+        bar: rg.regretRate + '%', barLo: '0%', barHi: '100%', delay: '0.46s',
+      });
+    }
     const statTiles = tiles.map((st) => {
       const valSpan = st.tick
         ? `<span class="stat-value value tick" data-fmt="${st.tick[0]}" data-target="${st.tick[1]}" style="font-family:'IBM Plex Mono',monospace;font-size:27px;font-weight:700;letter-spacing:-0.02em;color:${st.color};">${esc(st.value)}</span>`
@@ -1296,6 +1312,67 @@
         <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;width:62px;text-align:right;">${esc(fmtMoney(models[fm].cost))}</span>
       </div>`).join('');
 
+    // Model Advisor — the "which model is actually worth it on YOUR work"
+    // verdict, computed per view so each source tab advises on its own models.
+    // Hidden entirely when there's no model data (adv null).
+    const adv = v.modelAdvisor;
+    let advisorCard = '';
+    if (adv) {
+      // Same special-cases as metrics.capitalise — 'gpt' must not render 'Gpt'.
+      const FAM_DISPLAY = { gpt: 'GPT', codex: 'Codex', 'o-series': 'o-series' };
+      const capFam = (s) => FAM_DISPLAY[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+      const famDot = (fm) => famColorVar[fm] || 'var(--ink3)';
+      const advRows = adv.families.map((r, i) => {
+        const chip = adv.verdict === 'switch' && r.family === adv.recommended.family
+          ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;font-weight:700;letter-spacing:0.1em;color:var(--green);background:color-mix(in srgb, var(--green) 14%, transparent);border-radius:5px;padding:2px 6px;">BEST VALUE</span>`
+          : adv.current && r.family === adv.current.family
+            ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;font-weight:700;letter-spacing:0.1em;color:var(--ink3);background:var(--hover);border-radius:5px;padding:2px 6px;">MOST SPEND</span>`
+            : '';
+        return `<div style="display:grid;grid-template-columns:minmax(72px,1fr) 74px 58px 52px 86px;align-items:center;gap:10px;font-size:12px;${r.eligible ? '' : 'opacity:0.45;'}animation:riseSm .5s cubic-bezier(0.22,1,0.36,1) both;animation-delay:${(0.15 + i * 0.06).toFixed(2)}s;">
+          <span style="display:flex;align-items:center;gap:8px;color:var(--ink2);overflow:hidden;"><span style="flex-shrink:0;width:8px;height:8px;border-radius:3px;background:${famDot(r.family)};"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(capFam(r.family))}</span></span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;text-align:right;">${r.costPerCommit != null ? esc(fmtMoney(r.costPerCommit)) : '—'}<span style="font-weight:400;color:var(--ink3);">/c</span></span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink3);text-align:right;">${r.survivalRate != null ? r.survivalRate + '%' : '—'} <span style="font-size:8.5px;">SRV</span></span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink3);text-align:right;">${r.commits}<span style="font-size:8.5px;"> CMT</span></span>
+          <span style="text-align:right;">${chip}</span>
+        </div>`;
+      }).join('');
+
+      let verdictBadge, headline, subline, savings = '';
+      if (adv.verdict === 'switch') {
+        verdictBadge = `<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.14em;color:var(--amber-hi);background:color-mix(in srgb, var(--amber) 14%, transparent);border-radius:6px;padding:3px 8px;">SWITCH · ${esc(adv.confidence.toUpperCase())} CONFIDENCE</span>`;
+        headline = `Route routine work to ${capFam(adv.recommended.family)}`;
+        subline = `${capFam(adv.recommended.family)} ships commits at ${fmtMoney(adv.recommended.costPerCommit)} vs ${fmtMoney(adv.current.costPerCommit)} on ${capFam(adv.current.family)}${adv.recommended.survivalRate != null && adv.current.survivalRate != null ? `, with comparable survival (${adv.recommended.survivalRate}% vs ${adv.current.survivalRate}%)` : ''} — on your repos, not a benchmark.`;
+        savings = `<div style="margin-top:14px;border:1px dashed var(--line);border-radius:10px;padding:10px 14px;display:flex;align-items:baseline;gap:8px;">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:700;color:var(--green);">~${esc(fmtMoney(adv.projectedSavings))}</span>
+          <span style="font-size:11.5px;color:var(--ink3);">potential savings this window at ${capFam(adv.recommended.family)}'s $/commit</span>
+        </div>`;
+      } else if (adv.verdict === 'keep') {
+        verdictBadge = `<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.14em;color:var(--green);background:color-mix(in srgb, var(--green) 14%, transparent);border-radius:6px;padding:3px 8px;">KEEP</span>`;
+        headline = `${capFam(adv.current.family)} is earning its premium`;
+        subline = `No cheaper model family ships comparable-quality commits on your work this window.`;
+      } else {
+        verdictBadge = `<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.14em;color:var(--ink3);background:var(--hover);border-radius:6px;padding:3px 8px;">COLLECTING EVIDENCE</span>`;
+        headline = `Not enough data to compare models yet`;
+        subline = `The advisor needs at least ${adv.minCommits} commits on two or more model families before it will make a call.`;
+      }
+
+      advisorCard = `<div class="stat-card card-hover" data-hoverline="color-mix(in srgb, var(--accent) 45%, transparent)" style="border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:20px 22px;box-shadow:var(--shadow);margin-bottom:14px;display:flex;flex-wrap:wrap;gap:22px;position:relative;overflow:hidden;animation:rise .6s cubic-bezier(0.22,1,0.36,1) both;">
+        <div style="flex:1.2 1 300px;min-width:260px;">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <h3 style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink2);margin:0;">Model Advisor</h3>
+            ${verdictBadge}
+          </div>
+          <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:19px;font-weight:700;letter-spacing:-0.01em;margin-top:12px;">${esc(headline)}</div>
+          <div style="font-size:12.5px;color:var(--ink2);line-height:1.6;margin-top:6px;text-wrap:pretty;">${esc(subline)}</div>
+          ${savings}
+        </div>
+        <div style="flex:1 1 280px;min-width:250px;display:flex;flex-direction:column;gap:9px;justify-content:center;">
+          <div style="display:grid;grid-template-columns:minmax(72px,1fr) 74px 58px 52px 86px;gap:10px;font-family:'IBM Plex Mono',monospace;font-size:8.5px;font-weight:600;letter-spacing:0.12em;color:var(--ink3);"><span>FAMILY</span><span style="text-align:right;">$/COMMIT</span><span style="text-align:right;">SURVIVAL</span><span style="text-align:right;">COMMITS</span><span></span></div>
+          ${advRows}
+        </div>
+      </div>`;
+    }
+
     const toolEntries = Object.entries(v.toolBreakdown).sort((a, b) => b[1] - a[1]).slice(0, 9);
     const toolMax = Math.max(1, ...toolEntries.map(([, cnt]) => cnt));
     const toolRows = toolEntries.map(([name, cnt], i) =>
@@ -1313,6 +1390,7 @@
         <h2 style="font-family:'Bricolage Grotesque',sans-serif;font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0;">Models &amp; Tools</h2>
         <div style="flex:1;height:1px;background:var(--line2);"></div>
       </div>
+      ${advisorCard}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px;">
         <div style="border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:20px 22px;box-shadow:var(--shadow);">
           <h3 style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink2);margin:0;">Spend by Model</h3>
@@ -1507,6 +1585,22 @@
     const peakLabel = peak.v ? `${dayLabels[peak.d]} ${peak.h}:00 · ${peak.v} commits` : '—';
 
     const survColor = ls.survivalRate === null ? 'var(--ink3)' : ls.survivalRate >= 80 ? 'var(--purple)' : ls.survivalRate >= 50 ? 'var(--amber-hi)' : 'var(--red)';
+
+    // Regretted work — commits that were reverted or hot-fixed after landing.
+    // Rendered as a strip inside the Line Survival card: churn says "edited
+    // soon after", regret says "undone". Empty string when nothing regretted.
+    const regretStrip = (v.regret?.regretted > 0) ? `
+      <div style="margin-top:16px;padding-top:14px;border-top:1px dashed var(--line);">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink3);">Regretted work · ${v.regret.revertedCount} reverted, ${v.regret.quickFixedCount} hot-fixed ≤${v.regret.fixWindowHours}h</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:9px;">
+          ${v.regret.commits.slice(0, 3).map((rc) => `<div style="display:flex;align-items:center;gap:9px;font-size:11.5px;min-width:0;">
+            <span style="flex-shrink:0;font-family:'IBM Plex Mono',monospace;font-size:8.5px;font-weight:700;letter-spacing:0.08em;color:${rc.kind === 'reverted' ? 'var(--red)' : 'var(--amber-hi)'};background:color-mix(in srgb, ${rc.kind === 'reverted' ? 'var(--red)' : 'var(--amber)'} 13%, transparent);border-radius:5px;padding:2px 6px;">${rc.kind === 'reverted' ? 'REVERTED' : 'HOT-FIXED'}</span>
+            <span style="flex-shrink:0;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink3);">${esc(rc.hash)}</span>
+            <span style="color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;" title="${esc(rc.subject || '')}">${esc(rc.subject || '')}</span>
+            <span style="flex-shrink:0;margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink3);">${rc.hoursToRegret}h</span>
+          </div>`).join('')}
+        </div>
+      </div>` : '';
     const cacheFrom = fmtTokens(tk.totalCacheReadTokens);
     const cacheFresh = fmtTokens(tk.totalInputTokens + tk.totalCacheCreationTokens);
     const cacheSaved = '$' + tk.cacheSavingsDollars.toFixed(2);
@@ -1557,6 +1651,7 @@
               <div><div style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:700;color:var(--red);">${ls.totalChurned.toLocaleString()}</div><div style="font-size:10.5px;color:var(--ink3);margin-top:2px;">reworked &lt; 24h</div></div>
               <div><div style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:700;color:var(--ink2);">${ls.maturing.toLocaleString()}</div><div style="font-size:10.5px;color:var(--ink3);margin-top:2px;">still maturing</div></div>
             </div>
+            ${regretStrip}
           </div>
           <div style="border:1px solid var(--line2);border-radius:16px;background:linear-gradient(150deg, color-mix(in srgb, var(--cyan) 8%, var(--card)), var(--card) 60%);padding:20px 22px;box-shadow:var(--shadow);">
             <h3 style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink2);margin:0;">Cache Efficiency <span style="color:var(--ink3);font-weight:500;">· avoided cost</span></h3>

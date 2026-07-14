@@ -252,6 +252,16 @@ export function createServer(initialPayload, rebuildFn, opts = {}) {
     res.json(pick(req).lineSurvival);
   });
 
+  // Regret detector — AI commits reverted or hot-fixed soon after landing
+  app.get('/api/regret', (req, res) => {
+    res.json(pick(req).regret ?? null);
+  });
+
+  // Model advisor — per-family value comparison + switch/keep recommendation
+  app.get('/api/advisor', (req, res) => {
+    res.json(pick(req).modelAdvisor ?? null);
+  });
+
   // Token analytics
   app.get('/api/tokens', (req, res) => {
     res.json(pick(req).tokenAnalytics);
