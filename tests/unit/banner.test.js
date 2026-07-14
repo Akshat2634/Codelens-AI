@@ -36,10 +36,19 @@ test('color: false emits no ANSI escape codes', () => {
   assert.ok(out.includes('█'), 'art should still render as plain blocks');
 });
 
-test('color output paints each letter and resets', () => {
-  const out = renderBanner('1.2.3');
-  const opens = out.split(`${ESC}[38;5;`).length - 1;
-  const resets = out.split(`${ESC}[0m`).length - 1;
-  assert.ok(opens > 0, 'expected 256-color foreground codes');
-  assert.ok(resets >= opens, 'every color open should be reset');
+test('truecolor mode paints a smooth per-pixel gradient and resets each row', () => {
+  const out = renderBanner('1.2.3', { truecolor: true });
+  const opens = out.split(`${ESC}[38;2;`).length - 1;
+  assert.ok(opens > 20, `expected many 24-bit gradient stops, got ${opens}`);
+  for (const line of out.split('\n')) {
+    if (line.includes(`${ESC}[38;2;`)) {
+      assert.ok(line.endsWith(`${ESC}[0m`), 'every painted row should end with a reset');
+    }
+  }
+});
+
+test('256-color fallback uses only 38;5 codes', () => {
+  const out = renderBanner('1.2.3', { truecolor: false });
+  assert.ok(out.includes(`${ESC}[38;5;`), 'expected 256-color foreground codes');
+  assert.ok(!out.includes(`${ESC}[38;2;`), 'must not emit 24-bit codes in fallback mode');
 });
