@@ -23,6 +23,7 @@
 ```
 src/
 ├── index.js           # CLI entry point & orchestration (Commander)
+├── banner.js          # Pixel-block "CODELENS AI" startup splash (interactive TTY dashboard runs only)
 ├── claude-parser.js   # Parses JSONL session files from ~/.claude/projects/
 ├── codex-parser.js    # Parses OpenAI Codex rollout files from ~/.codex/sessions/
 ├── git-analyzer.js    # Git log analysis, branch detection, diff stats

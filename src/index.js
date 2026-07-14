@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Command } from 'commander';
+import { renderBanner } from './banner.js';
 import { blocksJson, buildBlocks, filterRecentBlocks, renderBlocksText } from './blocks.js';
 import { DEFAULT_CLAUDE_DIR, DEFAULT_CODEX_DIR, deleteCache, getCodexStaleFiles, getStaleFiles, loadCache, saveCache, saveQuickstats } from './cache.js';
 import { parseAllProjects } from './claude-parser.js';
@@ -477,11 +478,18 @@ async function runAnalysis(opts) {
 }
 
 // The deprecation nudge for the legacy claude-roi alias plus the version line.
-function printBanner(commandLabel = '') {
+// `big: true` swaps the one-liner for the full pixel wordmark splash — only
+// the interactive dashboard command asks for it (TTY stdout, not --json);
+// piped runs and subcommands keep the compact line.
+function printBanner(commandLabel = '', { big = false } = {}) {
   const invokedAs = path.basename(process.argv[1]);
   if (invokedAs.includes('claude-roi')) {
     progress(`  ${icon.warn} ${c.yellow}claude-roi has been renamed to codelens-ai${c.reset}`);
     progress(`    Switch to: ${c.cyan}npx codelens-ai${c.reset}\n`);
+  }
+  if (big) {
+    progress(renderBanner(VERSION, { color: !process.env.NO_COLOR }));
+    return;
   }
   progress(`${icon.dot} ${c.bold}${c.cyan}codelens-ai${commandLabel}${c.reset} v${VERSION}\n`);
 }
@@ -503,7 +511,7 @@ async function runDashboard(opts) {
     console.error(`  ${icon.err} ${c.red}--port must be an integer between 1 and 65535, got "${opts.port}".${c.reset}`);
     process.exit(1);
   }
-  printBanner();
+  printBanner('', { big: !opts.json && process.stdout.isTTY === true });
 
   const { payloads, days, claudeDir, codexDir, planConfigs, sourceFilter } = await runAnalysis(opts);
 
