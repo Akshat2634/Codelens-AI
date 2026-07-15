@@ -35,6 +35,19 @@ export function normalizeExternalId(name) {
     .trim();
 }
 
+// cache_read is common; cache_creation is Anthropic-specific. Fall back to the
+// usual ratios (read ≈ 0.1× input, 5-min write ≈ 1.25× input) when a rate omits
+// them, so cost never silently drops cache spend. Shared by the LiteLLM overlay
+// below and by config.js's pricingOverrides normalization.
+export function fillRateDefaults({ input, output, cacheRead, cacheWrite }) {
+  return {
+    input,
+    output,
+    cacheRead: Number.isFinite(cacheRead) ? cacheRead : input * 0.1,
+    cacheWrite: Number.isFinite(cacheWrite) ? cacheWrite : input * 1.25,
+  };
+}
+
 // Build the {input,output,cacheRead,cacheWrite} per-million map from LiteLLM's
 // per-token JSON. Only entries that expose an input+output token price are kept
 // (skips embeddings, image models, and rerankers with no chat token pricing).
@@ -45,41 +58,42 @@ function buildOverlay(litellm) {
     const input = e.input_cost_per_token;
     const output = e.output_cost_per_token;
     if (!Number.isFinite(input) || !Number.isFinite(output)) continue;
-    // cache_read is common; cache_creation is Anthropic-specific. Fall back to
-    // the usual ratios (read ≈ 0.1× input, 5-min write ≈ 1.25× input) when a
-    // model omits them, so cost never silently drops cache spend.
-    const cacheRead = Number.isFinite(e.cache_read_input_token_cost) ? e.cache_read_input_token_cost : input * 0.1;
-    const cacheWrite = Number.isFinite(e.cache_creation_input_token_cost) ? e.cache_creation_input_token_cost : input * 1.25;
+    const rate = fillRateDefaults({ input, output, cacheRead: e.cache_read_input_token_cost, cacheWrite: e.cache_creation_input_token_cost });
     map[normalizeExternalId(key)] = {
-      input: input * PER_MIL,
-      output: output * PER_MIL,
-      cacheRead: cacheRead * PER_MIL,
-      cacheWrite: cacheWrite * PER_MIL,
+      input: rate.input * PER_MIL,
+      output: rate.output * PER_MIL,
+      cacheRead: rate.cacheRead * PER_MIL,
+      cacheWrite: rate.cacheWrite * PER_MIL,
     };
   }
   return map;
 }
 
-// Look up a model's rates in the overlay. Tries exact match, then a
-// date-suffix-stripped match (claude-opus-9-20270101 → claude-opus-9), then the
-// longest overlay key the id starts with (mirrors the hardcoded substring
-// approach). Returns per-million { input, output, cacheRead, cacheWrite } or null.
-export function lookupExternalRate(modelName) {
-  if (!overlay) return null;
+// Look up a model's rate in a normalized-id -> rate map. Tries exact match,
+// then a date-suffix-stripped match (claude-opus-9-20270101 → claude-opus-9),
+// then the longest map key the id starts with (mirrors the hardcoded substring
+// approach). Shared by the LiteLLM overlay and config.js's pricingOverrides.
+export function matchRate(map, modelName) {
+  if (!map) return null;
   const id = normalizeExternalId(modelName);
   if (!id) return null;
-  if (overlay[id]) return overlay[id];
+  if (map[id]) return map[id];
   const dateless = id.replace(/-\d{8}$/, '');
-  if (dateless !== id && overlay[dateless]) return overlay[dateless];
+  if (dateless !== id && map[dateless]) return map[dateless];
   let best = null;
   let bestLen = 0;
-  for (const key of Object.keys(overlay)) {
+  for (const key of Object.keys(map)) {
     if (key.length > bestLen && (id === key || id.startsWith(`${key}-`))) {
-      best = overlay[key];
+      best = map[key];
       bestLen = key.length;
     }
   }
   return best;
+}
+
+// Returns per-million { input, output, cacheRead, cacheWrite } or null.
+export function lookupExternalRate(modelName) {
+  return matchRate(overlay, modelName);
 }
 
 export function overlayLoaded() {

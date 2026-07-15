@@ -11,6 +11,7 @@ import {
   listCodexSessionFiles,
   parseCodexSessions,
 } from '../../src/codex-parser.js';
+import { __resetPricingOverridesForTest, __setPricingOverridesForTest } from '../../src/config.js';
 
 // ── helpers ──
 
@@ -94,6 +95,18 @@ test('getCodexPricing resolves most-specific id first', () => {
   assert.equal(getCodexPricing('codex-mini-latest').cachedInput, 0.375);
   // non-OpenAI ids are not priced
   assert.equal(getCodexPricing('claude-opus-4-6'), null);
+});
+
+test('getCodexPricing prefers a pricingOverrides rate, even for a non-gpt/o/codex synthetic id', () => {
+  __setPricingOverridesForTest({
+    'gpt-5.5': { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 },
+    'my-internal-model': { input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite: 0.125 },
+  });
+  // Known id: override wins over the hardcoded table.
+  assert.deepEqual(getCodexPricing('gpt-5.5'), { input: 1, cachedInput: 0.1, output: 2 });
+  // Synthetic id the family-prefix gate would otherwise reject outright.
+  assert.deepEqual(getCodexPricing('my-internal-model'), { input: 0.1, cachedInput: 0.01, output: 0.4 });
+  __resetPricingOverridesForTest();
 });
 
 test('o3 pricing is date-tiered around the 2025-06-10 price cut', () => {

@@ -1,6 +1,7 @@
 import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import { getPricingOverride } from './config.js';
 import { lookupExternalRate } from './pricing.js';
 
 // Pricing per million tokens — from https://docs.anthropic.com/en/docs/about-claude/pricing
@@ -119,6 +120,10 @@ function getPricingTier(modelName, usageDateMs = Date.now()) {
 // null only for a missing model name, so callers still cost it as $0.
 function resolveClaudeRates(modelName, usageDateMs = Date.now()) {
   if (!modelName) return null;
+  // User-configured pricingOverrides always win — checked before the hardcoded
+  // tiers so a negotiated rate on a known model isn't shadowed by list price.
+  const override = getPricingOverride(modelName);
+  if (override) return { p: override, estimated: false };
   const tier = getPricingTier(modelName, usageDateMs);
   if (tier) return { p: PRICING[tier], estimated: false };
   const ext = lookupExternalRate(modelName);
