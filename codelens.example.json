@@ -1,0 +1,11 @@
+{
+  "days": 30,
+  "port": 3457,
+  "plan": "max20",
+  "codexPlan": "plus",
+  "offline": false,
+  "pricingOverrides": {
+    "claude-opus-4-8": { "input": 5, "output": 25, "cacheRead": 0.5, "cacheWrite": 6.25 },
+    "my-internal-model": { "input": 0.1, "output": 0.4 }
+  }
+}

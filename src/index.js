@@ -8,6 +8,7 @@ import { blocksJson, buildBlocks, filterRecentBlocks, renderBlocksText } from '.
 import { DEFAULT_CLAUDE_DIR, DEFAULT_CODEX_DIR, deleteCache, getCodexStaleFiles, getStaleFiles, loadCache, saveCache, saveQuickstats } from './cache.js';
 import { parseAllProjects } from './claude-parser.js';
 import { parseCodexSessions } from './codex-parser.js';
+import { loadConfig } from './config.js';
 import { correlateSessions } from './correlator.js';
 import { analyzeGitRepo, findNestedGitRepos, getGitUser, resolveMovedRepoPaths } from './git-analyzer.js';
 import { serveMcpStdio } from './mcp.js';
@@ -39,6 +40,9 @@ const fmt = (ms) => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 // Progress/banner output. main() reroutes this to stderr under --json so
 // stdout carries only the JSON document.
 let progress = console.log;
+// codelens.json config, loaded once at the top of main() — Commander option
+// defaults below read from this, and it's set before any of them are built.
+let cfg = {};
 
 // Bucket a session's absolute filesWritten paths across a set of nested
 // sub-repos. Returns Map<subRepo, string[]> of RELATIVE paths per sub-repo.
@@ -146,7 +150,7 @@ export function explodeWorkspaceSessions(sessions, depth = NESTED_REPO_DEPTH) {
   return out;
 }
 
-async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null, offline = false) {
+async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null, offline = false, overridesHash = null) {
   // Step 0: Load the external pricing overlay before any costing happens, so
   // models the hardcoded tables don't know get a real published rate instead of
   // the Sonnet estimate. Cached to disk (~24h TTL); --refresh forces a refetch,
@@ -165,7 +169,7 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   // cutoffDay keys the cache to the day it was built: sessions are clipped to
   // the rolling window at parse time, so yesterday's cache would serve
   // yesterday's clipping. Costs one full re-parse per day.
-  const cacheOptions = { days, project: project || null, claudeDir, codexDir, cutoffDay: cutoffDate.toDateString() };
+  const cacheOptions = { days, project: project || null, claudeDir, codexDir, cutoffDay: cutoffDate.toDateString(), overridesHash };
 
   if (forceRefresh) {
     deleteCache(cacheOptions);
@@ -365,16 +369,16 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
 
 // Analysis flags shared by the dashboard (default) command and `report`.
 const addAnalysisOptions = (cmd) => cmd
-  .option('-d, --days <number>', 'number of days to look back', '30')
+  .option('-d, --days <number>', 'number of days to look back', String(cfg.days ?? 30))
   .option('--project <name>', 'filter to specific project')
   .option('--refresh', 'force full re-parse, ignore cache')
   .option('--claude-dir <path>', 'override path to Claude Code projects directory (for testing/CI)')
   .option('--codex-dir <path>', 'override path to OpenAI Codex sessions directory (for testing/CI)')
   .option('--source <agent>', 'analyze a single agent only: claude | codex | all')
-  .option('--offline', 'skip the network pricing refresh; use cached/hardcoded pricing only')
-  .option('--plan <tier>', 'Claude subscription mode — effective $/commit vs your flat plan: pro | max5 | max20')
+  .option('--offline', 'skip the network pricing refresh; use cached/hardcoded pricing only', cfg.offline === true)
+  .option('--plan <tier>', 'Claude subscription mode — effective $/commit vs your flat plan: pro | max5 | max20', cfg.plan)
   .option('--plan-cost <amount>', 'custom Claude monthly subscription cost in USD (overrides --plan)')
-  .option('--codex-plan <tier>', 'Codex/ChatGPT subscription mode: free | go | plus | pro100 | pro | team | business | business-annual')
+  .option('--codex-plan <tier>', 'Codex/ChatGPT subscription mode: free | go | plus | pro100 | pro | team | business | business-annual', cfg.codexPlan)
   .option('--codex-plan-cost <amount>', 'custom Codex monthly subscription cost in USD (overrides --codex-plan)');
 
 // Validate the shared flags, run the full pipeline, and handle the byproducts
@@ -439,7 +443,7 @@ async function runAnalysis(opts) {
     console.error(`  ${icon.warn} ${c.yellow}--codex-dir does not exist:${c.reset} ${codexDir}`);
   }
 
-  const payloads = await buildPayload(claudeDir, codexDir, days, opts.project, opts.refresh, planConfigs, sourceFilter, !!opts.offline);
+  const payloads = await buildPayload(claudeDir, codexDir, days, opts.project, opts.refresh, planConfigs, sourceFilter, !!opts.offline, cfg.pricingOverridesHash);
   if (payloads) {
     const invokedAs = path.basename(process.argv[1]);
     for (const p of Object.values(payloads)) {
@@ -536,7 +540,7 @@ async function runDashboard(opts) {
 
   // Start server — pass a rebuild function so /api/refresh can re-run the pipeline
   const rebuild = async () => {
-    const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline);
+    const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline, cfg.pricingOverridesHash);
     if (fresh) {
       for (const p of Object.values(fresh)) p.meta.invokedAs = payload.meta.invokedAs;
     }
@@ -747,6 +751,19 @@ async function runMcp(opts) {
 }
 
 async function main() {
+  // Load codelens.json (project > user > built-ins) before the Commander
+  // options below are built — their defaults read from `cfg`.
+  cfg = loadConfig();
+  // Unconditional stderr, like the update-check hint below — this runs before
+  // any command decides whether it's a --json/stdout-only run, so it can never
+  // route through `progress` without risking stdout pollution.
+  const foundConfigPaths = [cfg.loaded.project && cfg.configPaths.project, cfg.loaded.user && cfg.configPaths.user].filter(Boolean);
+  if (foundConfigPaths.length > 0) {
+    console.error(`  ${icon.ok} ${c.green}Config loaded:${c.reset} ${foundConfigPaths.join(', ')}`);
+  } else {
+    console.error(`  ${icon.dot} ${c.dim}No config file found (checked ${cfg.configPaths.project} and ${cfg.configPaths.user})${c.reset}`);
+  }
+
   // A stale global install or npx cache runs old code with none of the
   // current subcommands — which fails with a cryptic Commander parse error
   // instead of a hint to upgrade. Cached to disk (~24h TTL) so this is a
@@ -769,7 +786,7 @@ async function main() {
     // this, the parent's identically-named analysis flags (--days, --source,
     // ...) swallow the values and `report`/`statusline` see only defaults.
     .enablePositionalOptions()
-    .option('-p, --port <number>', 'port to serve dashboard', '3457')
+    .option('-p, --port <number>', 'port to serve dashboard', String(cfg.port ?? 3457))
     .option('--host <address>', 'interface to bind the dashboard to (0.0.0.0 exposes it to your network)', '127.0.0.1')
     .option('--no-open', 'do not auto-open browser')
     .option('--json', 'output raw JSON to stdout instead of starting server');
