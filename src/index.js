@@ -754,6 +754,15 @@ async function main() {
   // Load codelens.json (project > user > built-ins) before the Commander
   // options below are built — their defaults read from `cfg`.
   cfg = loadConfig();
+  // Unconditional stderr, like the update-check hint below — this runs before
+  // any command decides whether it's a --json/stdout-only run, so it can never
+  // route through `progress` without risking stdout pollution.
+  const foundConfigPaths = [cfg.loaded.project && cfg.configPaths.project, cfg.loaded.user && cfg.configPaths.user].filter(Boolean);
+  if (foundConfigPaths.length > 0) {
+    console.error(`  ${icon.ok} ${c.green}Config loaded:${c.reset} ${foundConfigPaths.join(', ')}`);
+  } else {
+    console.error(`  ${icon.dot} ${c.dim}No config file found (checked ${cfg.configPaths.project} and ${cfg.configPaths.user})${c.reset}`);
+  }
 
   // A stale global install or npx cache runs old code with none of the
   // current subcommands — which fails with a cryptic Commander parse error

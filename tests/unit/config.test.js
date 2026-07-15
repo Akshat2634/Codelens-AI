@@ -37,6 +37,28 @@ test('loadConfig: no files present returns built-in-ish defaults', () => {
   assert.equal(cfg.port, undefined);
   assert.deepEqual(cfg.pricingOverrides, {});
   assert.equal(cfg.pricingOverridesHash, null);
+  assert.equal(cfg.loaded.user, false);
+  assert.equal(cfg.loaded.project, false);
+  __resetPricingOverridesForTest();
+});
+
+test('loadConfig: reports which of user/project config files were actually found', () => {
+  const dir = tmpDir();
+  // Neither present.
+  const { userConfigPath, projectConfigPath } = missingPaths(dir);
+  const neither = loadConfig({ userConfigPath, projectConfigPath });
+  assert.deepEqual(neither.loaded, { user: false, project: false });
+  assert.deepEqual(neither.configPaths, { user: userConfigPath, project: projectConfigPath });
+
+  // Only the user config present.
+  const realUserPath = writeJson(dir, 'user-only.json', { days: 1 });
+  const userOnly = loadConfig({ userConfigPath: realUserPath, projectConfigPath });
+  assert.deepEqual(userOnly.loaded, { user: true, project: false });
+
+  // Both present.
+  const realProjectPath = writeJson(dir, 'project-only.json', { days: 2 });
+  const both = loadConfig({ userConfigPath: realUserPath, projectConfigPath: realProjectPath });
+  assert.deepEqual(both.loaded, { user: true, project: true });
   __resetPricingOverridesForTest();
 });
 

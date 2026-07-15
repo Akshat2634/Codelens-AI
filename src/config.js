@@ -58,8 +58,10 @@ function buildOverridesMap(rawOverrides) {
 }
 
 export function loadConfig({ userConfigPath = DEFAULT_USER_CONFIG_PATH, projectConfigPath = DEFAULT_PROJECT_CONFIG_PATH } = {}) {
-  const user = readConfigFile(userConfigPath) || {};
-  const project = readConfigFile(projectConfigPath) || {};
+  const userRaw = readConfigFile(userConfigPath);
+  const projectRaw = readConfigFile(projectConfigPath);
+  const user = userRaw || {};
+  const project = projectRaw || {};
   warnUnknownKeys(user, userConfigPath);
   warnUnknownKeys(project, projectConfigPath);
 
@@ -84,6 +86,11 @@ export function loadConfig({ userConfigPath = DEFAULT_USER_CONFIG_PATH, projectC
     offline: merged.offline,
     pricingOverrides,
     pricingOverridesHash,
+    // Which of the two known locations actually had a file, and their paths —
+    // index.js logs this so it's obvious at a glance whether a config was
+    // picked up at all, and if so, from where.
+    configPaths: { user: userConfigPath, project: projectConfigPath },
+    loaded: { user: userRaw !== null, project: projectRaw !== null },
   };
 }
 
