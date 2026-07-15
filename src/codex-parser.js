@@ -153,8 +153,10 @@ export function getCodexModelFamily(modelName) {
   return 'gpt';
 }
 
-export function getCodexPricing(modelName, usageDateMs = Date.now()) {
-  if (!modelName) return null;
+// Pure hardcoded-table lookup (id normalize + prefix match + o3 date-tier +
+// long-context), split out of getCodexPricing so callers needing "what does
+// our table alone say" (cost-mode reconciliation) don't re-walk CODEX_PRICING.
+export function getHardcodedCodexRate(modelName, usageDateMs = Date.now()) {
   const id = normalizeCodexModelId(modelName);
   if (!/^(gpt-|o\d|codex)/.test(id)) return null;
   for (const [key, price] of CODEX_PRICING) {
@@ -166,6 +168,17 @@ export function getCodexPricing(modelName, usageDateMs = Date.now()) {
       return useLongContextPricing(modelName, price) ? price.longContext : price;
     }
   }
+  return null;
+}
+
+export function getCodexPricing(modelName, usageDateMs = Date.now()) {
+  if (!modelName) return null;
+  const hardcoded = getHardcodedCodexRate(modelName, usageDateMs);
+  if (hardcoded) return hardcoded;
+  // Non-OpenAI ids (e.g. a Claude model, seen when a workspace mixes agents)
+  // are never priced here, overlay included — this function must only ever
+  // speak for Codex/OpenAI ids.
+  if (!/^(gpt-|o\d|codex)/.test(normalizeCodexModelId(modelName))) return null;
   // Not in the hardcoded table — try the external LiteLLM overlay so a new
   // OpenAI model id is priced from its real published rate (not the flat
   // estimate). LiteLLM's cache_read maps to cachedInput; no `estimate` flag
@@ -180,8 +193,8 @@ export function getCodexPricing(modelName, usageDateMs = Date.now()) {
 // FRESH input (cached already subtracted during accumulation). Buckets whose
 // model never resolved (no turn_context seen — 'unknown') are priced at the
 // fallback and flagged as estimated, like claude-parser's Sonnet fallback.
-function calculateCodexCostBreakdown(inputTokens, outputTokens, cacheReadTokens, modelName, usageDateMs = Date.now(), webSearchRequests = 0) {
-  const p = getCodexPricing(modelName, usageDateMs) || CODEX_FALLBACK;
+function calculateCodexCostBreakdown(inputTokens, outputTokens, cacheReadTokens, modelName, usageDateMs = Date.now(), webSearchRequests = 0, forcedRate = null) {
+  const p = forcedRate || getCodexPricing(modelName, usageDateMs) || CODEX_FALLBACK;
   const inputCost = inputTokens * p.input / PER_MIL;
   const outputCost = outputTokens * p.output / PER_MIL;
   const cacheReadCost = cacheReadTokens * p.cachedInput / PER_MIL;
@@ -725,7 +738,14 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
     session.cacheSavingsDollars += tokens.cacheRead * (p.input - p.cachedInput) / PER_MIL;
     if (p.estimate) session.estimatedCost += bd.totalCost - bd.serverToolCost;
     const totalTokens = tokens.input + tokens.output + tokens.cacheRead;
-    session.modelBreakdown[model] = { tokens: totalTokens, cost: bd.totalCost };
+    // Overlay rate has no date-tiering (lookupExternalRate ignores usage date), so
+    // one lookup per model on session totals is exact — no need to re-derive per day.
+    const overlayRate = lookupExternalRate(model);
+    const overlayCost = overlayRate
+      ? calculateCodexCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, model, sessionDateMs, tokens.webSearch,
+          { input: overlayRate.input, cachedInput: overlayRate.cacheRead, output: overlayRate.output }).totalCost
+      : null;
+    session.modelBreakdown[model] = { tokens: totalTokens, cost: bd.totalCost, overlayCost };
     session.cost.inputCost += bd.inputCost;
     session.cost.outputCost += bd.outputCost;
     session.cost.cacheReadCost += bd.cacheReadCost;
@@ -764,6 +784,8 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
     let dayInput = 0;
     let dayOutput = 0;
     let dayCacheRead = 0;
+    let dayOverlayTotal = 0;
+    let dayOverlayIncomplete = false;
     const dayByModel = {};
     const dayMs = Date.parse(dateStr + 'T12:00:00Z');
     for (const [model, tokens] of Object.entries(models)) {
@@ -782,7 +804,17 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
       dayInput += tokens.input;
       dayOutput += tokens.output;
       dayCacheRead += tokens.cacheRead;
-      dayByModel[model] = { tokens: tokens.input + tokens.output + tokens.cacheRead, cost: bd.totalCost };
+      // Overlay rate is date-invariant (lookupExternalRate ignores date) — a
+      // fresh lookup here (rather than plumbing the session-level one across
+      // loops) keeps this loop self-contained; it's a cheap hashmap read.
+      const overlayRate = lookupExternalRate(model);
+      const overlayCost = overlayRate
+        ? calculateCodexCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, model, dayMs, tokens.webSearch,
+            { input: overlayRate.input, cachedInput: overlayRate.cacheRead, output: overlayRate.output }).totalCost
+        : null;
+      if (overlayCost != null) dayOverlayTotal += overlayCost;
+      else dayOverlayIncomplete = true;
+      dayByModel[model] = { tokens: tokens.input + tokens.output + tokens.cacheRead, cost: bd.totalCost, overlayCost };
     }
     session.dailyUsage[dateStr] = {
       inputTokens: dayInput,
@@ -790,6 +822,8 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
       cacheReadTokens: dayCacheRead,
       cacheCreationTokens: 0,
       cost: dayCost,
+      overlayTotalCost: dayOverlayTotal,
+      costModeIncomplete: dayOverlayIncomplete,
       byModel: dayByModel,
     };
   }
@@ -803,6 +837,18 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
       if (session.modelBreakdown[model]) session.modelBreakdown[model].cost = cost;
     }
   }
+
+  // Overlay total for --cost-mode auto/display: sum of per-model overlay costs;
+  // costModeIncomplete flags any model the external overlay has no rate for, so
+  // display mode can surface partial data instead of silently under-reporting.
+  let overlayTotalCost = 0;
+  let costModeIncomplete = false;
+  for (const mb of Object.values(session.modelBreakdown)) {
+    if (mb.overlayCost != null) overlayTotalCost += mb.overlayCost;
+    else costModeIncomplete = true;
+  }
+  session.cost.overlayTotalCost = overlayTotalCost;
+  session.cost.costModeIncomplete = costModeIncomplete;
 
   if (session.startTime && session.endTime) {
     const start = new Date(session.startTime).getTime();

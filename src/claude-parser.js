@@ -160,8 +160,8 @@ function calculateCost(inputTokens, outputTokens, cacheReadTokens, cacheCreation
   ) + webSearchRequests * WEB_SEARCH_COST_PER_REQUEST;
 }
 
-function calculateCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, cacheCreation1hTokens = 0, usageDateMs = Date.now(), webSearchRequests = 0) {
-  const r = resolveClaudeRates(modelName, usageDateMs);
+function calculateCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, cacheCreation1hTokens = 0, usageDateMs = Date.now(), webSearchRequests = 0, forcedRate = null) {
+  const r = forcedRate ? { p: forcedRate, estimated: false } : resolveClaudeRates(modelName, usageDateMs);
   if (!r) return { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, serverToolCost: 0, totalCost: 0 };
   const p = r.p;
   const mult = geoMultiplier(modelName);
@@ -658,7 +658,13 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
       if (rates.estimated) session.estimatedCost += cost;
     }
     const totalTokens = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
-    session.modelBreakdown[model] = { tokens: totalTokens, cost };
+    // Overlay rate has no date-tiering (lookupExternalRate ignores usage date), so
+    // one lookup per model on session totals is exact — no need to re-derive per day.
+    const overlayRate = lookupExternalRate(model);
+    const overlayCost = overlayRate
+      ? calculateCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h, sessionDateMs, tokens.webSearch, overlayRate).totalCost
+      : null;
+    session.modelBreakdown[model] = { tokens: totalTokens, cost, overlayCost };
 
     if (totalTokens > maxTokens) {
       maxTokens = totalTokens;
@@ -733,6 +739,8 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
   for (const [dateStr, models] of Object.entries(dailyModelTokens)) {
     let dayCost = 0;
     let dayInput = 0, dayOutput = 0, dayCacheRead = 0, dayCacheCreate = 0;
+    let dayOverlayTotal = 0;
+    let dayOverlayIncomplete = false;
     const dayByModel = {};
     // Price this day at the rate in effect on it (noon UTC avoids boundary TZ skew).
     const dayMs = Date.parse(dateStr + 'T12:00:00Z');
@@ -757,9 +765,19 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
       dayOutput += tokens.output;
       dayCacheRead += tokens.cacheRead;
       dayCacheCreate += tokens.cacheCreate;
+      // Overlay rate is date-invariant (lookupExternalRate ignores date) — a
+      // fresh lookup here (rather than plumbing the session-level one across
+      // loops) keeps this loop self-contained; it's a cheap hashmap read.
+      const overlayRate = lookupExternalRate(model);
+      const overlayCost = overlayRate
+        ? calculateCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, tokens.cacheCreate1h, dayMs, tokens.webSearch, overlayRate).totalCost
+        : null;
+      if (overlayCost != null) dayOverlayTotal += overlayCost;
+      else dayOverlayIncomplete = true;
       dayByModel[model] = {
         tokens: tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate,
         cost: bd.totalCost,
+        overlayCost,
       };
     }
     session.dailyUsage[dateStr] = {
@@ -768,6 +786,8 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
       cacheReadTokens: dayCacheRead,
       cacheCreationTokens: dayCacheCreate,
       cost: dayCost,
+      overlayTotalCost: dayOverlayTotal,
+      costModeIncomplete: dayOverlayIncomplete,
       // Per-model split so windowed views (e.g. the weekly narrative) can
       // divide spend and lines by what was actually used inside the window.
       byModel: dayByModel,
@@ -788,6 +808,18 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
       if (session.modelBreakdown[model]) session.modelBreakdown[model].cost = cost;
     }
   }
+
+  // Overlay total for --cost-mode auto/display: sum of per-model overlay costs;
+  // costModeIncomplete flags any model the external overlay has no rate for, so
+  // display mode can surface partial data instead of silently under-reporting.
+  let overlayTotalCost = 0;
+  let costModeIncomplete = false;
+  for (const mb of Object.values(session.modelBreakdown)) {
+    if (mb.overlayCost != null) overlayTotalCost += mb.overlayCost;
+    else costModeIncomplete = true;
+  }
+  session.cost.overlayTotalCost = overlayTotalCost;
+  session.cost.costModeIncomplete = costModeIncomplete;
 
   // Calculate duration
   if (session.startTime && session.endTime) {

@@ -11,6 +11,7 @@ import {
   listCodexSessionFiles,
   parseCodexSessions,
 } from '../../src/codex-parser.js';
+import { __resetOverlayForTest, __setOverlayForTest } from '../../src/pricing.js';
 
 // ── helpers ──
 
@@ -171,6 +172,52 @@ test('Codex web search calls add OpenAI server-tool cost', async () => {
     assert.ok(Math.abs(s.modelBreakdown['gpt-5.5'].cost - expected) < 1e-9);
     const dailyCost = Object.values(s.dailyUsage).reduce((a, d) => a + d.cost, 0);
     assert.ok(Math.abs(dailyCost - expected) < 1e-9);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('overlayCost is tracked alongside the hardcoded cost when an external rate exists (hardcoded still wins for --cost-mode calculate)', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-overlay-cost-'));
+  try {
+    // Deliberately cheaper than gpt-5.5's hardcoded $5/$0.50/$30 — proves the
+    // overlay rate is tracked independently, not blended into the default .cost.
+    // 1000 tokens (not 1M) stays under the 272K long-context threshold so this
+    // lands in the plain 'gpt-5.5' bucket, not 'gpt-5.5[long]'.
+    __setOverlayForTest({ 'gpt-5.5': { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 } });
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-overlay.jsonl', [
+      meta('overlay-cost', iso(2)),
+      turnContext(iso(2), 'gpt-5.5'),
+      tokenCount(iso(1.9), usage(1000, 0, 1000), usage(1000, 0, 1000)),
+    ]);
+
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    assert.ok(Math.abs(s.modelBreakdown['gpt-5.5'].cost - 0.035) < 1e-9, 'hardcoded $5+$30 per-million still wins for .cost');
+    assert.ok(Math.abs(s.modelBreakdown['gpt-5.5'].overlayCost - 0.002) < 1e-9, 'overlay $1+$1 per-million tracked separately');
+    assert.ok(Math.abs(s.cost.overlayTotalCost - 0.002) < 1e-9);
+    assert.equal(s.cost.costModeIncomplete, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    __resetOverlayForTest();
+  }
+});
+
+test('overlayCost is null and costModeIncomplete is set when no overlay rate covers a session\'s model', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-overlay-missing-'));
+  try {
+    __resetOverlayForTest();
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-no-overlay.jsonl', [
+      meta('overlay-missing', iso(2)),
+      turnContext(iso(2), 'gpt-5.5'),
+      tokenCount(iso(1.9), usage(1000, 0, 1000), usage(1000, 0, 1000)),
+    ]);
+
+    const { sessions } = await parseCodexSessions(root, 30);
+    const s = sessions[0];
+    assert.equal(s.modelBreakdown['gpt-5.5'].overlayCost, null);
+    assert.equal(s.cost.overlayTotalCost, 0);
+    assert.equal(s.cost.costModeIncomplete, true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

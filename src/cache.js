@@ -60,7 +60,11 @@ function cacheFileFor(options = {}) {
 // 19: filesWrittenAbsolute added to sessions for --depth's workspace-parent
 //     explosion — cached sessions from 18 lack it, so --depth would silently
 //     no-op against a warm cache until something else invalidated it.
-const CACHE_VERSION = 19;
+// 20: per-model overlayCost + session-level overlayTotalCost/costModeIncomplete
+//     added for --cost-mode auto|display and --debug pricing reconciliation —
+//     cached sessions from 19 lack them, so those modes would see no overlay
+//     comparison data until re-parsed.
+const CACHE_VERSION = 20;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);
