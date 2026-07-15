@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline';
 import zlib from 'node:zlib';
 import { findGitRoot, isReadOnlyCommand, isVerificationCommand, toRelativePath } from './claude-parser.js';
 import { lookupExternalRate } from './pricing.js';
+import { dayKeyInZone, resolveWindow } from './window.js';
 
 // ── OpenAI Codex CLI session parser ──
 //
@@ -236,11 +237,6 @@ async function* rolloutLines(filePath) {
   yield* rl;
 }
 
-function localDayStr(dateLike) {
-  const dt = new Date(dateLike);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-}
-
 function createEmptyCodexSession(sessionId) {
   return {
     sessionId,
@@ -324,10 +320,10 @@ function trackShellCommand(session, command) {
   if (isReadOnlyCommand(command)) session.readOnlyBashCalls++;
 }
 
-// cutoffMs clips usage accumulation to the lookback window, mirroring
+// cutoffMs/untilMs clip usage accumulation to the lookback window, mirroring
 // claude-parser: a session resumed inside the window keeps only its in-window
 // tokens/cost, while message and tool counts stay whole-session.
-async function parseCodexRollout(filePath, cutoffMs = 0) {
+async function parseCodexRollout(filePath, cutoffMs = 0, untilMs = 0, tz = null) {
   // rollout-2026-07-02T09-15-03-<uuid>.jsonl → default id from the filename
   const base = path.basename(filePath).replace(/\.jsonl(\.zst)?$/, '');
   const defaultId = base.replace(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-/, '') || base;
@@ -417,8 +413,9 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
     const reasoning = delta.reasoning_output_tokens || 0;
     if (freshInput === 0 && cached === 0 && output === 0) return;
 
-    // Window clipping: usage before the lookback cutoff is not accumulated.
+    // Window clipping: usage outside the lookback range is not accumulated.
     if (cutoffMs && ts && Date.parse(ts) < cutoffMs) return;
+    if (untilMs && ts && Date.parse(ts) > untilMs) return;
     session.totalInputTokens += freshInput;
     session.totalOutputTokens += output;
     session.reasoningOutputTokens += reasoning;
@@ -429,7 +426,7 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
     modelTokens[billingModel].output += output;
     modelTokens[billingModel].cacheRead += cached;
 
-    const dateStr = ts ? localDayStr(ts) : UNBUCKETED_DAY;
+    const dateStr = ts ? dayKeyInZone(ts, tz) : UNBUCKETED_DAY;
     if (!dailyModelTokens[dateStr]) dailyModelTokens[dateStr] = {};
     if (!dailyModelTokens[dateStr][billingModel]) dailyModelTokens[dateStr][billingModel] = { input: 0, output: 0, cacheRead: 0, webSearch: 0 };
     dailyModelTokens[dateStr][billingModel].input += freshInput;
@@ -454,6 +451,7 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
 
   const accumulateWebSearch = (ts, model) => {
     if (cutoffMs && ts && Date.parse(ts) < cutoffMs) return;
+    if (untilMs && ts && Date.parse(ts) > untilMs) return;
     // Bucket the fee under the same base billing name token usage resolves to
     // (a search call has no input size, so never the '[long]' variant) — not a
     // raw model string that could diverge from the token buckets.
@@ -463,7 +461,7 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
     if (!modelTokens[billingModel]) modelTokens[billingModel] = { input: 0, output: 0, cacheRead: 0, webSearch: 0 };
     modelTokens[billingModel].webSearch += 1;
 
-    const dateStr = ts ? localDayStr(ts) : UNBUCKETED_DAY;
+    const dateStr = ts ? dayKeyInZone(ts, tz) : UNBUCKETED_DAY;
     if (!dailyModelTokens[dateStr]) dailyModelTokens[dateStr] = {};
     if (!dailyModelTokens[dateStr][billingModel]) dailyModelTokens[dateStr][billingModel] = { input: 0, output: 0, cacheRead: 0, webSearch: 0 };
     dailyModelTokens[dateStr][billingModel].webSearch += 1;
@@ -742,9 +740,12 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
   // clamped into the analyzed window (mirrors claude-parser).
   if (dailyModelTokens[UNBUCKETED_DAY]) {
     const realDays = Object.keys(dailyModelTokens).filter(d => d !== UNBUCKETED_DAY).sort();
-    let targetMs = realDays.length > 0 ? Date.parse(realDays[0] + 'T12:00:00') : rawStartMs;
-    if (cutoffMs) targetMs = Math.max(targetMs, cutoffMs);
-    const target = localDayStr(targetMs);
+    // String comparison, not an instant round-trip (both are already
+    // zero-padded YYYY-MM-DD, so lexicographic order = chronological) — stays
+    // exact under any `tz`. Mirrors claude-parser.js.
+    const target = realDays.length > 0
+      ? (cutoffMs && dayKeyInZone(cutoffMs, tz) > realDays[0] ? dayKeyInZone(cutoffMs, tz) : realDays[0])
+      : dayKeyInZone(cutoffMs ? Math.max(rawStartMs, cutoffMs) : rawStartMs, tz);
     const day = dailyModelTokens[target] || (dailyModelTokens[target] = {});
     for (const [model, tk] of Object.entries(dailyModelTokens[UNBUCKETED_DAY])) {
       if (!day[model]) day[model] = { input: 0, output: 0, cacheRead: 0, webSearch: 0 };
@@ -829,14 +830,12 @@ async function parseCodexRollout(filePath, cutoffMs = 0) {
   return session;
 }
 
-export async function parseCodexSessions(codexDir, days, projectFilter) {
+export async function parseCodexSessions(codexDir, days, projectFilter, since = null, until = null, tz = null) {
   if (!codexDir || !existsSync(codexDir)) {
     return { sessions: [], fileIndex: {} };
   }
 
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - days);
-  const cutoffMs = cutoffDate.getTime();
+  const { cutoffMs, untilMs } = resolveWindow({ days, since, until, tz });
 
   const sessions = [];
   const fileIndex = {};
@@ -863,7 +862,7 @@ export async function parseCodexSessions(codexDir, days, projectFilter) {
     }
 
     try {
-      const session = await parseCodexRollout(filePath, cutoffMs);
+      const session = await parseCodexRollout(filePath, cutoffMs, untilMs, tz);
 
       // Skip empty sessions (no conversation and no usage)
       if (!session.startTime) continue;
@@ -875,6 +874,9 @@ export async function parseCodexSessions(codexDir, days, projectFilter) {
       // Keep sessions with ANY activity inside the window (usage was clipped
       // to the window during parsing, same rule as claude-parser)
       if (new Date(session.endTime || session.startTime).getTime() < cutoffMs) continue;
+      // Mirror: a session that starts only after the window's end is
+      // entirely out of range (--until's counterpart to the check above).
+      if (untilMs && new Date(session.startTime).getTime() > untilMs) continue;
 
       session.projectName = session.repoPath ? path.basename(session.repoPath) : 'codex';
       if (projectFilter && !session.projectName.toLowerCase().includes(projectFilter.toLowerCase())) {

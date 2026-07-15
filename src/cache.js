@@ -83,6 +83,12 @@ export function loadCache(options = {}) {
     // The rolling window moves daily and sessions are clipped to it at parse
     // time, so a cache built on an earlier day would serve stale clipping.
     if (options.cutoffDay && data.cutoffDay !== options.cutoffDay) return null;
+    // --since/--until/--tz (issue #80): a cache built under one range or zone
+    // must not serve another, even if `days` (which --since/--until derives
+    // for display/proration only) happens to coincide.
+    if ((data.since || null) !== (options.since || null)) return null;
+    if ((data.until || null) !== (options.until || null)) return null;
+    if ((data.tz || null) !== (options.tz || null)) return null;
     return data;
   } catch {
     return null;
@@ -99,6 +105,9 @@ export function saveCache(sessions, fileIndex, codexFileIndex, options = {}) {
     claudeDir: options.claudeDir || null,
     codexDir: options.codexDir || null,
     cutoffDay: options.cutoffDay || null,
+    since: options.since || null,
+    until: options.until || null,
+    tz: options.tz || null,
     fileIndex,
     codexFileIndex: codexFileIndex || {},
     sessions,

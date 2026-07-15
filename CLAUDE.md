@@ -37,6 +37,7 @@ src/
 ├── server.js          # Express REST API routes (?source= selects per-agent views)
 ├── cache.js           # Smart caching with per-source stale file detection + statusline quickstats
 ├── pricing.js         # External LiteLLM pricing overlay — auto-prices models the hardcoded tables don't know
+├── window.js          # --since/--until/--tz window resolution + timezone-aware day-key bucketing, shared by every consumer
 └── dashboard.html     # Single-file SPA dashboard (4000+ lines)
 
 tests/
@@ -88,6 +89,8 @@ All GET routes accept `?source=all|claude|codex` (default `all`; per-agent views
 ```bash
 npx codelens-ai                 # defaults: 30 days, port 3457
 npx codelens-ai --days 90       # custom lookback
+npx codelens-ai --since 2026-06-01 --until 2026-06-30   # fixed date range instead of a rolling window
+npx codelens-ai --tz America/New_York  # timezone for day bucketing (default: local time)
 npx codelens-ai --port 8080     # custom port
 npx codelens-ai --no-open       # don't auto-open browser
 npx codelens-ai --json          # dump raw JSON to stdout
@@ -129,6 +132,7 @@ node --check src/*.js           # syntax validation
 - **Auto-pricing fallback** — models the hardcoded tables don't match are priced from LiteLLM's public map (`src/pricing.js`): fetched on demand, disk-cached ~24h (`pricing.json`), refreshed on `--refresh`, skipped with `--offline`, and graceful on failure (cache → hardcoded Sonnet/`CODEX_FALLBACK` estimate). **Hardcoded tables win** when both have a model; overlay-priced models are real rates, so NOT flagged estimated. The overlay must be loaded (`loadPricingOverlay`, awaited in `buildPayload`) before any costing; `lookupExternalRate` is a no-op until then
 - **Update nudge** (`src/update-check.js`) — every run checks npm's registry for a newer published version and prints an upgrade hint if behind; disk-cached ~24h (`version-check.json`), capped at 400ms so a slow network never delays a real command, skipped with `--offline`, silent on any failure. Exists because `npx codelens-ai` (no version pin) can silently run a stale global install or npx-cached copy — old enough to predate whole subcommands — producing a confusing Commander parse error instead of a hint to upgrade (see README Troubleshooting)
 - **Nested-repo discovery** — when a session's cwd is a workspace parent with no `.git` of its own, `git-analyzer.js#findNestedGitRepos` walks up to `NESTED_REPO_DEPTH` (3) levels to find sub-repos, and `index.js#explodeWorkspaceSessions` splits the session into one virtual clone per touched sub-repo so their commits correlate. Always on, zero-config, no flag — the gate (`session.repoPath` has no `.git`) never fires for an ordinary single-repo session, so it's a no-op for the common case. Only the sub-repo with the most touched files keeps the session's real cost/tokens (`costZeroed: true` on the rest) — total spend is conserved, but a zeroed clone must never be graded (`computeSessionGrade` returns `null` for it) since a real commit landing on a `$0` clone would otherwise look like a fabricated 'A'
+- **Date ranges & timezone-aware bucketing** (`src/window.js`) — `--since`/`--until` (mutually exclusive with `--days`) plus `--tz <IANA zone>`, across every analysis command. `resolveWindow({days, since, until, tz})` is the single source of `{cutoffMs, untilMs}`, replacing what used to be an independently-duplicated `cutoffDate.setDate(...)` in ~6 files; `dayKeyInZone(dateLike, tz)` replaces the equally-duplicated local `getFullYear/getMonth/getDate` day-string formula in both parsers, metrics.js, and tables.js. In days-mode `untilMs` is always `null`; every consumer writes its new upper-bound check as `!untilMs || <cmp>`, so the pre-existing `--days`-only path is unaffected by construction. Converting a `YYYY-MM-DD` + zone into a UTC instant has no native JS API — `window.js` does it via a round-trip correction through `Intl.DateTimeFormat`, verified against zones up to UTC+14/-11 and DST-transition dates. `statusline.js` and the CLI's live quickstats keep their own local-time day bucketing unchanged — deliberately out of scope, since neither takes a `--tz` flag
 
 ## Coding Conventions
 

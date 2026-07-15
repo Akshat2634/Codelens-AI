@@ -2,6 +2,7 @@ import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { lookupExternalRate } from './pricing.js';
+import { dayKeyInZone, resolveWindow } from './window.js';
 
 // Pricing per million tokens — from https://docs.anthropic.com/en/docs/about-claude/pricing
 // Cache reads = 0.1x base input, Cache writes (5min) = 1.25x base input
@@ -446,17 +447,14 @@ function createEmptySession(sessionId) {
 // the session's earliest real day (clamped to the window) after parsing.
 const UNBUCKETED_DAY = '__unbucketed__';
 
-function localDayStr(dateLike) {
-  const dt = new Date(dateLike);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-}
-
-// cutoffMs clips usage accumulation to the lookback window: a session started
-// before the window but resumed inside it (--resume appends to the same JSONL)
-// keeps only its in-window tokens/cost, so totals and the daily timeline agree
-// with the window instead of dropping or over-counting the session. Message and
-// tool counts stay whole-session — they describe the session, not the window.
-async function parseSessionFile(filePath, cutoffMs = 0) {
+// cutoffMs/untilMs clip usage accumulation to the lookback window: a session
+// started before the window but resumed inside it (--resume appends to the
+// same JSONL) keeps only its in-window tokens/cost, so totals and the daily
+// timeline agree with the window instead of dropping or over-counting the
+// session. Message and tool counts stay whole-session — they describe the
+// session, not the window. `tz` only affects which calendar day usage lands
+// in (dayKeyInZone below), not whether it's in-window.
+async function parseSessionFile(filePath, cutoffMs = 0, untilMs = 0, tz = null) {
   const sessionId = path.basename(filePath, '.jsonl');
   const session = createEmptySession(sessionId);
   const seenRequestIds = new Set();
@@ -553,7 +551,8 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
     // Accumulate usage only for new requests, and only inside the lookback
     // window (usage without a resolvable timestamp is kept rather than lost)
     const usageTs = obj.timestamp || lastSeenTimestamp;
-    const inWindow = !cutoffMs || !usageTs || Date.parse(usageTs) >= cutoffMs;
+    const inWindow = (!cutoffMs || !usageTs || Date.parse(usageTs) >= cutoffMs)
+      && (!untilMs || !usageTs || Date.parse(usageTs) <= untilMs);
     if (isNewRequest || !requestId) {
       const usage = inWindow ? msg.usage : null;
       if (usage) {
@@ -597,7 +596,7 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
         // resolved after the parse — left day-less it would appear in session
         // totals but in no day, so the daily timeline and period cards (which
         // read only dailyUsage) would stop reconciling with the hero numbers.
-        const dateStr = usageTs ? localDayStr(usageTs) : UNBUCKETED_DAY;
+        const dateStr = usageTs ? dayKeyInZone(usageTs, tz) : UNBUCKETED_DAY;
         if (!dailyModelTokens[dateStr]) dailyModelTokens[dateStr] = {};
         if (!dailyModelTokens[dateStr][model]) {
           dailyModelTokens[dateStr][model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, cacheCreate1h: 0, webSearch: 0 };
@@ -706,11 +705,13 @@ async function parseSessionFile(filePath, cutoffMs = 0) {
   // window cutoff so it lands inside the window everything else was clipped to.
   if (dailyModelTokens[UNBUCKETED_DAY]) {
     const realDays = Object.keys(dailyModelTokens).filter(d => d !== UNBUCKETED_DAY).sort();
-    let targetMs = realDays.length > 0
-      ? Date.parse(realDays[0] + 'T12:00:00')
-      : rawStartMs;
-    if (cutoffMs) targetMs = Math.max(targetMs, cutoffMs);
-    const target = localDayStr(targetMs);
+    // Clamped to the window start, like every other window-cutoff clamp in
+    // this function. Compared/rendered as YYYY-MM-DD strings throughout
+    // (lexicographic order = chronological for zero-padded dates) rather than
+    // round-tripping through an instant, which stays exact under any `tz`.
+    const target = realDays.length > 0
+      ? (cutoffMs && dayKeyInZone(cutoffMs, tz) > realDays[0] ? dayKeyInZone(cutoffMs, tz) : realDays[0])
+      : dayKeyInZone(cutoffMs ? Math.max(rawStartMs, cutoffMs) : rawStartMs, tz);
     const day = dailyModelTokens[target] || (dailyModelTokens[target] = {});
     for (const [model, tk] of Object.entries(dailyModelTokens[UNBUCKETED_DAY])) {
       if (!day[model]) day[model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, cacheCreate1h: 0, webSearch: 0 };
@@ -846,9 +847,9 @@ function listSubagentTranscripts(dir, out = []) {
   return out;
 }
 
-async function parseSessionWithSubagents(projectDir, sessionId, cutoffMs = 0) {
+async function parseSessionWithSubagents(projectDir, sessionId, cutoffMs = 0, untilMs = 0, tz = null) {
   const mainFile = path.join(projectDir, `${sessionId}.jsonl`);
-  const session = await parseSessionFile(mainFile, cutoffMs);
+  const session = await parseSessionFile(mainFile, cutoffMs, untilMs, tz);
 
   // Merge every subagent transcript (including workflow-nested ones)
   const subagentDir = path.join(projectDir, sessionId, 'subagents');
@@ -857,7 +858,7 @@ async function parseSessionWithSubagents(projectDir, sessionId, cutoffMs = 0) {
     session.subagentTranscriptCount += subagentFiles.length;
     for (const af of subagentFiles) {
       try {
-        const subSession = await parseSessionFile(af, cutoffMs);
+        const subSession = await parseSessionFile(af, cutoffMs, untilMs, tz);
         mergeSubagentIntoSession(session, subSession);
       } catch {
         // Skip unreadable/corrupt subagent files
@@ -984,14 +985,12 @@ function findGitRoot(startPath) {
   return null;
 }
 
-export async function parseAllProjects(claudeDir, days, projectFilter) {
+export async function parseAllProjects(claudeDir, days, projectFilter, since = null, until = null, tz = null) {
   if (!existsSync(claudeDir)) {
     return { sessions: [], fileIndex: {} };
   }
 
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - days);
-  const cutoffMs = cutoffDate.getTime();
+  const { cutoffMs, untilMs } = resolveWindow({ days, since, until, tz });
 
   const sessions = [];
   const fileIndex = {};
@@ -1045,7 +1044,7 @@ export async function parseAllProjects(claudeDir, days, projectFilter) {
       for (const [sf, m] of subMtimes) fileIndex[sf] = m;
 
       try {
-        const session = await parseSessionWithSubagents(projectDir, sessionId, cutoffMs);
+        const session = await parseSessionWithSubagents(projectDir, sessionId, cutoffMs, untilMs, tz);
 
         // Skip empty sessions (no messages)
         if (!session.startTime || (session.userMessageCount === 0 && session.assistantMessageCount === 0)) {
@@ -1056,6 +1055,9 @@ export async function parseAllProjects(claudeDir, days, projectFilter) {
         // before the window but resumed inside it was parsed with its usage
         // clipped to the window — dropping it whole would lose that usage).
         if (new Date(session.endTime).getTime() < cutoffMs) continue;
+        // Mirror: a session that starts only after the window's end is
+        // entirely out of range (--until's counterpart to the check above).
+        if (untilMs && new Date(session.startTime).getTime() > untilMs) continue;
 
         // Derive project name from the session's actual repo path (cwd),
         // falling back to the folder name if repoPath is unavailable

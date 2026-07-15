@@ -176,6 +176,51 @@ test('Codex web search calls add OpenAI server-tool cost', async () => {
   }
 });
 
+test('--tz buckets dailyUsage by the requested IANA zone, not the server\'s local zone', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-tz-bucket-'));
+  try {
+    // 03:30 UTC on July 16 = 23:30 EDT on July 15 — the issue's own boundary case.
+    const ts = '2026-07-16T03:30:00.000Z';
+    writeRollout(root, '2026/07/16', 'rollout-2026-07-16T03-30-00-tz.jsonl', [
+      meta('tz-bucket', ts),
+      turnContext(ts, 'gpt-5.5'),
+      tokenCount(ts, usage(1000, 0, 1000), usage(1000, 0, 1000)),
+    ]);
+
+    const { sessions } = await parseCodexSessions(root, 100000, null, null, null, 'America/New_York');
+    const s = sessions[0];
+    assert.deepEqual(Object.keys(s.dailyUsage), ['2026-07-15'], 'bucketed by ET calendar day, not the UTC one');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('--until clips usage after the window end and drops sessions that start entirely after it', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-until-clip-'));
+  try {
+    // Kept: starts inside [--since, --until], a second event after --until
+    // that must be clipped from totals (the end-clip mirroring the start-clip).
+    writeRollout(root, '2026/06/15', 'rollout-2026-06-15T10-00-00-kept.jsonl', [
+      meta('kept', '2026-06-15T10:00:00.000Z'),
+      turnContext('2026-06-15T10:00:00.000Z', 'gpt-5.5'),
+      tokenCount('2026-06-15T10:00:00.000Z', usage(1000, 0, 0), usage(1000, 0, 0)),
+      tokenCount('2026-07-15T10:00:00.000Z', usage(9999, 0, 0), usage(10999, 0, 0)),
+    ]);
+    // Dropped: starts entirely after --until.
+    writeRollout(root, '2026/08/01', 'rollout-2026-08-01T10-00-00-dropped.jsonl', [
+      meta('dropped', '2026-08-01T10:00:00.000Z'),
+      turnContext('2026-08-01T10:00:00.000Z', 'gpt-5.5'),
+      tokenCount('2026-08-01T10:00:00.000Z', usage(1000, 0, 0), usage(1000, 0, 0)),
+    ]);
+
+    const { sessions } = await parseCodexSessions(root, null, null, '2026-06-01', '2026-06-30', null);
+    assert.equal(sessions.length, 1, 'the session starting entirely after --until is dropped');
+    assert.equal(sessions[0].totalInputTokens, 1000, 'usage after --until is clipped from totals, mirroring the --since start-clip');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('long-context GPT-5.x Codex usage is priced at long-context rates', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'codex-long-context-'));
   try {
