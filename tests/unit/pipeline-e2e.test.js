@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -211,6 +211,69 @@ test('nested workspace-parent sessions automatically explode into per-sub-repo c
     const zeroedSession = result.sessions.find(s => s.cost.totalCost === 0);
     assert.equal(zeroedSession.commitCount, 1, 'the zeroed clone still gets its own real commit');
     assert.equal(zeroedSession.grade, null, 'a zeroed clone must not be graded');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a workspace-parent cwd that still EXISTS is not flagged as a moved/deleted repo', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'pipeline-exists-'));
+  try {
+    const now = Date.now();
+    const iso = (minAgo) => new Date(now - minAgo * 60_000).toISOString();
+
+    // A plain folder that EXISTS but is not a git repo and has no nested repos
+    // — exactly the `talosred` case: repos would live in sub-folders, but this
+    // session's cwd is just the bare parent, so it can't be exploded.
+    const existingParent = path.join(root, 'workspace-parent');
+    mkdirSync(existingParent, { recursive: true });
+
+    // A path that does NOT exist on disk — a genuinely moved/deleted repo.
+    const missingRepo = path.join(root, 'ghost-repo');
+
+    const claudeDir = path.join(root, 'claude-projects');
+    const projDir = path.join(claudeDir, 'proj');
+    mkdirSync(projDir, { recursive: true });
+
+    const mkSession = (sid, cwd, file) => [
+      {
+        type: 'user', sessionId: sid, cwd, gitBranch: 'main', timestamp: iso(60),
+        message: { content: [{ type: 'text', text: 'work' }] },
+      },
+      {
+        type: 'assistant', requestId: `${sid}-req`, timestamp: iso(50),
+        message: {
+          model: 'claude-sonnet-4-6-20250929',
+          usage: { input_tokens: 1000, output_tokens: 200, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+          content: [{ type: 'tool_use', id: `${sid}-t1`, name: 'Edit', input: { file_path: file } }],
+        },
+      },
+    ];
+    const existsSid = 'aaaaaaaa-1111-2222-3333-444444444444';
+    const ghostSid = 'bbbbbbbb-1111-2222-3333-444444444444';
+    writeFileSync(path.join(projDir, `${existsSid}.jsonl`),
+      mkSession(existsSid, existingParent, path.join(existingParent, 'notes.md')).map(l => JSON.stringify(l)).join('\n') + '\n');
+    writeFileSync(path.join(projDir, `${ghostSid}.jsonl`),
+      mkSession(ghostSid, missingRepo, path.join(missingRepo, 'src', 'x.js')).map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const codexDir = path.join(root, 'codex-sessions');
+    mkdirSync(codexDir, { recursive: true });
+
+    // Progress (incl. the warning) goes to stderr under --json.
+    const r = spawnSync(process.execPath, [
+      INDEX, '--json', '--claude-dir', claudeDir, '--codex-dir', codexDir, '--days', '30',
+    ], { encoding: 'utf-8', env: { ...process.env, HOME: root } });
+
+    // The existing-but-not-a-repo parent must NOT be reported as "no longer
+    // exist" — it's right there on disk. (Its path only ever appears in stderr
+    // via that warning, so its absence proves the false alarm is gone.)
+    assert.ok(!r.stderr.includes(existingParent),
+      `existing workspace parent must not be flagged as missing.\nstderr:\n${r.stderr}`);
+
+    // The genuinely-missing path IS still warned about, by name.
+    assert.match(r.stderr, /no longer exist/);
+    assert.ok(r.stderr.includes(missingRepo),
+      `the truly-missing repo path must still be reported.\nstderr:\n${r.stderr}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
