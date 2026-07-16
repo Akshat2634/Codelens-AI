@@ -112,6 +112,65 @@ test('Sonnet 5 session straddling the cutover: session.cost reconciles with the 
   }
 });
 
+test('--tz buckets dailyUsage by the requested IANA zone, not the server\'s local zone', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codelens-tz-bucket-'));
+  try {
+    const proj = path.join(root, 'proj');
+    mkdirSync(proj, { recursive: true });
+    const sid = 'dddddddd-1111-2222-3333-444444444444';
+    // 03:30 UTC on July 16 = 23:30 EDT on July 15 — the issue's own boundary case.
+    const ts = '2026-07-16T03:30:00.000Z';
+    const usage = { input_tokens: 1000, output_tokens: 1000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    const lines = [
+      { type: 'user', sessionId: sid, cwd: '/tmp/x', gitBranch: 'main', timestamp: ts, message: { content: [{ type: 'text', text: 'go' }] } },
+      { type: 'assistant', requestId: 'r1', timestamp: ts, message: { model: 'claude-sonnet-5', usage } },
+    ];
+    writeFileSync(path.join(proj, sid + '.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions } = await parseAllProjects(root, 100000, null, null, null, 'America/New_York');
+    const s = sessions.find(x => x.sessionId === sid);
+    assert.ok(s);
+    assert.deepEqual(Object.keys(s.dailyUsage), ['2026-07-15'], 'bucketed by ET calendar day, not the UTC one');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('--until clips usage after the window end and drops sessions that start entirely after it', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codelens-until-clip-'));
+  try {
+    const proj = path.join(root, 'proj');
+    mkdirSync(proj, { recursive: true });
+    const usage = (n) => ({ input_tokens: n, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 });
+
+    // Kept: starts inside [--since, --until], one usage row after --until that
+    // must be clipped from totals (the end-clip mirroring the start-clip).
+    const sidKept = 'eeeeeeee-1111-2222-3333-444444444444';
+    const linesKept = [
+      { type: 'user', sessionId: sidKept, cwd: '/tmp/x', gitBranch: 'main', timestamp: '2026-06-15T10:00:00.000Z', message: { content: [{ type: 'text', text: 'go' }] } },
+      { type: 'assistant', requestId: 'r1', timestamp: '2026-06-15T10:00:00.000Z', message: { model: 'claude-sonnet-5', usage: usage(1000) } },
+      { type: 'assistant', requestId: 'r2', timestamp: '2026-07-15T10:00:00.000Z', message: { model: 'claude-sonnet-5', usage: usage(9999) } },
+    ];
+    writeFileSync(path.join(proj, sidKept + '.jsonl'), linesKept.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    // Dropped: starts entirely after --until.
+    const sidDropped = 'ffffffff-1111-2222-3333-444444444444';
+    const linesDropped = [
+      { type: 'user', sessionId: sidDropped, cwd: '/tmp/x', gitBranch: 'main', timestamp: '2026-08-01T10:00:00.000Z', message: { content: [{ type: 'text', text: 'go' }] } },
+      { type: 'assistant', requestId: 'r1', timestamp: '2026-08-01T10:00:00.000Z', message: { model: 'claude-sonnet-5', usage: usage(1000) } },
+    ];
+    writeFileSync(path.join(proj, sidDropped + '.jsonl'), linesDropped.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions } = await parseAllProjects(root, null, null, '2026-06-01', '2026-06-30', null);
+    assert.equal(sessions.length, 1, 'the session starting entirely after --until is dropped');
+    const s = sessions[0];
+    assert.equal(s.sessionId, sidKept);
+    assert.equal(s.totalInputTokens, 1000, 'usage after --until is clipped from totals, mirroring the --since start-clip');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('PRICING table covers every exported tier', () => {
   for (const key of ['fable', 'opus-48', 'opus-47', 'opus-46', 'opus-45', 'opus-old', 'opus-48-fast', 'opus-47-fast', 'sonnet', 'sonnet-5-intro', 'haiku-new', 'haiku-35', 'haiku-3']) {
     assert.ok(PRICING[key], `missing pricing tier ${key}`);

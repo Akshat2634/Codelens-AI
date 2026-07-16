@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { resolveWindow } from './window.js';
 
 // Directory names that should never be recursed into when walking for nested
 // git repos: package/build dirs (some npm packages ship a stray `.git` — every
@@ -401,7 +402,7 @@ export function resolveMovedRepoPaths(repoPaths, sessions = []) {
   return { aliasMap, unresolved };
 }
 
-export function analyzeGitRepo(repoPath, days) {
+export function analyzeGitRepo(repoPath, days, since = null, until = null) {
   const remote = getRepoRemote(repoPath);
   if (!existsSync(path.join(repoPath, '.git'))) {
     return { repoPath, commits: [], defaultBranch: null, remote: remote?.id || null, remoteSlug: remote?.slug || null };
@@ -410,8 +411,15 @@ export function analyzeGitRepo(repoPath, days) {
   const user = getGitUser(repoPath);
 
   try {
+    // --since/--until here are just a rough over-fetch pre-filter (git's own
+    // approxidate parsing) — the JS-side author-date filter below is what's
+    // actually authoritative, same division of labor as the existing
+    // "N days ago" string always had. Safe to interpolate: `since`/`until` are
+    // validated YYYY-MM-DD by window.js:validateDateStr before reaching here.
+    const sinceArg = since || `${days} days ago`;
+    const untilArg = until ? ` --until="${until} 23:59:59"` : '';
     const raw = execSync(
-      `git -C "${repoPath}" log --no-merges --exclude=refs/stash --all --since="${days} days ago" --format="COMMIT:%H%x01%ae%x01%aI%x01%s%x01%(trailers:key=Co-authored-by,valueonly,separator=%x02)%x01%S" --numstat`,
+      `git -C "${repoPath}" log --no-merges --exclude=refs/stash --all --since="${sinceArg}"${untilArg} --format="COMMIT:%H%x01%ae%x01%aI%x01%s%x01%(trailers:key=Co-authored-by,valueonly,separator=%x02)%x01%S" --numstat`,
       { encoding: 'utf-8', maxBuffer: 256 * 1024 * 1024 }
     );
 
@@ -486,20 +494,19 @@ export function analyzeGitRepo(repoPath, days) {
     }
 
     // Enforce the lookback window on AUTHOR date (%aI), matching every downstream
-    // metric (all of which bucket on author date). `--since` filters on committer
-    // date, which can differ from author date after a rebase or cherry-pick.
-    // Same calendar-day cutoff formula as the session parser (setDate is
+    // metric (all of which bucket on author date). `--since`/`--until` filter on
+    // committer date, which can differ from author date after a rebase or
+    // cherry-pick. Same window resolution as the session parsers (setDate is
     // DST-aware; a fixed days*24h product drifts an hour across DST changes).
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days);
-    const cutoffMs = cutoffDate.getTime();
+    const { cutoffMs, untilMs } = resolveWindow({ days, since, until });
 
     // Filter to the current user (case-insensitive — git records emails verbatim
     // and the case can vary) within the author-date window.
     const userEmail = (user.email || '').toLowerCase();
     const userCommits = allCommits.filter(c =>
       (c.authorEmail || '').toLowerCase() === userEmail &&
-      Number.isFinite(c.timestampMs) && c.timestampMs >= cutoffMs
+      Number.isFinite(c.timestampMs) && c.timestampMs >= cutoffMs &&
+      (!untilMs || c.timestampMs <= untilMs)
     );
 
     return { repoPath, commits: userCommits, defaultBranch: branchName, remote: remote?.id || null, remoteSlug: remote?.slug || null };
