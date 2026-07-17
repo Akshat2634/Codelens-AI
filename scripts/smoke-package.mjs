@@ -18,6 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
 const fixtures = path.join(repoRoot, 'tests', 'fixtures', 'claude-projects');
 const codexFixtures = path.join(repoRoot, 'tests', 'fixtures', 'codex-sessions');
+const kimiFixtures = path.join(repoRoot, 'tests', 'fixtures', 'kimi-share');
 const PORT = 39217;
 
 const run = (cmd, args, opts = {}) =>
@@ -57,7 +58,7 @@ try {
   //    actually starts.
   server = spawn(
     'node',
-    [path.join(installed, 'src', 'index.js'), '--no-open', '--port', String(PORT), '--days', '3650', '--claude-dir', fixtures, '--codex-dir', codexFixtures],
+    [path.join(installed, 'src', 'index.js'), '--no-open', '--port', String(PORT), '--days', '3650', '--claude-dir', fixtures, '--codex-dir', codexFixtures, '--kimi-dir', kimiFixtures],
     { stdio: ['ignore', 'pipe', 'pipe'] }
   );
   let serverLog = '';
@@ -83,7 +84,7 @@ try {
   const dash = await fetch(`${base}/`);
   if (dash.status !== 200) fail(`GET / returned ${dash.status}`);
 
-  // The packed parsers must actually load the fixture sessions — both agents.
+  // The packed parsers must actually load the fixture sessions — every agent.
   const payload = await (await fetch(`${base}/api/all`)).json();
   if (!Array.isArray(payload.sessions) || payload.sessions.length === 0) {
     fail('packed CLI served an empty payload — no sessions parsed from fixtures');
@@ -91,7 +92,8 @@ try {
   const sources = payload.meta?.sources || {};
   if (!(sources.claude > 0)) fail('packed CLI parsed no Claude fixture sessions');
   if (!(sources.codex > 0)) fail('packed CLI parsed no Codex fixture sessions');
-  console.log(`  • packed parsers loaded ${sources.claude} claude + ${sources.codex} codex fixture sessions`);
+  if (!(sources.kimi > 0)) fail('packed CLI parsed no Kimi fixture sessions');
+  console.log(`  • packed parsers loaded ${sources.claude} claude + ${sources.codex} codex + ${sources.kimi} kimi fixture sessions`);
 
   const chart = await fetch(`${base}/vendor/chart.umd.min.js`);
   if (chart.status !== 200) fail(`GET /vendor/chart.umd.min.js returned ${chart.status} — this is the blank-dashboard bug`);

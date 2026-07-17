@@ -7,8 +7,9 @@ import { expect, test } from '@playwright/test';
 // The dashboard is the "Mission Control" redesign: a fixed left rail with agent
 // source tabs + section nav, a bento Overview (efficiency score ring + stat
 // tiles), Cost & Token Flow, Models & Tools, Agents & Autonomy (with the
-// Claude-vs-Codex face-off), Shipping Rhythm, and a searchable Sessions table.
-// A ⌘K command palette replaces the old sticky command bar.
+// agent face-off — fixtures carry all three agents, so it renders as the
+// three-way comparison grid), Shipping Rhythm, and a searchable Sessions
+// table. A ⌘K command palette replaces the old sticky command bar.
 
 test.describe('Dashboard smoke (fixtures)', () => {
   test('server responds and API payload is well-formed', async ({ request }) => {
@@ -107,11 +108,12 @@ test.describe('Dashboard smoke (fixtures)', () => {
     expect(errors, 'chart JS errors: ' + errors.join(' | ')).toEqual([]);
   });
 
-  test('per-source API views: claude and codex sessions are split', async ({ request }) => {
+  test('per-source API views: claude, codex, and kimi sessions are split', async ({ request }) => {
     const all = await (await request.get('/api/all')).json();
     expect(all.meta.source).toBe('all');
     expect(all.meta.sources.claude).toBeGreaterThan(0);
     expect(all.meta.sources.codex).toBeGreaterThan(0);
+    expect(all.meta.sources.kimi).toBeGreaterThan(0);
 
     const codex = await (await request.get('/api/all?source=codex')).json();
     expect(codex.meta.source).toBe('codex');
@@ -122,20 +124,28 @@ test.describe('Dashboard smoke (fixtures)', () => {
     expect(claude.meta.source).toBe('claude');
     expect(claude.sessions.every((s) => (s.source || 'claude') === 'claude')).toBe(true);
 
-    // The combined view is a true sum of both providers for capability/tool
+    const kimi = await (await request.get('/api/all?source=kimi')).json();
+    expect(kimi.meta.source).toBe('kimi');
+    expect(kimi.sessions.length).toBe(all.meta.sources.kimi);
+    expect(kimi.sessions.every((s) => s.source === 'kimi')).toBe(true);
+
+    // The combined view is a true sum of all providers for capability/tool
     // counts, while retaining every provider's exact model rows.
+    const views = [claude, codex, kimi];
     for (const field of ['toolBreakdown', 'skillBreakdown', 'mcpServerBreakdown']) {
-      const keys = new Set([...Object.keys(claude[field] || {}), ...Object.keys(codex[field] || {})]);
+      const keys = new Set(views.flatMap((v) => Object.keys(v[field] || {})));
       for (const key of keys) {
-        expect(all[field]?.[key] || 0).toBe((claude[field]?.[key] || 0) + (codex[field]?.[key] || 0));
+        expect(all[field]?.[key] || 0).toBe(views.reduce((n, v) => n + (v[field]?.[key] || 0), 0));
       }
     }
-    for (const model of Object.keys(codex.modelDetailBreakdown)) {
-      expect(all.modelDetailBreakdown[model].cost).toBeCloseTo(codex.modelDetailBreakdown[model].cost, 10);
+    for (const view of [codex, kimi]) {
+      for (const model of Object.keys(view.modelDetailBreakdown)) {
+        expect(all.modelDetailBreakdown[model].cost).toBeCloseTo(view.modelDetailBreakdown[model].cost, 10);
+      }
     }
   });
 
-  test('All Agents model view renders exact Claude and Codex models together', async ({ page }) => {
+  test('All Agents model view renders exact Claude, Codex, and Kimi models together', async ({ page }) => {
     const errors = [];
     page.on('pageerror', (err) => errors.push(err.message));
     await page.goto('/');
@@ -143,16 +153,17 @@ test.describe('Dashboard smoke (fixtures)', () => {
     await expect(page.locator('#sec-models')).toContainText('Sonnet 4.6');
     await expect(page.locator('#sec-models')).toContainText('GPT-5.3 Codex');
     await expect(page.locator('#sec-models')).toContainText('GPT-5.1 Codex Max');
+    await expect(page.locator('#sec-models')).toContainText('Kimi K2.7 Code');
     expect(errors, 'JS errors in combined model view: ' + errors.join(' | ')).toEqual([]);
   });
 
   test('source tabs render and switching to Codex re-renders the dashboard', async ({ page }) => {
     const errors = [];
     page.on('pageerror', (err) => errors.push(err.message));
-    // Fixtures contain both Claude and Codex sessions, so all three tabs show.
+    // Fixtures contain Claude, Codex, and Kimi sessions, so all four tabs show.
     await page.goto('/');
     await page.waitForSelector('.source-tabs .source-tab');
-    await expect(page.locator('.source-tabs .source-tab')).toHaveCount(3);
+    await expect(page.locator('.source-tabs .source-tab')).toHaveCount(4);
     await expect(page.locator('.source-tabs .source-tab.active')).toContainText(/All Agents/i);
 
     await page.locator('.source-tabs .source-tab', { hasText: 'OpenAI Codex' }).click();
@@ -176,44 +187,68 @@ test.describe('UI modernization (brand marks, face-off, command palette)', () =>
   test('agent brand marks render on tabs, session rows, and footer', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('.source-tabs .source-tab');
-    // Tabs: Claude tab carries the starburst, Codex tab the knot, All both.
+    // Tabs: Claude tab carries the starburst, Codex the knot, Kimi the
+    // crescent, and All carries all three.
     await expect(page.locator('.source-tabs .source-tab', { hasText: 'Claude Code' }).locator('svg[data-agent-logo="claude"]')).toHaveCount(1);
     await expect(page.locator('.source-tabs .source-tab', { hasText: 'OpenAI Codex' }).locator('svg[data-agent-logo="codex"]')).toHaveCount(1);
-    await expect(page.locator('.source-tabs .source-tab', { hasText: 'All Agents' }).locator('svg[data-agent-logo]')).toHaveCount(2);
+    await expect(page.locator('.source-tabs .source-tab', { hasText: 'Kimi CLI' }).locator('svg[data-agent-logo="kimi"]')).toHaveCount(1);
+    await expect(page.locator('.source-tabs .source-tab', { hasText: 'All Agents' }).locator('svg[data-agent-logo]')).toHaveCount(3);
     // Sessions table: every row is stamped with its agent's mark on the mixed view.
     await page.waitForSelector('.sessions-section .session-row');
     const rows = await page.locator('.sessions-section .session-row').count();
     const rowMarks = await page.locator('.sessions-section .session-row svg[data-agent-logo]').count();
     expect(rowMarks).toBe(rows);
-    // Both agents are correctly identified (regression guard: real Claude
+    // All agents are correctly identified (regression guard: real Claude
     // sessions omit the `source` field, so a `source === 'claude'` check would
-    // silently render every Claude row with the Codex mark).
+    // silently render every Claude row with another agent's mark).
     const claudeMarks = await page.locator('.sessions-section .session-row svg[data-agent-logo="claude"]').count();
     const codexMarks = await page.locator('.sessions-section .session-row svg[data-agent-logo="codex"]').count();
+    const kimiMarks = await page.locator('.sessions-section .session-row svg[data-agent-logo="kimi"]').count();
     expect(claudeMarks).toBeGreaterThan(0);
     expect(codexMarks).toBeGreaterThan(0);
-    expect(claudeMarks + codexMarks).toBe(rows);
-    // Footer carries both marks.
-    await expect(page.locator('#footer-agents svg[data-agent-logo]')).toHaveCount(2);
+    expect(kimiMarks).toBeGreaterThan(0);
+    expect(claudeMarks + codexMarks + kimiMarks).toBe(rows);
+    // Footer carries all three marks.
+    await expect(page.locator('#footer-agents svg[data-agent-logo]')).toHaveCount(3);
   });
 
   test('agent face-off renders on All Agents and hides on a per-agent tab', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('.faceoff-section', { timeout: 15_000 });
-    // One head-to-head card: two grade badges, one VS divider, the Claude mascot
-    // (head + watermark) and the Codex knot (header + watermark).
-    await expect(page.locator('.faceoff-section .grade-badge')).toHaveCount(2);
+    // Fixtures carry all three agents, so the face-off renders as the
+    // three-way grid: one grade badge per agent, the VS chip, the Claude
+    // mascot and the Codex/Kimi marks in the header row.
+    await expect(page.locator('.faceoff-section .grade-badge')).toHaveCount(3);
     await expect(page.locator('.faceoff-vs')).toHaveText('VS');
-    await expect(page.locator('.faceoff-section svg[data-agent-mascot="claude"]')).toHaveCount(2);
-    await expect(page.locator('.faceoff-section svg[data-agent-logo="codex"]')).toHaveCount(2);
+    await expect(page.locator('.faceoff-section svg[data-agent-mascot="claude"]')).toHaveCount(1);
+    await expect(page.locator('.faceoff-section svg[data-agent-logo="codex"]')).toHaveCount(1);
+    await expect(page.locator('.faceoff-section svg[data-agent-logo="kimi"]')).toHaveCount(1);
     const spendRow = page.locator('.faceoff-section .fo-row', { hasText: 'Spend' });
     await expect(spendRow).toHaveCount(1);
     expect(await spendRow.textContent()).toMatch(/\$\d/);
 
-    // Per-agent view: the head-to-head disappears (there is no opponent).
+    // Per-agent view: the face-off disappears (there is no opponent).
     await page.locator('.source-tabs .source-tab', { hasText: 'Claude Code' }).click();
     await expect(page.locator('.source-tabs .source-tab.active')).toContainText(/Claude Code/i, { timeout: 10_000 });
     await expect(page.locator('.faceoff-section')).toHaveCount(0);
+  });
+
+  test('switching to the Kimi tab shows only Kimi sessions and models', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+    await page.goto('/');
+    await page.waitForSelector('.source-tabs .source-tab');
+    await page.locator('.source-tabs .source-tab', { hasText: 'Kimi CLI' }).click();
+    await expect(page.locator('.source-tabs .source-tab.active')).toContainText(/Kimi CLI/i, { timeout: 10_000 });
+    await expect(page.locator('#sec-models')).toContainText('Kimi K2.7 Code');
+    await page.waitForSelector('.sessions-section .session-row');
+    const rows = page.locator('.sessions-section .session-row');
+    const n = await rows.count();
+    expect(n).toBeGreaterThan(0);
+    for (let i = 0; i < n; i++) {
+      expect(await rows.nth(i).textContent()).toMatch(/Kimi/i);
+    }
+    expect(errors, 'JS errors during Kimi source switch: ' + errors.join(' | ')).toEqual([]);
   });
 
   test('command palette opens with the trigger and closes on Escape', async ({ page }) => {
@@ -235,13 +270,13 @@ test.describe('UI modernization (brand marks, face-off, command palette)', () =>
     expect(errors, 'command palette JS errors: ' + errors.join(' | ')).toEqual([]);
   });
 
-  test('command palette lists all three agent views (incl. OpenAI Codex)', async ({ page }) => {
+  test('command palette lists every agent view (incl. OpenAI Codex and Kimi CLI)', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('.source-tabs .source-tab');
     await page.locator('[data-act="openCmd"]').click();
     await expect(page.locator('.command-palette')).toBeVisible();
-    // All three agent Views must be reachable at rest — a prior 9-row cap hid Codex.
-    for (const label of ['View: All Agents', 'View: Claude Code', 'View: OpenAI Codex']) {
+    // Every agent View must be reachable at rest — a prior 9-row cap hid Codex.
+    for (const label of ['View: All Agents', 'View: Claude Code', 'View: OpenAI Codex', 'View: Kimi CLI']) {
       await expect(page.locator('.command-palette [data-act="cmdRun"]', { hasText: label })).toHaveCount(1);
     }
   });
@@ -326,10 +361,10 @@ test.describe('UI modernization (brand marks, face-off, command palette)', () =>
     expect(errors, 'refresh JS errors: ' + errors.join(' | ')).toEqual([]);
   });
 
-  test('footer shows both agent marks and links to the real project', async ({ page }) => {
+  test('footer shows all agent marks and links to the real project', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('footer');
-    await expect(page.locator('footer svg[data-agent-logo]')).toHaveCount(2);
+    await expect(page.locator('footer svg[data-agent-logo]')).toHaveCount(3);
     await expect(page.locator('footer a[href="https://github.com/Akshat2634/Codelens-AI"]')).toHaveCount(2);
   });
 });

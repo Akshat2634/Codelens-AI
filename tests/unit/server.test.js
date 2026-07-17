@@ -81,13 +81,14 @@ test('GET /vendor/chart.umd.min.js degrades to a clean 500 when the bundle is un
 });
 
 // ── Multi-agent source views ──
-// The server holds one payload per agent source ({ all, claude, codex }) and
-// routes select a view via ?source=. A bare single payload (the pre-Codex
+// The server holds one payload per agent source ({ all, claude, codex, kimi })
+// and routes select a view via ?source=. A bare single payload (the pre-Codex
 // shape) must keep working, and unknown sources must fall back to `all`.
 
+const SOURCE_COSTS = { all: 18, claude: 10, codex: 5, kimi: 3 };
 const mkPayload = (source) => ({
-  meta: { source, sources: { claude: 2, codex: 1 } },
-  summary: { totalCost: source === 'claude' ? 10 : source === 'codex' ? 5 : 15 },
+  meta: { source, sources: { claude: 2, codex: 1, kimi: 1 } },
+  summary: { totalCost: SOURCE_COSTS[source] },
   insights: [],
   daily: [{ date: '2026-07-01', cost: 1 }],
   sessions: [{ sessionId: `${source}-session`, source, cost: { totalCost: 1 }, commits: [], startTime: '2026-07-01T00:00:00Z', userMessageCount: 1, assistantMessageCount: 1 }],
@@ -95,7 +96,7 @@ const mkPayload = (source) => ({
 });
 
 async function withSourceServer(fn) {
-  const payloads = { all: mkPayload('all'), claude: mkPayload('claude'), codex: mkPayload('codex') };
+  const payloads = { all: mkPayload('all'), claude: mkPayload('claude'), codex: mkPayload('codex'), kimi: mkPayload('kimi') };
   const app = createServer(payloads, null, { chartJsPath: null });
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
@@ -111,15 +112,13 @@ test('GET /api/all?source= selects the per-agent view and falls back to all', as
   await withSourceServer(async (port) => {
     const all = await (await fetch(`http://127.0.0.1:${port}/api/all`)).json();
     assert.equal(all.meta.source, 'all');
-    assert.equal(all.summary.totalCost, 15);
+    assert.equal(all.summary.totalCost, SOURCE_COSTS.all);
 
-    const claude = await (await fetch(`http://127.0.0.1:${port}/api/all?source=claude`)).json();
-    assert.equal(claude.meta.source, 'claude');
-    assert.equal(claude.summary.totalCost, 10);
-
-    const codex = await (await fetch(`http://127.0.0.1:${port}/api/all?source=codex`)).json();
-    assert.equal(codex.meta.source, 'codex');
-    assert.equal(codex.summary.totalCost, 5);
+    for (const source of ['claude', 'codex', 'kimi']) {
+      const view = await (await fetch(`http://127.0.0.1:${port}/api/all?source=${source}`)).json();
+      assert.equal(view.meta.source, source);
+      assert.equal(view.summary.totalCost, SOURCE_COSTS[source]);
+    }
 
     // Unknown source → all view, not an error
     const bogus = await (await fetch(`http://127.0.0.1:${port}/api/all?source=cursor`)).json();

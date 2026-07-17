@@ -1,25 +1,35 @@
 // Generates synthetic agent session files for CI smoke tests.
 // Output: tests/fixtures/claude-projects/test-project/*.jsonl (Claude Code)
 //         tests/fixtures/codex-sessions/YYYY/MM/DD/rollout-*.jsonl (OpenAI Codex)
+//         tests/fixtures/kimi-share/{kimi.json,config.toml,sessions/...} (Kimi CLI)
 //
-// Shapes mirror what ~/.claude/projects/ and ~/.codex/sessions/ contain in
-// practice. The parsers pick these up and the dashboard renders with non-empty
-// data for both agent sources (which also makes the source tabs appear).
+// Shapes mirror what ~/.claude/projects/, ~/.codex/sessions/, and ~/.kimi/
+// contain in practice. The parsers pick these up and the dashboard renders
+// with non-empty data for every agent source (which also makes the source
+// tabs appear).
 
-import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(__dirname, 'claude-projects', 'test-project');
 const CODEX_DIR = path.join(__dirname, 'codex-sessions');
+const KIMI_DIR = path.join(__dirname, 'kimi-share');
 mkdirSync(OUT_DIR, { recursive: true });
 rmSync(CODEX_DIR, { recursive: true, force: true });
+rmSync(KIMI_DIR, { recursive: true, force: true });
 
 const FAKE_REPO = '/tmp/codelens-fixture-repo';
 
 function iso(minutesAgo) {
   return new Date(Date.now() - minutesAgo * 60_000).toISOString();
+}
+
+// Kimi wire.jsonl records carry epoch SECONDS.
+function epochSec(minutesAgo) {
+  return (Date.now() - minutesAgo * 60_000) / 1000;
 }
 
 function session(sessionId, model, entries) {
@@ -165,6 +175,28 @@ session(s5, 'claude-sonnet-5', [
   },
 ]);
 
+// Write a Kimi CLI session into the real ~/.kimi layout: the share dir holds
+// kimi.json (the md5(cwd) -> cwd registry), config.toml (the only place the
+// model id lives), and sessions/<md5-of-cwd>/<session-id>/wire.jsonl.
+const KIMI_HASH = createHash('md5').update(FAKE_REPO, 'utf-8').digest('hex');
+function kimiSession(sessionId, records) {
+  const dir = path.join(KIMI_DIR, 'sessions', KIMI_HASH, sessionId);
+  mkdirSync(dir, { recursive: true });
+  const lines = [
+    JSON.stringify({ type: 'metadata', protocol_version: '1.10' }),
+    ...records.map(([minutesAgo, type, payload]) =>
+      JSON.stringify({ timestamp: epochSec(minutesAgo), message: { type, payload } })),
+  ];
+  writeFileSync(path.join(dir, 'wire.jsonl'), lines.join('\n') + '\n');
+}
+const kimiTool = (id, name, args) => ({ type: 'function', id, function: { name, arguments: JSON.stringify(args) }, extras: null });
+const kimiUsage = (messageId, inputOther, cacheRead, cacheCreate, output) => ({
+  context_usage: 0.1,
+  token_usage: { input_other: inputOther, input_cache_read: cacheRead, input_cache_creation: cacheCreate, output },
+  message_id: messageId,
+  plan_mode: null,
+});
+
 // ── Codex Session 1: Shipped work (gpt-5.3-codex, ~30h ago)
 const cx1 = '11111111-aaaa-bbbb-cccc-000000000001';
 codexSession(cx1, [
@@ -201,5 +233,40 @@ codexSession(cx3, [
   { timestamp: iso(5 * 60 - 2), type: 'event_msg', payload: { type: 'agent_message', message: 'The auth flow uses middleware chaining…' } },
 ]);
 
+// ── Kimi Session 1: Shipped work (kimi-k2.7-code via config.toml, ~26h ago)
+const km1 = '22222222-bbbb-cccc-dddd-000000000001';
+kimiSession(km1, [
+  [26 * 60, 'TurnBegin', { user_input: 'Add request telemetry to the API.' }],
+  [26 * 60 - 1, 'StepBegin', { n: 1 }],
+  [26 * 60 - 1, 'ToolCall', kimiTool('km1-c1', 'Shell', { command: 'npm test', timeout: 60 })],
+  [26 * 60 - 1, 'StatusUpdate', kimiUsage('km1-m1', 2600, 11000, 900, 700)],
+  [26 * 60 - 2, 'ToolCall', kimiTool('km1-c2', 'StrReplaceFile', { path: 'src/telemetry.js', edit: { old: 'a', new: 'b', replace_all: false } })],
+  [26 * 60 - 2, 'StatusUpdate', kimiUsage('km1-m2', 3400, 14000, 0, 1200)],
+  [26 * 60 - 3, 'TurnEnd', {}],
+]);
+
+// ── Kimi Session 2: Prior-week work for narrative comparison (~8.5 days ago)
+const km2 = '22222222-bbbb-cccc-dddd-000000000002';
+kimiSession(km2, [
+  [8.5 * 24 * 60, 'TurnBegin', { user_input: 'Document the telemetry setup.' }],
+  [8.5 * 24 * 60 - 1, 'ToolCall', kimiTool('km2-c1', 'WriteFile', { path: FAKE_REPO + '/docs/telemetry.md', content: '# Telemetry', mode: 'overwrite' })],
+  [8.5 * 24 * 60 - 1, 'StatusUpdate', kimiUsage('km2-m1', 1800, 6000, 300, 500)],
+  [8.5 * 24 * 60 - 2, 'TurnEnd', {}],
+]);
+
+writeFileSync(path.join(KIMI_DIR, 'kimi.json'), JSON.stringify({
+  work_dirs: [{ path: FAKE_REPO, kaos: 'local', last_session_id: km1 }],
+}) + '\n');
+writeFileSync(path.join(KIMI_DIR, 'config.toml'), [
+  'default_model = "moonshot-ai/kimi-k2.7-code"',
+  '',
+  '[models."moonshot-ai/kimi-k2.7-code"]',
+  'model = "kimi-k2.7-code"',
+  'provider = "moonshot-ai"',
+  'max_context_size = 262144',
+  '',
+].join('\n'));
+
 console.log('Wrote 5 synthetic Claude sessions to ' + OUT_DIR);
 console.log('Wrote 3 synthetic Codex sessions to ' + CODEX_DIR);
+console.log('Wrote 2 synthetic Kimi sessions to ' + KIMI_DIR);

@@ -4,12 +4,12 @@
 
 **Agent Productivity-to-Cost Correlator** — Is your AI coding agent actually shipping code?
 
-Codelens AI ties AI coding agent token usage to actual git output. It reads your local **Claude Code** and **OpenAI Codex CLI** session files, correlates them with git commits, and serves a dashboard answering: *"Am I getting ROI from my AI coding agents?"* When both agents have sessions, the dashboard adds **All Agents / Claude Code / OpenAI Codex** tabs so you can compare them side by side.
+Codelens AI ties AI coding agent token usage to actual git output. It reads your local **Claude Code**, **OpenAI Codex CLI**, and **Kimi CLI** session files, correlates them with git commits, and serves a dashboard answering: *"Am I getting ROI from my AI coding agents?"* When more than one agent has sessions, the dashboard adds **All Agents / Claude Code / OpenAI Codex / Kimi CLI** tabs so you can compare them side by side.
 
 - One command, zero config
 - All data stays local
-- Supports Claude Code and OpenAI Codex CLI in one dashboard
-- Works with any git repo where you've used either agent
+- Supports Claude Code, OpenAI Codex CLI, and Kimi CLI in one dashboard
+- Works with any git repo where you've used any of these agents
 
 ## Installation
 
@@ -88,6 +88,7 @@ npm install -g codelens-ai@latest   # ...or just update it
 - At least one supported agent with local session data:
   - **Claude Code** — [Claude Code](https://claude.com/claude-code) sessions at `~/.claude/projects/`
   - **OpenAI Codex CLI** — [Codex](https://developers.openai.com/codex) sessions at `~/.codex/sessions/` (`$CODEX_HOME` is honored)
+  - **Kimi CLI** — [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) sessions at `~/.kimi/sessions/` (`$KIMI_SHARE_DIR` is honored)
 
 ## Quick Start
 
@@ -95,7 +96,7 @@ npm install -g codelens-ai@latest   # ...or just update it
 npx codelens-ai
 ```
 
-This parses your `~/.claude/projects/` and `~/.codex/sessions/` data, analyzes your git repos, and opens a dashboard at `http://localhost:3457`.
+This parses your `~/.claude/projects/`, `~/.codex/sessions/`, and `~/.kimi/sessions/` data, analyzes your git repos, and opens a dashboard at `http://localhost:3457`.
 
 ## What It Measures
 
@@ -108,8 +109,8 @@ This parses your `~/.claude/projects/` and `~/.codex/sessions/` data, analyzes y
 | **Orphaned Sessions** | Sessions with 10+ messages that produced zero commits           |
 | **ROI Grade (A-F)**   | Composite score based on tokens-per-commit and survival rate    |
 | **Trailer Attribution** | `Co-authored-by` agent trailers confirm commit attribution (near-ground-truth) |
-| **Model Comparison**  | Efficiency across Claude and Codex models, including GPT-5.6 Sol, Terra, and Luna |
-| **Agent Comparison**  | Per-agent dashboard tabs (All / Claude Code / OpenAI Codex)     |
+| **Model Comparison**  | Efficiency across Claude, Codex, and Kimi models, including GPT-5.6 Sol/Terra/Luna and Kimi K3/K2.7 |
+| **Agent Comparison**  | Per-agent dashboard tabs (All / Claude Code / OpenAI Codex / Kimi CLI) |
 | **Branch Awareness**  | What % of AI commits landed on production                       |
 | **Peak Hours**        | Hour-of-day x day-of-week productivity heatmap                  |
 | **Autonomy Score**    | Composite A-F grade measuring how independently the agent works |
@@ -128,14 +129,17 @@ codelens-ai --no-open              # don't auto-open browser
 codelens-ai --json                 # dump all metrics as JSON to stdout
 codelens-ai --project techops      # filter to a specific project
 codelens-ai --refresh              # force full re-parse (ignore cache)
-codelens-ai --source codex         # analyze a single agent only: claude | codex
+codelens-ai --source codex         # analyze a single agent only: claude | codex | kimi
 codelens-ai --offline              # skip the network pricing refresh (use cached/hardcoded rates)
 codelens-ai --plan max20           # Claude subscription mode: effective $/commit vs your flat plan
 codelens-ai --plan-cost 150        # custom Claude monthly subscription cost (USD)
 codelens-ai --codex-plan plus      # ChatGPT/Codex subscription: free | go | plus | pro100 | pro | business | business-annual
 codelens-ai --codex-plan-cost 40   # custom Codex monthly subscription cost (USD)
+codelens-ai --kimi-plan moderato   # Kimi membership: adagio | moderato | allegretto | allegro | vivace
+codelens-ai --kimi-plan-cost 19    # custom Kimi monthly subscription cost (USD)
 codelens-ai --claude-dir <path>    # override ~/.claude/projects (testing/CI)
 codelens-ai --codex-dir <path>     # override ~/.codex/sessions (testing/CI)
+codelens-ai --kimi-dir <path>      # override ~/.kimi — the Kimi share dir containing sessions/ (testing/CI)
 
 codelens-ai report                 # print an ROI scorecard to the terminal
 codelens-ai report --md            # export codelens-report.md (or --md <path>)
@@ -161,7 +165,7 @@ codelens-ai mcp                    # serve usage & ROI reports as MCP tools over
 ccusage-style token accounting over the same analyzed window — Input / Output / Cache Create /
 Cache Read / Total / Cost per period — plus the two ROI columns a pure usage tool can't give you:
 **Commits** and **$/Commit**. All the shared analysis flags (`--days`, `--source`, `--project`,
-`--claude-dir`, `--codex-dir`) apply.
+`--claude-dir`, `--codex-dir`, `--kimi-dir`) apply.
 
 ### Billing blocks (`codelens-ai blocks`)
 
@@ -186,7 +190,7 @@ claude mcp add codelens -- npx -y codelens-ai mcp
 Exposed tools: **`roi_summary`** (grade, spend, $/commit, survival, value leak — the scorecard),
 **`usage`** (daily/weekly/monthly token & cost table), **`blocks`** (5-hour billing windows + burn
 rate), **`sessions`**, **`projects`** (per-repo ROI), and **`refresh`** (force a re-parse). Most
-tools take an optional `source` (`all | claude | codex`), and all the shared analysis flags
+tools take an optional `source` (`all | claude | codex | kimi`), and all the shared analysis flags
 (`--days`, `--project`, `--claude-dir`, ...) apply to the server itself. Analysis runs once at
 startup and is served from memory; the `refresh` tool re-runs it on demand.
 
@@ -231,7 +235,7 @@ Then run `npx codelens-ai` (or `codelens-ai report`) whenever you want the "toda
 
 ### Effective cost (subscription mode)
 
-By default costs are **API-equivalent** — what your usage *would* cost at pay-as-you-go token rates. If you're on a flat-rate plan, those dollars aren't what you actually pay. Pass `--plan` (`pro` = $20/mo, `max5` = $100/mo, `max20` = $200/mo) / `--plan-cost <usd>` for Claude, or `--codex-plan` (`free` = $0/mo, `go` = $8/mo, `plus` = $20/mo, `pro100` = $100/mo, `pro` = $200/mo, `business` = $25/seat/mo monthly, `business-annual` = $20/seat/mo annually) / `--codex-plan-cost <usd>` for ChatGPT/Codex, to add an **Effective Cost** panel that prorates your subscription to the analyzed window and shows:
+By default costs are **API-equivalent** — what your usage *would* cost at pay-as-you-go token rates. If you're on a flat-rate plan, those dollars aren't what you actually pay. Pass `--plan` (`pro` = $20/mo, `max5` = $100/mo, `max20` = $200/mo) / `--plan-cost <usd>` for Claude, `--codex-plan` (`free` = $0/mo, `go` = $8/mo, `plus` = $20/mo, `pro100` = $100/mo, `pro` = $200/mo, `business` = $25/seat/mo monthly, `business-annual` = $20/seat/mo annually) / `--codex-plan-cost <usd>` for ChatGPT/Codex, or `--kimi-plan` (`adagio` = $0/mo, `moderato` = $19/mo, `allegretto` = $39/mo, `allegro` = $99/mo, `vivace` = $199/mo) / `--kimi-plan-cost <usd>` for Kimi memberships, to add an **Effective Cost** panel that prorates your subscription to the analyzed window and shows:
 
 - **Effective $/commit** and **$/surviving line** — your prorated fee ÷ output, the cost figures that actually reflect your bill.
 - **Plan utilization** — API-equivalent value ÷ prorated fee (e.g. `3.2×` means you extracted ~3.2× your subscription in pay-as-you-go value). This is an estimate of value extracted, **not** realized savings.
@@ -240,12 +244,12 @@ By default costs are **API-equivalent** — what your usage *would* cost at pay-
 
 The dashboard includes:
 
-- **Agent source tabs** — when both Claude Code and Codex sessions exist, switch between **All Agents**, **Claude Code**, and **OpenAI Codex** views; every section recomputes for the selected agent
+- **Agent source tabs** — when more than one agent has sessions, switch between **All Agents**, **Claude Code**, **OpenAI Codex**, and **Kimi CLI** views; every section recomputes for the selected agent
 - **Hero stats** — total cost, commits shipped, cost per commit, ROI grade, **AI code share**, and **value leak**
 - **Attribution & Coverage** — per-commit confidence (high/medium/low) that a commit was really the AI's, `Co-authored-by` trailer confirmations, plus a reconciliation of AI-attributed vs co-authored vs organic (manual) lines, so the ROI numbers are auditable rather than a black box
 - **Smart insights** — auto-generated observations about your usage patterns
 - **Cost vs Output timeline** — dual-axis chart of daily cost and lines added
-- **Model comparison** — cost and efficiency breakdown across Claude Code and OpenAI Codex models
+- **Model comparison** — cost and efficiency breakdown across Claude Code, OpenAI Codex, and Kimi models
 - **Session length analysis** — which session sizes have the best ROI
 - **Productivity heatmap** — GitHub-style grid showing when you're most productive
 - **Agent Autonomy** — autonomy score badge, autopilot ratio, self-heal score, commit velocity, and top verification commands
@@ -254,9 +258,9 @@ The dashboard includes:
 
 ## How It Works
 
-1. **Parses** JSONL session files from `~/.claude/projects/` (Claude Code) and rollout files from `~/.codex/sessions/` (OpenAI Codex CLI — including `.jsonl.zst` archives on Node >= 22.15)
-2. **Analyzes** git history from each repo you've worked in with either agent, including `Co-authored-by` agent trailers on each commit. If a session starts in a workspace parent that contains multiple git repos, Codelens automatically discovers nested repos (up to three levels) and correlates the touched files with the right repo — no flag or configuration required.
-3. **Correlates** sessions to commits by file overlap and timing — all agents correlate together, so a commit is attributed to at most one session; a commit stamped `Co-authored-by: Claude/Codex` is routed to the matching agent and counts as high-confidence attribution
+1. **Parses** JSONL session files from `~/.claude/projects/` (Claude Code), rollout files from `~/.codex/sessions/` (OpenAI Codex CLI — including `.jsonl.zst` archives on Node >= 22.15), and wire logs from `~/.kimi/sessions/` (Kimi CLI)
+2. **Analyzes** git history from each repo you've worked in with any agent, including `Co-authored-by` agent trailers on each commit. If a session starts in a workspace parent that contains multiple git repos, Codelens automatically discovers nested repos (up to three levels) and correlates the touched files with the right repo — no flag or configuration required.
+3. **Correlates** sessions to commits by file overlap and timing — all agents correlate together, so a commit is attributed to at most one session; a commit stamped `Co-authored-by: Claude/Codex` is routed to the matching agent and counts as high-confidence attribution (Kimi CLI stamps no trailer, so its commits match on file overlap + timing alone)
 4. **Calculates** cost using each provider's published API pricing (input, output, cache, and server-side web search when logged)
 5. **Serves** an interactive dashboard on localhost with per-agent views
 
@@ -326,6 +330,29 @@ Codex sessions are costed from the `token_count` events in each rollout file. In
 >
 > **Note — subscriptions:** If you use Codex through a ChatGPT plan (Free/Go/Plus/Pro/Business), the dollar figures are **API-equivalent value**, not what you were billed — pass `--codex-plan` to see effective cost against your flat fee. API-key mode can also include published server-side tool-call fees when the rollout logs expose them.
 
+#### Moonshot AI (Kimi) models
+
+Kimi CLI sessions are costed from the per-request `token_usage` records in each session's `wire.jsonl`. Moonshot reports Anthropic-style input splits (`input_other` + `input_cache_read` + `input_cache_creation`); cache reads bill at the published cache-hit rate and cache creation bills at the plain input rate (Moonshot publishes no write premium). Rates per million tokens from [Moonshot's pricing](https://platform.kimi.ai/docs/pricing/chat):
+
+| Model | Input | Cache Hit | Output |
+| --- | --- | --- | --- |
+| Kimi K3 | $3.00/M | $0.30/M | $15/M |
+| Kimi K2.7 Code | $0.95/M | $0.19/M | $4/M ($8/M high-speed) |
+| Kimi K2.6 | $0.95/M | $0.16/M | $4/M |
+| Kimi K2.5 | $0.60/M | $0.10/M | $3/M |
+| Kimi K2 Thinking / K2 0711 / K2 0905 (EOL May 2026) | $0.60/M | $0.15/M | $2.50/M |
+| Kimi K2 Turbo / K2 Thinking Turbo (EOL May 2026) | $1.15/M (from Nov 6 2025; date-tiered before) | $0.15/M | $8/M |
+| kimi-latest 8k / 32k / 128k (EOL Jan 2026) | $0.20 / $1.00 / $2.00/M | $0.15/M | $2 / $3 / $5/M |
+| moonshot-v1 8k / 32k / 128k (legacy) | $0.20 / $1.00 / $2.00/M | no cache-hit rate | $2 / $3 / $5/M |
+
+> **Note — model attribution:** Kimi CLI session files record **no model id**. Codelens attributes sessions to the model configured in `~/.kimi/config.toml` (`default_model`), falling back to the `kimi-for-coding` subscription alias. Alias-priced spend uses the real rates of the model Moonshot routed the alias to on each usage date (K2 Thinking → K2.5 → K2.6 → K2.7 Code) and is included in the dashboard's "estimated spend" share, since the alias has no published price of its own.
+>
+> **Note — auto-tier models:** `kimi-latest` and `moonshot-v1-auto` bill the context tier each request fits in; Codelens re-buckets their usage per request onto the concrete 8k/32k/128k tier ids.
+>
+> **Note — price history:** `kimi-k2-turbo-preview` is date-tiered ($1.20/$0.30/$5 launch promo through Aug 2025, $2.40/$0.60/$10 through Nov 5 2025, then $1.15/$0.15/$8); every other Moonshot price change shipped as a new model id. Unknown/future Kimi models are priced from the LiteLLM overlay when available, else at estimated current-default rates.
+>
+> **Note — subscriptions:** Kimi memberships (Moderato/Allegretto/Allegro/Vivace) cover Kimi CLI usage with credits, so the dollar figures are **API-equivalent value** — pass `--kimi-plan` to see effective cost against your flat fee.
+
 ### Line Survival
 
 Line survival uses an approximate heuristic: if lines added in commit A are deleted by a subsequent commit on the same file within 24 hours, they're counted as "churned." This is not git-blame-based tracking and survival rates are rounded to the nearest 5%.
@@ -341,6 +368,7 @@ Codelens-AI/
     ├── index.js          # CLI entry point
     ├── claude-parser.js  # Parse Claude Code JSONL session files
     ├── codex-parser.js   # Parse OpenAI Codex CLI rollout files
+    ├── kimi-parser.js    # Parse Kimi CLI wire.jsonl session logs
     ├── cache.js          # Parsed data caching layer (per-source staleness)
     ├── git-analyzer.js   # Parse git log with branch awareness
     ├── correlator.js     # Match sessions to commits by file overlap + timing + trailers

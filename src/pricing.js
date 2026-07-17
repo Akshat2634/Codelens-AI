@@ -27,11 +27,14 @@ let overlay = null;
 let overlaySource = null; // 'network' | 'cache' | 'disabled' | null (for reporting)
 
 // Strip our billing markers ([fast]/[us]/[long]) and a provider prefix, lowercase.
+// LiteLLM keys Moonshot models as moonshot/kimi-k2-... (and moonshotai/... for
+// open-weight hosts) — stripping the prefix lets a bare session-log model id
+// like 'kimi-k2-0905-preview' resolve to that entry.
 export function normalizeExternalId(name) {
   return String(name || '')
     .toLowerCase()
     .replace(/\[[^\]]*\]/g, '')
-    .replace(/^(anthropic|openai|azure|vertex_ai|bedrock)\//, '')
+    .replace(/^(anthropic|openai|azure|vertex_ai|bedrock|moonshotai|moonshot)\//, '')
     .trim();
 }
 

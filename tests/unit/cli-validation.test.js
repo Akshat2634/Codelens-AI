@@ -50,13 +50,15 @@ test('--json with zero sessions writes the literal null to stdout, progress to s
   try {
     const claudeDir = path.join(root, 'claude-projects');
     const codexDir = path.join(root, 'codex-sessions');
+    const kimiDir = path.join(root, 'kimi-share');
     mkdirSync(claudeDir, { recursive: true });
     mkdirSync(codexDir, { recursive: true });
+    mkdirSync(path.join(kimiDir, 'sessions'), { recursive: true });
 
     // --source all must be accepted as the no-filter default (matches the
     // ?source=all name every API route uses).
     const r = runCli(
-      ['--json', '--source', 'all', '--claude-dir', claudeDir, '--codex-dir', codexDir],
+      ['--json', '--source', 'all', '--claude-dir', claudeDir, '--codex-dir', codexDir, '--kimi-dir', kimiDir],
       { HOME: root }
     );
 
@@ -68,6 +70,7 @@ test('--json with zero sessions writes the literal null to stdout, progress to s
     // The hint must name the directories actually scanned, not the defaults.
     assert.ok(r.stderr.includes(claudeDir));
     assert.ok(r.stderr.includes(codexDir));
+    assert.ok(r.stderr.includes(kimiDir));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -31,19 +31,19 @@ export function reportModel(payload, payloads = null) {
   const surv = payload.lineSurvival;
 
   const agents = [];
-  // Per-agent one-liners when the run computed per-agent views.
-  if (payloads?.claude && payloads.codex) {
-    for (const [key, label] of [['claude', 'Claude Code'], ['codex', 'OpenAI Codex']]) {
-      const p = payloads[key];
-      agents.push({
-        label,
-        cost: p.summary.totalCost,
-        commits: p.summary.totalCommits,
-        costPerCommit: p.summary.avgCostPerCommit,
-        survivalRate: p.lineSurvival.survivalRate,
-        grade: p.summary.overallGrade,
-      });
-    }
+  // Per-agent one-liners when the run computed per-agent views (they exist
+  // only when more than one agent has sessions, so no length gate needed).
+  for (const [key, label] of [['claude', 'Claude Code'], ['codex', 'OpenAI Codex'], ['kimi', 'Kimi CLI']]) {
+    const p = payloads?.[key];
+    if (!p) continue;
+    agents.push({
+      label,
+      cost: p.summary.totalCost,
+      commits: p.summary.totalCommits,
+      costPerCommit: p.summary.avgCostPerCommit,
+      survivalRate: p.lineSurvival.survivalRate,
+      grade: p.summary.overallGrade,
+    });
   }
 
   // Top model families by cost that shipped commits — the "which model is
