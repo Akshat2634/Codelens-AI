@@ -28,7 +28,7 @@ src/
 ├── codex-parser.js    # Parses OpenAI Codex rollout files from ~/.codex/sessions/
 ├── git-analyzer.js    # Git log analysis, branch detection, diff stats
 ├── correlator.js      # Matches sessions to commits via file overlap + time window + Co-authored-by trailers
-├── metrics.js         # ROI calculations, grades, insights, heatmap, survival rate, AI code share, value leak
+├── metrics.js         # ROI calculations, grades, insights, heatmap, survival rate, AI code share, value leak, regret detector, model advisor
 ├── report.js          # `codelens-ai report` — terminal / Markdown / HTML ROI scorecard
 ├── tables.js          # `codelens-ai daily|weekly|monthly` — usage/cost tables + ROI columns
 ├── blocks.js          # `codelens-ai blocks` — 5-hour billing windows, burn rate, projection
@@ -81,6 +81,8 @@ All GET routes accept `?source=all|claude|codex` (default `all`; per-agent views
 - `GET /api/agent-type` — sessions by agent type (main_only vs delegated to a subagent)
 - `GET /api/feature-adoption` — share of sessions using Sub-agents / Skills / MCP / Plan mode
 - `GET /api/survival` — line survival stats
+- `GET /api/regret` — regret detector: AI commits reverted (parsed from `git revert` bodies by git-analyzer, any author) or hot-fixed by a later out-of-session commit touching the same files ≤48h; per-commit detail + estimated cost that didn't stick. `null` when the window has no AI commits
+- `GET /api/advisor` — model advisor: sessions grouped by dominant model family (`costZeroed` clones excluded), per-family $/commit + line survival, and a `switch`/`keep`/`insufficient` verdict — a cheaper family is recommended only with ≥5 commits, ≥2 sessions, ≥15% savings, and survival within 10 points of the incumbent
 - `GET /api/tokens` — detailed token analytics
 - `POST /api/refresh` — force re-parse
 

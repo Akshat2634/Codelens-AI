@@ -640,3 +640,255 @@ test('skillBreakdown, mcpServerBreakdown, and clientBreakdown are empty (not mis
   assert.deepEqual(m.clientBreakdown, {});
   assert.deepEqual(m.agentTypeBreakdown, { main_only: { sessions: 0, pct: 0 }, delegated: { sessions: 0, pct: 0 } });
 });
+
+// ── regret detector ──
+
+const T0 = new Date('2026-04-20T10:30:00.000Z').getTime();
+function mkCommit(hash, minutesAfterT0, subject, files, extra = {}) {
+  const ts = new Date(T0 + minutesAfterT0 * 60000);
+  return {
+    hash, authorEmail: 'a@b.com', timestamp: ts.toISOString(), timestampMs: ts.getTime(),
+    subject, branch: 'main', onMain: true,
+    files: files.map(([p, added, deleted]) => ({ path: p, added, deleted })),
+    totalAdded: files.reduce((s, f) => s + f[1], 0),
+    totalDeleted: files.reduce((s, f) => s + f[2], 0),
+    ...extra,
+  };
+}
+const AI_HASH = 'a'.repeat(40);
+
+test('regret: a git revert naming an AI commit counts as a hard regret with cost', () => {
+  const ai = mkCommit(AI_HASH, 0, 'add feature', [['src/foo.js', 50, 0]]);
+  const s = mkCorrelated({ commits: [ai], commitCount: 1, cost: { totalCost: 10 } });
+  const commitsByRepo = {
+    '/repo': {
+      commits: [ai], defaultBranch: 'main',
+      reverts: [{ hash: 'b'.repeat(40), timestampMs: T0 + 3600000, reverts: [AI_HASH.slice(0, 9)] }],
+    },
+  };
+  const m = computeMetrics([s], [], commitsByRepo, 30);
+  assert.equal(m.regret.aiCommits, 1);
+  assert.equal(m.regret.revertedCount, 1);
+  assert.equal(m.regret.quickFixedCount, 0);
+  assert.equal(m.regret.regretRate, 100);
+  assert.equal(m.regret.regrettedCost, 10);
+  assert.equal(m.regret.commits[0].kind, 'reverted');
+  assert.equal(m.regret.commits[0].hoursToRegret, 1);
+});
+
+test('regret: a fixup commit from outside the session touching the same file counts as quick-fixed', () => {
+  const ai = mkCommit(AI_HASH, 0, 'add endpoint', [['src/api.js', 40, 0]]);
+  const organicFix = mkCommit('c'.repeat(40), 120, 'fix broken endpoint', [['src/api.js', 3, 3]]);
+  const s = mkCorrelated({ commits: [ai], commitCount: 1, cost: { totalCost: 6 } });
+  const commitsByRepo = { '/repo': { commits: [ai, organicFix], defaultBranch: 'main', reverts: [] } };
+  const m = computeMetrics([s], [organicFix], commitsByRepo, 30);
+  assert.equal(m.regret.quickFixedCount, 1);
+  assert.equal(m.regret.revertedCount, 0);
+  assert.equal(m.regret.regrettedCost, 6);
+});
+
+test('regret: same-session follow-ups, late fixes, and unrelated files do NOT count', () => {
+  const ai = mkCommit(AI_HASH, 0, 'add endpoint', [['src/api.js', 40, 0]]);
+  const sameSessionFix = mkCommit('d'.repeat(40), 30, 'fix tests', [['src/api.js', 2, 2]]);
+  const lateFix = mkCommit('e'.repeat(40), 49 * 60, 'fix broken endpoint', [['src/api.js', 1, 1]]);
+  const unrelatedFix = mkCommit('f'.repeat(40), 60, 'fix other thing', [['src/other.js', 1, 1]]);
+  const s = mkCorrelated({ commits: [ai, sameSessionFix], commitCount: 2, cost: { totalCost: 8 } });
+  const commitsByRepo = {
+    '/repo': { commits: [ai, sameSessionFix, lateFix, unrelatedFix], defaultBranch: 'main', reverts: [] },
+  };
+  const m = computeMetrics([s], [lateFix, unrelatedFix], commitsByRepo, 30);
+  assert.equal(m.regret.regretted, 0);
+  assert.equal(m.regret.regretRate, 0);
+});
+
+test('regret: null when the window has no AI commits', () => {
+  const m = computeMetrics([mkCorrelated({ commits: [], commitCount: 0 })], [], { '/repo': { commits: [], defaultBranch: 'main', reverts: [] } }, 30);
+  assert.equal(m.regret, null);
+});
+
+// ── model advisor ──
+
+function advisorSessions() {
+  // Opus: expensive per commit; Sonnet: cheap, same (perfect) survival.
+  const sessions = [];
+  for (let i = 0; i < 2; i++) {
+    sessions.push(mkCorrelated({
+      sessionId: `opus-${i}`, filesWritten: ['src/big.js'],
+      commits: [mkCommit(`0${i}`.padEnd(40, '0'), i * 10, `opus work ${i}`, [['src/big.js', 30, 0]])],
+      commitCount: 3, cost: { totalCost: 30 },
+      modelBreakdown: { 'claude-opus-4-6': { tokens: 900000, cost: 30 } },
+    }));
+  }
+  for (let i = 0; i < 3; i++) {
+    sessions.push(mkCorrelated({
+      sessionId: `sonnet-${i}`, filesWritten: ['src/small.js'],
+      commits: [mkCommit(`1${i}`.padEnd(40, '1'), i * 10, `sonnet work ${i}`, [['src/small.js', 20, 0]])],
+      commitCount: 2, cost: { totalCost: 2 },
+      modelBreakdown: { 'claude-sonnet-4-6': { tokens: 200000, cost: 2 } },
+    }));
+  }
+  return sessions;
+}
+
+test('advisor: recommends the cheaper family when survival is comparable', () => {
+  const m = computeMetrics(advisorSessions(), [], { '/repo': { commits: [], defaultBranch: 'main', reverts: [] } }, 30);
+  const a = m.modelAdvisor;
+  assert.equal(a.verdict, 'switch');
+  assert.equal(a.current.family, 'opus');       // most spend ($60 vs $6)
+  assert.equal(a.recommended.family, 'sonnet'); // $1/commit vs $10/commit
+  assert.equal(a.current.costPerCommit, 10);
+  assert.equal(a.recommended.costPerCommit, 1);
+  assert.equal(a.projectedSavings, (10 - 1) * 6); // opus commits repriced
+  assert.ok(['medium', 'high'].includes(a.confidence));
+  // The advisor insight supersedes the passive cost-ratio insight.
+  const advisorInsight = m.insights.find((i) => i.text.includes('routing routine work'));
+  assert.ok(advisorInsight, 'advisor insight present');
+  assert.ok(!m.insights.some((i) => i.text.includes('-family models cost') && i.text.endsWith('models.')), 'old cost-ratio insight suppressed');
+});
+
+test('advisor: keeps the premium family when the cheap one has meaningfully worse survival', () => {
+  const sessions = advisorSessions();
+  // Give every sonnet session churn: an immediate same-file deletion commit,
+  // so the sonnet group's survival collapses to 0%.
+  for (const s of sessions) {
+    if (!s.sessionId.startsWith('sonnet')) continue;
+    const add = s.commits[0];
+    const churn = mkCommit(`2${s.sessionId.slice(-1)}`.padEnd(40, '2'), 60, 'more work', [[add.files[0].path, 0, add.files[0].added]]);
+    s.commits = [add, churn];
+    s.commitCount = 2;
+  }
+  const m = computeMetrics(sessions, [], { '/repo': { commits: [], defaultBranch: 'main', reverts: [] } }, 30);
+  assert.equal(m.modelAdvisor.verdict, 'keep');
+  assert.equal(m.modelAdvisor.current.family, 'opus');
+  assert.equal(m.modelAdvisor.recommended, null);
+});
+
+test('advisor: insufficient with a single eligible family; costZeroed clones are excluded', () => {
+  const single = computeMetrics(advisorSessions().slice(0, 2), [], { '/repo': { commits: [], defaultBranch: 'main', reverts: [] } }, 30);
+  assert.equal(single.modelAdvisor.verdict, 'insufficient');
+
+  // A zeroed clone family with commits must not become a $0/commit challenger.
+  const sessions = advisorSessions();
+  for (let i = 0; i < 3; i++) {
+    sessions.push(mkCorrelated({
+      sessionId: `zeroed-${i}`, costZeroed: true,
+      commits: [mkCommit(`3${i}`.padEnd(40, '3'), i, `clone work ${i}`, [['sub/x.js', 5, 0]])],
+      commitCount: 2, cost: { totalCost: 0 },
+      modelBreakdown: { 'claude-haiku-4-5': { tokens: 100000, cost: 0 } },
+    }));
+  }
+  const m = computeMetrics(sessions, [], { '/repo': { commits: [], defaultBranch: 'main', reverts: [] } }, 30);
+  assert.ok(!m.modelAdvisor.families.some((f) => f.family === 'haiku'), 'zeroed clones excluded from advisor');
+  assert.equal(m.modelAdvisor.recommended.family, 'sonnet');
+});
+
+test('regret: subjects like "add fixtures" or "typography tweaks" are NOT hot-fixes', () => {
+  const ai = mkCommit(AI_HASH, 0, 'add parser', [['src/parser.js', 40, 0]]);
+  const fixtures = mkCommit('1'.repeat(40), 120, 'add fixtures for parser tests', [['src/parser.js', 5, 0]]);
+  const typo = mkCommit('2'.repeat(40), 180, 'typography tweaks', [['src/parser.js', 1, 1]]);
+  const realFix = mkCommit('3'.repeat(40), 240, 'fixes crash in parser', [['src/parser.js', 2, 2]]);
+  const s = mkCorrelated({ commits: [ai], commitCount: 1 });
+  const mk = (extra) => computeMetrics([s], [], { '/repo': { commits: [ai, ...extra], defaultBranch: 'main', reverts: [] } }, 30);
+  assert.equal(mk([fixtures]).regret.regretted, 0, '"fixtures" must not match');
+  assert.equal(mk([typo]).regret.regretted, 0, '"typography" must not match');
+  assert.equal(mk([realFix]).regret.regretted, 1, '"fixes crash" must match');
+});
+
+test('regret: a reverted revert (Reapply) neutralizes the pair', () => {
+  const ai = mkCommit(AI_HASH, 0, 'add feature', [['src/foo.js', 50, 0]]);
+  const s = mkCorrelated({ commits: [ai], commitCount: 1, cost: { totalCost: 10 } });
+  const R1 = 'b'.repeat(40); // reverts the AI commit...
+  const R2 = 'c'.repeat(40); // ...but is itself reverted an hour later (Reapply)
+  const commitsByRepo = {
+    '/repo': {
+      commits: [ai], defaultBranch: 'main',
+      reverts: [
+        { hash: R1, timestampMs: T0 + 3600000, reverts: [AI_HASH.slice(0, 9)] },
+        { hash: R2, timestampMs: T0 + 7200000, reverts: [R1.slice(0, 9)] },
+      ],
+    },
+  };
+  const m = computeMetrics([s], [], commitsByRepo, 30);
+  assert.equal(m.regret.regretted, 0, 're-landed work is not regret');
+});
+
+test('regret: a revert made in a second clone of the same remote still counts', () => {
+  const ai = mkCommit(AI_HASH, 0, 'add feature', [['src/foo.js', 50, 0]]);
+  const s = mkCorrelated({ repoPath: '/work/clone-a', commits: [ai], commitCount: 1, cost: { totalCost: 10 } });
+  const commitsByRepo = {
+    '/work/clone-a': { repoPath: '/work/clone-a', commits: [ai], defaultBranch: 'main', remoteSlug: 'me/proj', reverts: [] },
+    '/home/clone-b': {
+      repoPath: '/home/clone-b', commits: [], defaultBranch: 'main', remoteSlug: 'me/proj',
+      reverts: [{ hash: 'b'.repeat(40), timestampMs: T0 + 3600000, reverts: [AI_HASH.slice(0, 9)] }],
+    },
+  };
+  const m = computeMetrics([s], [], commitsByRepo, 30);
+  assert.equal(m.regret.revertedCount, 1);
+});
+
+test('advisor: cross-family churn counts against the writer (quality guard sees it)', () => {
+  const sessions = advisorSessions();
+  // An opus session immediately rewrites every sonnet file — under a
+  // per-group timeline sonnet would still look 100%-surviving.
+  sessions.push(mkCorrelated({
+    sessionId: 'opus-rewriter', filesWritten: ['src/a.js', 'src/b.js', 'src/c.js', 'src/d.js', 'src/small.js'],
+    commits: [
+      mkCommit('9'.repeat(40), 90, 'rework everything', [
+        ['src/small.js', 0, 100], // sonnet's lines (added at ~T0) deleted within 24h
+      ]),
+    ],
+    commitCount: 1, cost: { totalCost: 30 },
+    modelBreakdown: { 'claude-opus-4-6': { tokens: 900000, cost: 30 } },
+  }));
+  const m = computeMetrics(sessions, [], { '/repo': { commits: [], defaultBranch: 'main', reverts: [] } }, 30);
+  const sonnet = m.modelAdvisor.families.find((f) => f.family === 'sonnet');
+  assert.ok(sonnet.survivalRate < 100, `sonnet survival must reflect opus rewrites, got ${sonnet.survivalRate}`);
+  // 60 of sonnet's 100 lines churned -> 40% survival -> below opus-10 -> keep.
+  assert.equal(m.modelAdvisor.verdict, 'keep');
+});
+
+test('advisor: never recommends the unknown family; free families are ineligible', () => {
+  const sessions = advisorSessions().slice(0, 2); // opus only (eligible)
+  for (let i = 0; i < 3; i++) {
+    sessions.push(mkCorrelated({
+      sessionId: `mystery-${i}`, filesWritten: ['src/m.js'],
+      commits: [mkCommit(`4${i}`.padEnd(40, '4'), i, `mystery work ${i}`, [['src/m.js', 10, 0]])],
+      commitCount: 2, cost: { totalCost: 1 },
+      modelBreakdown: { 'qwen2.5-coder:7b': { tokens: 500000, cost: 1 } },
+    }));
+    sessions.push(mkCorrelated({
+      sessionId: `free-${i}`, filesWritten: ['src/f.js'],
+      commits: [mkCommit(`5${i}`.padEnd(40, '5'), i, `free work ${i}`, [['src/f.js', 10, 0]])],
+      commitCount: 2, cost: { totalCost: 0 },
+      modelBreakdown: { 'gpt-oss-120b': { tokens: 500000, cost: 0 } },
+    }));
+  }
+  const m = computeMetrics(sessions, [], { '/repo': { commits: [], defaultBranch: 'main', reverts: [] } }, 30);
+  const a = m.modelAdvisor;
+  const free = a.families.find((f) => f.family === 'gpt');
+  assert.equal(free.eligible, false, '$0 family cannot be value-compared');
+  assert.notEqual(a.recommended?.family, 'unknown', 'unknown is never the recommendation');
+  assert.notEqual(a.recommended?.family, 'gpt', 'free family is never the recommendation');
+});
+
+test('advisor: insufficient when the top-spend family itself lacks evidence', () => {
+  // One giant opus session (3 commits < min 5) dwarfs two eligible cheap families.
+  const sessions = [
+    mkCorrelated({
+      sessionId: 'opus-whale', filesWritten: ['src/big.js'],
+      commits: [mkCommit('6'.repeat(40), 0, 'whale work', [['src/big.js', 30, 0]])],
+      commitCount: 3, cost: { totalCost: 500 },
+      modelBreakdown: { 'claude-opus-4-6': { tokens: 900000, cost: 500 } },
+    }),
+    ...advisorSessions().filter((s) => s.sessionId.startsWith('sonnet')),
+    ...['x', 'y'].map((k, i) => mkCorrelated({
+      sessionId: `haiku-${k}`, filesWritten: ['src/h.js'],
+      commits: [mkCommit(`7${i}`.padEnd(40, '7'), i, `haiku work ${k}`, [['src/h.js', 10, 0]])],
+      commitCount: 3, cost: { totalCost: 1 },
+      modelBreakdown: { 'claude-haiku-4-5': { tokens: 300000, cost: 1 } },
+    })),
+  ];
+  const m = computeMetrics(sessions, [], { '/repo': { commits: [], defaultBranch: 'main', reverts: [] } }, 30);
+  assert.equal(m.modelAdvisor.verdict, 'insufficient',
+    'must not adjudicate runners-up while the actual top spender is unjudgeable');
+});

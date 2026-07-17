@@ -105,6 +105,8 @@ This parses your `~/.claude/projects/` and `~/.codex/sessions/` data, analyzes y
 | **AI Code Share**     | % of all merged lines this window written by AI — measured from git, not surveys |
 | **Value Leak**        | $ and % of spend from sessions that produced zero committed code |
 | **Line Survival Rate**| % of AI-written lines that survive 24h without being rewritten  |
+| **Regret Rate**       | % of AI commits that were `git revert`ed or hot-fixed within 48h — spend that didn't stick |
+| **Model Advisor**     | Which model family is actually worth it on *your* repos: $/commit + survival per family, with a switch/keep recommendation and projected savings |
 | **Orphaned Sessions** | Sessions with 10+ messages that produced zero commits           |
 | **ROI Grade (A-F)**   | Composite score based on tokens-per-commit and survival rate    |
 | **Trailer Attribution** | `Co-authored-by` agent trailers confirm commit attribution (near-ground-truth) |

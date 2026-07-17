@@ -429,3 +429,88 @@ test('findNestedGitRepos still finds a real repo under an unrelated "worktrees"-
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ── revert detection ──
+
+test('parseRevertLog extracts reverted shas from NUL-terminated records', async () => {
+  const { parseRevertLog } = await import('../../src/git-analyzer.js');
+  const body = 'Revert "add feature"\n\nThis reverts commit AbCdEf1234567890abcdef1234567890abcdef12.\n';
+  const raw = `deadbeef00000000000000000000000000000000\x012026-04-21T10:00:00+00:00\x01${body}\x00`;
+  const out = parseRevertLog(raw);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].hash, 'deadbeef00000000000000000000000000000000');
+  assert.equal(out[0].timestampMs, new Date('2026-04-21T10:00:00+00:00').getTime());
+  assert.deepEqual(out[0].reverts, ['abcdef1234567890abcdef1234567890abcdef12']);
+});
+
+test('parseRevertLog: multiple targets, abbreviated shas, and garbage records', async () => {
+  const { parseRevertLog } = await import('../../src/git-analyzer.js');
+  const multi = 'This reverts commit 1111111.\nThis reverts commit 2222222222222222222222222222222222222222.';
+  const raw = [
+    `aaaa000000000000000000000000000000000000\x012026-04-21T10:00:00Z\x01${multi}`,
+    `bbbb000000000000000000000000000000000000\x012026-04-21T11:00:00Z\x01no revert marker here`,
+    '', '   ',
+  ].join('\x00');
+  const out = parseRevertLog(raw);
+  assert.equal(out.length, 1);
+  assert.deepEqual(out[0].reverts, ['1111111', '2222222222222222222222222222222222222222']);
+  assert.equal(parseRevertLog('').length, 0);
+  assert.equal(parseRevertLog(null).length, 0);
+});
+
+test('analyzeGitRepo surfaces git-revert commits in .reverts', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'git-revert-'));
+  try {
+    const dir = path.join(root, 'repo');
+    mkdirSync(dir, { recursive: true });
+    execSync('git init -q -b main', { cwd: dir });
+    execSync('git config user.email a@b.com', { cwd: dir });
+    execSync('git config user.name A', { cwd: dir });
+    const base = new Date(Date.now() - 5 * 86400000);
+    const iso = (m) => new Date(base.getTime() + m * 60000).toISOString();
+
+    gitCommit(dir, 'base.txt', 'base\n', 'base', iso(0));
+    gitCommit(dir, 'feature.txt', 'new stuff\n', 'add feature', iso(30));
+    const target = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf-8' }).trim();
+    execSync('git revert --no-edit HEAD', {
+      cwd: dir,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'A', GIT_AUTHOR_EMAIL: 'a@b.com',
+        GIT_COMMITTER_NAME: 'A', GIT_COMMITTER_EMAIL: 'a@b.com',
+        GIT_AUTHOR_DATE: iso(90), GIT_COMMITTER_DATE: iso(90),
+      },
+    });
+
+    const analysis = analyzeGitRepo(dir, 3650);
+    assert.equal(analysis.reverts.length, 1);
+    assert.deepEqual(analysis.reverts[0].reverts, [target]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('analyzeGitRepo returns empty reverts for a repo with none (and for a non-repo)', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'git-norevert-'));
+  try {
+    const dir = path.join(root, 'repo');
+    mkdirSync(dir, { recursive: true });
+    execSync('git init -q -b main', { cwd: dir });
+    execSync('git config user.email a@b.com', { cwd: dir });
+    execSync('git config user.name A', { cwd: dir });
+    gitCommit(dir, 'a.txt', 'x\n', 'plain commit', new Date(Date.now() - 86400000).toISOString());
+    assert.deepEqual(analyzeGitRepo(dir, 30).reverts, []);
+    assert.deepEqual(analyzeGitRepo(path.join(root, 'nope'), 30).reverts, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('parseRevertLog keeps a body containing a literal \\x01 intact', async () => {
+  const { parseRevertLog } = await import('../../src/git-analyzer.js');
+  const body = `weird\x01junk\n\nThis reverts commit ${'a'.repeat(40)}.`;
+  const raw = `bbbb000000000000000000000000000000000000\x012026-04-21T10:00:00Z\x01${body}\x00`;
+  const out = parseRevertLog(raw);
+  assert.equal(out.length, 1);
+  assert.deepEqual(out[0].reverts, ['a'.repeat(40)]);
+});
