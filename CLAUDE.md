@@ -47,6 +47,7 @@ tests/
 
 .github/workflows/
 ├── ci.yml             # CI: syntax check, unit tests, CLI smoke (both agents), Node 22/24 matrix
+├── codeql.yml         # CodeQL code scanning (javascript-typescript + actions), weekly + per-PR
 └── release.yml        # npm publish on version tag push
 ```
 
