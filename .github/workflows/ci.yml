@@ -42,7 +42,7 @@ jobs:
         run: npm run test:unit
 
       - name: Verify CLI starts without error
-        run: node src/index.js --json --claude-dir tests/fixtures/claude-projects --codex-dir tests/fixtures/codex-sessions --days 30 > /dev/null
+        run: node src/index.js --json --claude-dir tests/fixtures/claude-projects --codex-dir tests/fixtures/codex-sessions --kimi-dir tests/fixtures/kimi-share --days 30 > /dev/null
 
   package:
     # Production-fidelity guard: pack the tarball, install it with prod deps

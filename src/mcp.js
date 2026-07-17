@@ -19,8 +19,8 @@ import { buildPeriodTable, periodTableJson } from './tables.js';
 const SOURCE_PROP = {
   source: {
     type: 'string',
-    enum: ['all', 'claude', 'codex'],
-    description: "Agent to scope the answer to (default 'all'; per-agent views exist only when both agents have sessions)",
+    enum: ['all', 'claude', 'codex', 'kimi'],
+    description: "Agent to scope the answer to (default 'all'; per-agent views exist only when more than one agent has sessions)",
   },
 };
 
@@ -114,7 +114,7 @@ function pickView(payloads, source) {
 
 /**
  * Execute one tool call against the current payloads.
- *   ctx.getPayloads() — returns the current { all, claude?, codex? } payloads (or null when no sessions)
+ *   ctx.getPayloads() — returns the current { all, claude?, codex?, kimi? } payloads (or null when no sessions)
  *   ctx.refresh()     — async; re-runs the pipeline and returns fresh payloads (or null)
  *   ctx.days          — the analyzed lookback window in days
  * Pure of transport concerns, so tests can drive it directly.

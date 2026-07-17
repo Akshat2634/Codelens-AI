@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { listSubagentTranscripts } from './claude-parser.js';
 import { listCodexSessionFiles } from './codex-parser.js';
+import { listKimiSessionFiles } from './kimi-parser.js';
 
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'agent-analytics');
 const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
@@ -12,22 +13,28 @@ const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
 // dir?" check below can't drift from the CLI's own defaults.
 export const DEFAULT_CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
 export const DEFAULT_CODEX_DIR = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
-// The primary cache file is reserved for the plain ~/.codex layout. Comparing
-// against DEFAULT_CODEX_DIR (which bakes in $CODEX_HOME at load) would let a
-// run with a temporary CODEX_HOME map onto parsed-sessions.json and evict the
-// cache built from the user's real sessions — overrides must fall through to
-// the hashed filename below, same as --codex-dir.
+// Kimi CLI's share dir holds sessions/ plus the kimi.json work-dir registry
+// and config.toml the parser needs, so the whole dir is the unit of override.
+export const DEFAULT_KIMI_DIR = process.env.KIMI_SHARE_DIR || path.join(os.homedir(), '.kimi');
+// The primary cache file is reserved for the plain ~/.codex + ~/.kimi layout.
+// Comparing against DEFAULT_*_DIR (which bakes in $CODEX_HOME/$KIMI_SHARE_DIR
+// at load) would let a run with a temporary env override map onto
+// parsed-sessions.json and evict the cache built from the user's real
+// sessions — overrides must fall through to the hashed filename below, same
+// as --codex-dir/--kimi-dir.
 const PLAIN_CODEX_DIR = path.join(os.homedir(), '.codex', 'sessions');
+const PLAIN_KIMI_DIR = path.join(os.homedir(), '.kimi');
 
-// Runs against custom --claude-dir/--codex-dir (tests, CI, fixtures) get their
-// own cache file, so they never evict the cache built from the user's real
-// sessions — before this, one `npm run test:e2e` cost the next real run a full
-// re-parse.
+// Runs against custom --claude-dir/--codex-dir/--kimi-dir (tests, CI,
+// fixtures) get their own cache file, so they never evict the cache built
+// from the user's real sessions — before this, one `npm run test:e2e` cost
+// the next real run a full re-parse.
 function cacheFileFor(options = {}) {
   const claudeDir = options.claudeDir || DEFAULT_CLAUDE_DIR;
   const codexDir = options.codexDir || DEFAULT_CODEX_DIR;
-  if (claudeDir === DEFAULT_CLAUDE_DIR && codexDir === PLAIN_CODEX_DIR) return CACHE_FILE;
-  const hash = createHash('sha1').update(`${claudeDir}|${codexDir}`).digest('hex').slice(0, 8);
+  const kimiDir = options.kimiDir || DEFAULT_KIMI_DIR;
+  if (claudeDir === DEFAULT_CLAUDE_DIR && codexDir === PLAIN_CODEX_DIR && kimiDir === PLAIN_KIMI_DIR) return CACHE_FILE;
+  const hash = createHash('sha1').update(`${claudeDir}|${codexDir}|${kimiDir}`).digest('hex').slice(0, 8);
   return path.join(CACHE_DIR, `parsed-sessions-${hash}.json`);
 }
 // Bump whenever parsing or pricing logic changes so cached sessions (which store
@@ -60,7 +67,8 @@ function cacheFileFor(options = {}) {
 // 19: filesWrittenAbsolute added to sessions for --depth's workspace-parent
 //     explosion — cached sessions from 18 lack it, so --depth would silently
 //     no-op against a warm cache until something else invalidated it.
-const CACHE_VERSION = 19;
+// 20: Kimi CLI sessions (source 'kimi', kimiFileIndex, cache keyed on kimiDir).
+const CACHE_VERSION = 20;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);
@@ -77,9 +85,11 @@ export function loadCache(options = {}) {
     // different options would display the wrong data — treat as a miss.
     if (data.days !== options.days) return null;
     if ((data.project || null) !== (options.project || null)) return null;
-    // A cache built from one --claude-dir / --codex-dir must not serve another.
+    // A cache built from one --claude-dir / --codex-dir / --kimi-dir must not
+    // serve another.
     if ((data.claudeDir || null) !== (options.claudeDir || null)) return null;
     if ((data.codexDir || null) !== (options.codexDir || null)) return null;
+    if ((data.kimiDir || null) !== (options.kimiDir || null)) return null;
     // The rolling window moves daily and sessions are clipped to it at parse
     // time, so a cache built on an earlier day would serve stale clipping.
     if (options.cutoffDay && data.cutoffDay !== options.cutoffDay) return null;
@@ -89,7 +99,7 @@ export function loadCache(options = {}) {
   }
 }
 
-export function saveCache(sessions, fileIndex, codexFileIndex, options = {}) {
+export function saveCache(sessions, fileIndex, codexFileIndex, kimiFileIndex, options = {}) {
   mkdirSync(CACHE_DIR, { recursive: true });
   const data = {
     version: CACHE_VERSION,
@@ -98,9 +108,11 @@ export function saveCache(sessions, fileIndex, codexFileIndex, options = {}) {
     project: options.project || null,
     claudeDir: options.claudeDir || null,
     codexDir: options.codexDir || null,
+    kimiDir: options.kimiDir || null,
     cutoffDay: options.cutoffDay || null,
     fileIndex,
     codexFileIndex: codexFileIndex || {},
+    kimiFileIndex: kimiFileIndex || {},
     sessions,
   };
   writeFileSync(cacheFileFor(options), JSON.stringify(data));
@@ -219,24 +231,24 @@ export function getStaleFiles(claudeDir, cachedFileIndex, cutoffMs = 0, projectF
   return { currentFiles, newFiles, modifiedFiles, deletedFiles };
 }
 
-// Codex counterpart of getStaleFiles. Codex rollout files live in a date tree
-// (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl) with no per-project folders,
-// so there is no folder-level project filter — the parser filters by each
-// session's cwd after parsing, and the cache is keyed on (project) anyway.
-export function getCodexStaleFiles(codexDir, cachedFileIndex, cutoffMs = 0) {
+// Flat-file-list staleness scan shared by the Codex and Kimi sources: neither
+// has per-project folders, so there is no folder-level project filter — the
+// parsers filter by each session's cwd after parsing, and the cache is keyed
+// on (project) anyway.
+function getStaleFilesFromList(files, cachedFileIndex, cutoffMs) {
   const currentFiles = {};
   const newFiles = [];
   const modifiedFiles = [];
   const deletedFiles = [];
 
-  for (const filePath of listCodexSessionFiles(codexDir)) {
+  for (const filePath of files) {
     let mtime;
     try {
       mtime = statSync(filePath).mtimeMs;
     } catch {
       continue;
     }
-    // Same gate as the parser: files untouched since the cutoff are never
+    // Same gate as the parsers: files untouched since the cutoff are never
     // parsed, so they must not register as "new".
     if (mtime < cutoffMs) continue;
     currentFiles[filePath] = mtime;
@@ -254,4 +266,16 @@ export function getCodexStaleFiles(codexDir, cachedFileIndex, cutoffMs = 0) {
   }
 
   return { currentFiles, newFiles, modifiedFiles, deletedFiles };
+}
+
+// Codex counterpart of getStaleFiles, over the rollout date tree
+// (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl).
+export function getCodexStaleFiles(codexDir, cachedFileIndex, cutoffMs = 0) {
+  return getStaleFilesFromList(listCodexSessionFiles(codexDir), cachedFileIndex, cutoffMs);
+}
+
+// Kimi counterpart, over ~/.kimi/sessions/<md5>/<session>/wire.jsonl files
+// (plus the legacy context-file layouts the parser reads).
+export function getKimiStaleFiles(kimiDir, cachedFileIndex, cutoffMs = 0) {
+  return getStaleFilesFromList(listKimiSessionFiles(kimiDir), cachedFileIndex, cutoffMs);
 }

@@ -30,10 +30,10 @@ function findChartJs() {
 }
 
 // The server holds one payload per agent source: `all` (every session), and —
-// when more than one agent has sessions — `claude` and `codex` views computed
-// over just that agent's sessions. Routes select the view via ?source=; an
-// unknown or absent source falls back to `all`. A bare payload (no `.all`) is
-// accepted for backward compatibility and treated as the `all` view.
+// when more than one agent has sessions — per-agent views (`claude`, `codex`,
+// `kimi`) computed over just that agent's sessions. Routes select the view via
+// ?source=; an unknown or absent source falls back to `all`. A bare payload
+// (no `.all`) is accepted for backward compatibility and treated as the `all` view.
 function normalizePayloads(payloadOrMap) {
   if (payloadOrMap?.all) return payloadOrMap;
   return { all: payloadOrMap };
@@ -47,7 +47,7 @@ export function createServer(initialPayload, rebuildFn, opts = {}) {
   // falling back to `all`.
   const pick = (req) => {
     const source = req.query.source;
-    if ((source === 'claude' || source === 'codex' || source === 'all') && payloads[source]) {
+    if ((source === 'claude' || source === 'codex' || source === 'kimi' || source === 'all') && payloads[source]) {
       return payloads[source];
     }
     return payloads.all;

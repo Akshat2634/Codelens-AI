@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Codelens AI** (`codelens-ai` on npm) is a CLI tool that measures ROI from AI coding agents by correlating token usage with git commit output. It parses **Claude Code** session files (`~/.claude/projects/`) and **OpenAI Codex CLI** rollout files (`~/.codex/sessions/`), analyzes git history, and serves an interactive dashboard at `http://localhost:3457` with per-agent source tabs (All Agents / Claude Code / OpenAI Codex).
+**Codelens AI** (`codelens-ai` on npm) is a CLI tool that measures ROI from AI coding agents by correlating token usage with git commit output. It parses **Claude Code** session files (`~/.claude/projects/`), **OpenAI Codex CLI** rollout files (`~/.codex/sessions/`), and **Kimi CLI** wire logs (`~/.kimi/sessions/`), analyzes git history, and serves an interactive dashboard at `http://localhost:3457` with per-agent source tabs (All Agents / Claude Code / OpenAI Codex / Kimi CLI).
 
 **Version:** 0.9.0
 **License:** MIT
@@ -26,6 +26,7 @@ src/
 ├── banner.js          # Pixel-block "CODELENS AI" startup splash (interactive TTY dashboard runs only)
 ├── claude-parser.js   # Parses JSONL session files from ~/.claude/projects/
 ├── codex-parser.js    # Parses OpenAI Codex rollout files from ~/.codex/sessions/
+├── kimi-parser.js     # Parses Kimi CLI wire.jsonl session logs from ~/.kimi/sessions/
 ├── git-analyzer.js    # Git log analysis, branch detection, diff stats
 ├── correlator.js      # Matches sessions to commits via file overlap + time window + Co-authored-by trailers
 ├── metrics.js         # ROI calculations, grades, insights, heatmap, survival rate, AI code share, value leak
@@ -54,16 +55,17 @@ tests/
 
 ```
 Claude Sessions (JSONL)  → claude-parser.js ┐
-Codex Rollouts (JSONL)   → codex-parser.js  ┴→ [Cache] → git-analyzer.js
+Codex Rollouts (JSONL)   → codex-parser.js  ┼→ [Cache] → git-analyzer.js
+Kimi Wire Logs (JSONL)   → kimi-parser.js   ┘
 → correlator.js (all sources together) → metrics.js (per-source payloads)
 → server.js (REST API, ?source=) → dashboard.html (source tabs)
 ```
 
-Every session object carries `source: 'claude' | 'codex'` and an identical shape (codex-parser mirrors claude-parser's output). Correlation runs over ALL sessions together so a commit is claimed by at most one session across agents; per-source payloads filter the correlated set.
+Every session object carries `source: 'claude' | 'codex' | 'kimi'` and an identical shape (codex-parser and kimi-parser mirror claude-parser's output). Correlation runs over ALL sessions together so a commit is claimed by at most one session across agents; per-source payloads filter the correlated set.
 
 ## Key API Routes (server.js)
 
-All GET routes accept `?source=all|claude|codex` (default `all`; per-agent views exist only when both agents have sessions — unknown source falls back to `all`).
+All GET routes accept `?source=all|claude|codex|kimi` (default `all`; per-agent views exist only when more than one agent has sessions — unknown source falls back to `all`).
 
 - `GET /` — dashboard HTML
 - `GET /api/all` — full payload
@@ -93,11 +95,12 @@ npx codelens-ai --no-open       # don't auto-open browser
 npx codelens-ai --json          # dump raw JSON to stdout
 npx codelens-ai --project X     # filter by project name
 npx codelens-ai --refresh       # force full re-parse
-npx codelens-ai --source codex  # analyze a single agent: claude | codex
+npx codelens-ai --source codex  # analyze a single agent: claude | codex | kimi
 npx codelens-ai --offline       # skip network pricing refresh (cached/hardcoded rates only)
 npx codelens-ai --claude-dir X  # override ~/.claude/projects (testing/CI)
 npx codelens-ai --codex-dir X   # override ~/.codex/sessions (testing/CI)
-npx codelens-ai --plan max20 --codex-plan plus   # per-agent subscription mode
+npx codelens-ai --kimi-dir X    # override ~/.kimi (the share dir containing sessions/) (testing/CI)
+npx codelens-ai --plan max20 --codex-plan plus --kimi-plan moderato   # per-agent subscription mode
 npx codelens-ai --host 0.0.0.0  # expose dashboard beyond localhost (default 127.0.0.1)
 npx codelens-ai report          # terminal ROI scorecard (--md / --html to export)
 npx codelens-ai daily           # usage/cost table by day (+ commits, $/commit); -b per-model, --json
@@ -120,12 +123,12 @@ node --check src/*.js           # syntax validation
 ## Key Design Decisions
 
 - **Single-file dashboard** — no build step, served directly by Express
-- **Zero-config** — auto-discovers `~/.claude/projects/` and `~/.codex/sessions/` (`$CODEX_HOME` honored)
+- **Zero-config** — auto-discovers `~/.claude/projects/`, `~/.codex/sessions/` (`$CODEX_HOME` honored), and `~/.kimi/` (`$KIMI_SHARE_DIR` honored)
 - **Smart caching** — incremental parsing with per-source staleness, so a new Codex rollout doesn't force a Claude re-parse (`~/.cache/agent-analytics/`)
-- **File-first correlation** — sessions matched to commits by file overlap, 2-hour temporal buffer; all agent sources correlate together so a commit is attributed to at most one session. `Co-authored-by` agent trailers (parsed from git log) route trailer-stamped commits to the matching agent and upgrade attribution confidence to high
-- **Uniform session shape** — codex-parser produces the exact claude-parser session shape (`cacheReadTokens` = OpenAI `cached_input_tokens`, `cacheCreationTokens` = 0) so correlator/metrics/server are source-agnostic
+- **File-first correlation** — sessions matched to commits by file overlap, 2-hour temporal buffer; all agent sources correlate together so a commit is attributed to at most one session. `Co-authored-by` agent trailers (parsed from git log) route trailer-stamped commits to the matching agent and upgrade attribution confidence to high (Kimi CLI stamps no trailer — its commits match on file overlap + timing only)
+- **Uniform session shape** — codex-parser and kimi-parser produce the exact claude-parser session shape (Codex: `cacheReadTokens` = OpenAI `cached_input_tokens`, `cacheCreationTokens` = 0; Kimi: `totalInputTokens` = `input_other`, `cacheReadTokens` = `input_cache_read`, `cacheCreationTokens` = `input_cache_creation` billed at input rate) so correlator/metrics/server are source-agnostic
 - **Privacy-first** — all data stays local, no telemetry; the dashboard binds 127.0.0.1 by default (`--host` to override)
-- **Version-aware pricing** — token costs reflect each provider's pricing tiers per model (Anthropic per-version tiers; OpenAI per-model-id, with o3's Jun 2025 price cut date-tiered)
+- **Version-aware pricing** — token costs reflect each provider's pricing tiers per model (Anthropic per-version tiers; OpenAI per-model-id, with o3's Jun 2025 price cut date-tiered; Moonshot per-model-id, with kimi-k2-turbo's promo/cut history and the kimi-for-coding alias date-tiered by what it routed to)
 - **Auto-pricing fallback** — models the hardcoded tables don't match are priced from LiteLLM's public map (`src/pricing.js`): fetched on demand, disk-cached ~24h (`pricing.json`), refreshed on `--refresh`, skipped with `--offline`, and graceful on failure (cache → hardcoded Sonnet/`CODEX_FALLBACK` estimate). **Hardcoded tables win** when both have a model; overlay-priced models are real rates, so NOT flagged estimated. The overlay must be loaded (`loadPricingOverlay`, awaited in `buildPayload`) before any costing; `lookupExternalRate` is a no-op until then
 - **Update nudge** (`src/update-check.js`) — every run checks npm's registry for a newer published version and prints an upgrade hint if behind; disk-cached ~24h (`version-check.json`), capped at 400ms so a slow network never delays a real command, skipped with `--offline`, silent on any failure. Exists because `npx codelens-ai` (no version pin) can silently run a stale global install or npx-cached copy — old enough to predate whole subcommands — producing a confusing Commander parse error instead of a hint to upgrade (see README Troubleshooting)
 - **Nested-repo discovery** — when a session's cwd is a workspace parent with no `.git` of its own, `git-analyzer.js#findNestedGitRepos` walks up to `NESTED_REPO_DEPTH` (3) levels to find sub-repos, and `index.js#explodeWorkspaceSessions` splits the session into one virtual clone per touched sub-repo so their commits correlate. Always on, zero-config, no flag — the gate (`session.repoPath` has no `.git`) never fires for an ordinary single-repo session, so it's a no-op for the common case. Only the sub-repo with the most touched files keeps the session's real cost/tokens (`costZeroed: true` on the rest) — total spend is conserved, but a zeroed clone must never be graded (`computeSessionGrade` returns `null` for it) since a real commit landing on a `$0` clone would otherwise look like a fabricated 'A'
@@ -153,8 +156,9 @@ Use these skills when working on this project:
 
 - The dashboard is a single 4000+ line HTML file — changes should maintain the inline architecture
 - Cache is stored at `~/.cache/agent-analytics/parsed-sessions.json` (plus `quickstats.json`, a tiny summary the statusline reads); runs with custom `--claude-dir`/`--codex-dir` write to a separate `parsed-sessions-<hash>.json` so tests/CI never evict the real cache
-- Claude session JSONL files are at `~/.claude/projects/`; Codex rollouts at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (zstd-compressed `.jsonl.zst` after ~7 days — readable on Node >= 22.15)
-- Token pricing is hardcoded in `claude-parser.js` (Anthropic) and `codex-parser.js` (OpenAI) — update when providers change pricing
+- Claude session JSONL files are at `~/.claude/projects/`; Codex rollouts at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (zstd-compressed `.jsonl.zst` after ~7 days — readable on Node >= 22.15); Kimi wire logs at `~/.kimi/sessions/<md5-of-cwd>/<session-uuid>/wire.jsonl` with the cwd registry in `~/.kimi/kimi.json`
+- Token pricing is hardcoded in `claude-parser.js` (Anthropic), `codex-parser.js` (OpenAI), and `kimi-parser.js` (Moonshot) — update when providers change pricing
 - Codex gotchas already handled in `codex-parser.js`: `token_count` totals are cumulative (use `last_token_usage` deltas), duplicate re-logged usage events (deduped only when the cumulative total is unchanged), `cached_input_tokens ⊂ input_tokens`, `reasoning_output_tokens ⊂ output_tokens`, subagent `thread_spawn` rollouts replay parent history (skipped), legacy pre-envelope 2025 format, long-context pricing only above 272K input tokens per request
+- Kimi gotchas already handled in `kimi-parser.js`: the cwd exists only as `md5(path)` folder names resolved through `kimi.json`; per-request usage lives in `StatusUpdate.token_usage` (never sum `context.jsonl` `_usage` markers); `/fork`//`/undo` copy wire records into a new session (deduped run-wide by `message_id`, originals parsed first); subagent events arrive wrapped in `SubagentEvent` in the PARENT wire (never also read `subagents/*/wire.jsonl`); rotated `context_N.jsonl` files are compaction copies (skipped); the model id is only in `config.toml` (sessions attributed to `default_model`, falling back to the `kimi-for-coding` alias priced by routing date and flagged estimated); no git branch or Co-authored-by trailer exists
 - Playwright tests require session fixtures to run (regenerated by `tests/fixtures/build-fixtures.js`)
 - CI runs syntax checks, unit tests, and a fixture-backed CLI smoke run for both agents; Playwright E2E tests are local-only

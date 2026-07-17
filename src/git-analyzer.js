@@ -213,6 +213,7 @@ function parseNumstatPath(raw) {
 const AI_TRAILER_EMAIL_PATTERNS = [
   [/@anthropic\.com/i, 'claude'],
   [/@openai\.com|chatgpt/i, 'codex'],
+  [/@moonshot\.(cn|ai)|@kimi\.(com|ai)|kimi\.moonshot/i, 'kimi'],
   [/copilot@|copilot\[bot\]|copilot@users\.noreply\.github\.com/i, 'copilot'],
   [/cursoragent|@cursor\.(com|sh)/i, 'cursor'],
   [/@devin\.ai/i, 'devin'],
@@ -223,6 +224,8 @@ const AI_TRAILER_NAME_PATTERNS = [
   // "Claude" alone is a human name; require a product qualifier.
   [/\bclaude\s+(code|fable|mythos|opus|sonnet|haiku|\d)/i, 'claude'],
   [/\bcodex\b/i, 'codex'],
+  // "Kimi" alone is a human name too; require the product/model qualifier.
+  [/\bkimi\s+(cli|code|k\d)/i, 'kimi'],
   [/\bcopilot\b/i, 'copilot'],
   [/\bcursor\s+agent\b/i, 'cursor'],
   [/\bgemini\b/i, 'gemini'],

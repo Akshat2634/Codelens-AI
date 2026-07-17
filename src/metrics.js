@@ -1,11 +1,13 @@
 import { getModelFamily as getClaudeModelFamily } from './claude-parser.js';
 import { getCodexModelFamily } from './codex-parser.js';
 import { commitLinesForSession } from './correlator.js';
+import { getKimiModelFamily } from './kimi-parser.js';
 
 // Family resolution across agent sources: Claude names first (opus/sonnet/
-// haiku/fable), then OpenAI Codex names (gpt-5-codex/gpt-5/o-series/...).
+// haiku/fable), then OpenAI Codex names (gpt-5-codex/gpt-5/o-series/...),
+// then Moonshot/Kimi names (kimi-k2/kimi-latest/moonshot-v1).
 function getModelFamily(modelName) {
-  return getClaudeModelFamily(modelName) || getCodexModelFamily(modelName);
+  return getClaudeModelFamily(modelName) || getCodexModelFamily(modelName) || getKimiModelFamily(modelName);
 }
 
 const CHURN_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours

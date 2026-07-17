@@ -1,0 +1,6 @@
+default_model = "moonshot-ai/kimi-k2.7-code"
+
+[models."moonshot-ai/kimi-k2.7-code"]
+model = "kimi-k2.7-code"
+provider = "moonshot-ai"
+max_context_size = 262144

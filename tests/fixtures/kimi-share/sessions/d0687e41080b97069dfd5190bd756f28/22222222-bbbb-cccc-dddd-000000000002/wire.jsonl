@@ -1,0 +1,5 @@
+{"type":"metadata","protocol_version":"1.10"}
+{"timestamp":1783585180.804,"message":{"type":"TurnBegin","payload":{"user_input":"Document the telemetry setup."}}}
+{"timestamp":1783585240.804,"message":{"type":"ToolCall","payload":{"type":"function","id":"km2-c1","function":{"name":"WriteFile","arguments":"{\"path\":\"/tmp/codelens-fixture-repo/docs/telemetry.md\",\"content\":\"# Telemetry\",\"mode\":\"overwrite\"}"},"extras":null}}}
+{"timestamp":1783585240.804,"message":{"type":"StatusUpdate","payload":{"context_usage":0.1,"token_usage":{"input_other":1800,"input_cache_read":6000,"input_cache_creation":300,"output":500},"message_id":"km2-m1","plan_mode":null}}}
+{"timestamp":1783585300.804,"message":{"type":"TurnEnd","payload":{}}}
