@@ -45,6 +45,7 @@ function fakeView(source, sessions) {
       overallGrade: 'B',
       efficiencyScore: { score: 72, explanation: 'ok', tip: '' },
       totalCost: 4.2,
+      costModeIncomplete: false,
       pricingEstimatedPct: 0,
       plan: null,
       totalSessions: sessions.length,

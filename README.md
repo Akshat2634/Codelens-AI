@@ -130,6 +130,8 @@ codelens-ai --project techops      # filter to a specific project
 codelens-ai --refresh              # force full re-parse (ignore cache)
 codelens-ai --source codex         # analyze a single agent only: claude | codex
 codelens-ai --offline              # skip the network pricing refresh (use cached/hardcoded rates)
+codelens-ai --cost-mode auto       # prefer the external overlay rate per model, calculate | auto | display
+codelens-ai --debug                # print a per-model calculated-vs-overlay pricing reconciliation table
 codelens-ai --plan max20           # Claude subscription mode: effective $/commit vs your flat plan
 codelens-ai --plan-cost 150        # custom Claude monthly subscription cost (USD)
 codelens-ai --codex-plan plus      # ChatGPT/Codex subscription: free | go | plus | pro100 | pro | business | business-annual
@@ -228,6 +230,25 @@ npx codelens-ai statusline --install
 ```
 
 Then run `npx codelens-ai` (or `codelens-ai report`) whenever you want the "today" ROI numbers refreshed.
+
+### Cost mode & pricing reconciliation
+
+Costs are computed from **hardcoded per-token rate tables** by default (`--cost-mode calculate`).
+Neither Claude Code nor Codex session logs record a real dollar figure historically — there's no
+"actual bill" to read back — so the alternate modes compare against the **external LiteLLM pricing
+overlay** instead (the same community-maintained rate source `pricing.js` already uses to auto-price
+models the hardcoded tables don't know):
+
+- `--cost-mode calculate` (default) — hardcoded tables, unchanged from every prior version.
+- `--cost-mode auto` — prefers the overlay rate per model, silently falling back to the hardcoded
+  rate for any model the overlay doesn't cover.
+- `--cost-mode display` — overlay rate only; when a session has one or more models the overlay
+  doesn't cover, the total is flagged rather than silently blended.
+- `--debug` — prints a **Pricing reconciliation** table (in `report`'s terminal/Markdown/HTML output):
+  hardcoded total vs. overlay total per model, with any divergence over 5% flagged — useful for
+  spotting a stale hardcoded rate.
+
+Switching `--cost-mode` never forces a re-parse — both rates are computed and cached per session.
 
 ### Effective cost (subscription mode)
 

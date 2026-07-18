@@ -225,6 +225,61 @@ test('Claude Code usage fields drive billing markers and reconcile through parsi
   }
 });
 
+test('overlayCost is tracked alongside the hardcoded cost when an external rate exists (hardcoded still wins for --cost-mode calculate)', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codelens-overlay-cost-'));
+  try {
+    // Deliberately cheaper than Opus 4.6's hardcoded $5/$25 — proves the overlay
+    // rate is tracked independently, not blended into the default .cost.
+    __setOverlayForTest({ 'claude-opus-4-6': { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 } });
+    const proj = path.join(root, 'proj');
+    mkdirSync(proj, { recursive: true });
+    const sid = 'bbbbbbbb-1111-2222-3333-444444444444';
+    const now = new Date().toISOString();
+    const usage = { input_tokens: 1_000_000, output_tokens: 1_000_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    const lines = [
+      { type: 'user', sessionId: sid, cwd: '/tmp/x', gitBranch: 'main', timestamp: now, message: { content: [{ type: 'text', text: 'go' }] } },
+      { type: 'assistant', requestId: 'r1', timestamp: now, message: { model: 'claude-opus-4-6', usage } },
+    ];
+    writeFileSync(path.join(proj, sid + '.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions } = await parseAllProjects(root, 30);
+    const s = sessions.find(x => x.sessionId === sid);
+    assert.ok(s);
+    assert.ok(Math.abs(s.modelBreakdown['claude-opus-4-6'].cost - 30) < 1e-9, 'hardcoded $5+$25 still wins for .cost');
+    assert.ok(Math.abs(s.modelBreakdown['claude-opus-4-6'].overlayCost - 2) < 1e-9, 'overlay $1+$1 tracked separately');
+    assert.ok(Math.abs(s.cost.overlayTotalCost - 2) < 1e-9);
+    assert.equal(s.cost.costModeIncomplete, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    __resetOverlayForTest();
+  }
+});
+
+test('overlayCost is null and costModeIncomplete is set when no overlay rate covers a session\'s model', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codelens-overlay-missing-'));
+  try {
+    __resetOverlayForTest();
+    const proj = path.join(root, 'proj');
+    mkdirSync(proj, { recursive: true });
+    const sid = 'cccccccc-1111-2222-3333-444444444444';
+    const now = new Date().toISOString();
+    const usage = { input_tokens: 1000, output_tokens: 1000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    const lines = [
+      { type: 'user', sessionId: sid, cwd: '/tmp/x', gitBranch: 'main', timestamp: now, message: { content: [{ type: 'text', text: 'go' }] } },
+      { type: 'assistant', requestId: 'r1', timestamp: now, message: { model: 'claude-opus-4-6', usage } },
+    ];
+    writeFileSync(path.join(proj, sid + '.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions } = await parseAllProjects(root, 30);
+    const s = sessions.find(x => x.sessionId === sid);
+    assert.equal(s.modelBreakdown['claude-opus-4-6'].overlayCost, null);
+    assert.equal(s.cost.overlayTotalCost, 0);
+    assert.equal(s.cost.costModeIncomplete, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('isVerificationCommand identifies common test/lint invocations', () => {
   assert.equal(isVerificationCommand('npm test'), true);
   assert.equal(isVerificationCommand('npm run lint'), true);

@@ -9,6 +9,7 @@ import { DEFAULT_CLAUDE_DIR, DEFAULT_CODEX_DIR, deleteCache, getCodexStaleFiles,
 import { parseAllProjects } from './claude-parser.js';
 import { parseCodexSessions } from './codex-parser.js';
 import { correlateSessions } from './correlator.js';
+import { applyCostMode, reconcilePricing, validateCostMode } from './cost-mode.js';
 import { analyzeGitRepo, findNestedGitRepos, getGitUser, resolveMovedRepoPaths } from './git-analyzer.js';
 import { serveMcpStdio } from './mcp.js';
 import { computeMetrics } from './metrics.js';
@@ -146,7 +147,7 @@ export function explodeWorkspaceSessions(sessions, depth = NESTED_REPO_DEPTH) {
   return out;
 }
 
-async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null, offline = false) {
+async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null, offline = false, costMode = 'calculate', debug = false) {
   // Step 0: Load the external pricing overlay before any costing happens, so
   // models the hardcoded tables don't know get a real published rate instead of
   // the Sonnet estimate. Cached to disk (~24h TTL); --refresh forces a refetch,
@@ -247,6 +248,10 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
     return null;
   }
 
+  // Applied fresh every run (never cached — saveCache above already ran on the
+  // raw calculate-mode data), so switching --cost-mode never forces a re-parse.
+  sessions.forEach(s => applyCostMode(s, costMode));
+
   // Step 2: Analyze git repos
   const startGit = Date.now();
   const repoPathsSet = new Set(sessions.map(s => s.repoPath).filter(Boolean));
@@ -322,6 +327,11 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
     // organic set (see viewOrganic above) — expose the folded count so the
     // dashboard can label those commits as the other agent's, not manual.
     p.meta.otherAgentClaimedCommits = otherAgentClaimed;
+    p.meta.costMode = costMode;
+    // --debug: per-model calculated-vs-overlay reconciliation, scoped to this
+    // view's own sessions (so a --source claude run reconciles Claude's models
+    // only). null when --debug wasn't passed — no wasted work.
+    p.meta.pricingReconciliation = debug ? reconcilePricing(subset) : null;
     return p;
   };
 
@@ -379,6 +389,8 @@ const addAnalysisOptions = (cmd) => cmd
   .option('--codex-dir <path>', 'override path to OpenAI Codex sessions directory (for testing/CI)')
   .option('--source <agent>', 'analyze a single agent only: claude | codex | all')
   .option('--offline', 'skip the network pricing refresh; use cached/hardcoded pricing only')
+  .option('--cost-mode <mode>', 'cost source: calculate (hardcoded rates, default) | auto (prefer external overlay rate, fall back silently) | display (overlay rate only, flags gaps)', 'calculate')
+  .option('--debug', 'print a per-model calculated-vs-overlay pricing reconciliation table, flagging >5% divergence')
   .option('--plan <tier>', 'Claude subscription mode — effective $/commit vs your flat plan: pro | max5 | max20')
   .option('--plan-cost <amount>', 'custom Claude monthly subscription cost in USD (overrides --plan)')
   .option('--codex-plan <tier>', 'Codex/ChatGPT subscription mode: free | go | plus | pro100 | pro | team | business | business-annual')
@@ -433,6 +445,12 @@ async function runAnalysis(opts) {
     process.exit(1);
   }
 
+  const costModeError = validateCostMode(opts.costMode);
+  if (costModeError) {
+    console.error(`  ${icon.err} ${c.red}${costModeError}${c.reset}`);
+    process.exit(1);
+  }
+
   // Defaults live in cache.js so custom-dir runs get their own cache file.
   // Codex CLI stores rollout files under $CODEX_HOME/sessions (~/.codex by default).
   const claudeDir = opts.claudeDir ? path.resolve(opts.claudeDir) : DEFAULT_CLAUDE_DIR;
@@ -446,7 +464,7 @@ async function runAnalysis(opts) {
     console.error(`  ${icon.warn} ${c.yellow}--codex-dir does not exist:${c.reset} ${codexDir}`);
   }
 
-  const payloads = await buildPayload(claudeDir, codexDir, days, opts.project, opts.refresh, planConfigs, sourceFilter, !!opts.offline);
+  const payloads = await buildPayload(claudeDir, codexDir, days, opts.project, opts.refresh, planConfigs, sourceFilter, !!opts.offline, opts.costMode, !!opts.debug);
   if (payloads) {
     const invokedAs = path.basename(process.argv[1]);
     for (const p of Object.values(payloads)) {
@@ -543,7 +561,7 @@ async function runDashboard(opts) {
 
   // Start server — pass a rebuild function so /api/refresh can re-run the pipeline
   const rebuild = async () => {
-    const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline);
+    const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline, opts.costMode, !!opts.debug);
     if (fresh) {
       for (const p of Object.values(fresh)) p.meta.invokedAs = payload.meta.invokedAs;
     }
@@ -834,7 +852,7 @@ async function main() {
   const ANALYSIS_SUBCOMMANDS = new Set(['report', 'daily', 'weekly', 'monthly', 'blocks', 'mcp']);
   program.hook('preSubcommand', (thisCommand, subcommand) => {
     if (!ANALYSIS_SUBCOMMANDS.has(subcommand.name())) return;
-    for (const key of ['days', 'project', 'refresh', 'claudeDir', 'codexDir', 'source', 'offline', 'plan', 'planCost', 'codexPlan', 'codexPlanCost']) {
+    for (const key of ['days', 'project', 'refresh', 'claudeDir', 'codexDir', 'source', 'offline', 'costMode', 'debug', 'plan', 'planCost', 'codexPlan', 'codexPlanCost']) {
       if (thisCommand.getOptionValueSource(key) === 'cli') {
         subcommand.setOptionValueWithSource(key, thisCommand.getOptionValue(key), 'cli');
       }

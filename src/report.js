@@ -70,6 +70,9 @@ export function reportModel(payload, payloads = null) {
     verdict: s.efficiencyScore?.explanation || '',
     tip: s.efficiencyScore?.tip || '',
     totalCost: s.totalCost,
+    costMode: meta.costMode || 'calculate',
+    costModeIncomplete: s.costModeIncomplete,
+    pricingReconciliation: meta.pricingReconciliation || null,
     pricingEstimatedPct: s.pricingEstimatedPct,
     plan: s.plan,
     sessions: s.totalSessions,
@@ -161,6 +164,19 @@ export function renderReportText(model) {
       L.push(`  ${mark[i.type] || ' '} ${i.text}`);
     }
   }
+
+  if (model.pricingReconciliation?.length > 0) {
+    L.push(`  ${rule}`);
+    L.push(`  ${c.bold}Pricing reconciliation${c.reset} ${c.dim}(hardcoded rate vs external overlay rate)${c.reset}`);
+    for (const r of model.pricingReconciliation) {
+      const sign = r.pctDivergence > 0 ? '+' : '';
+      const divColor = r.flagged ? c.red : c.dim;
+      L.push(`  ${label(r.model)}${fmtMoney(r.calculatedTotal)} ${c.dim}vs${c.reset} ${fmtMoney(r.overlayTotal)} ${divColor}(${sign}${r.pctDivergence.toFixed(1)}%)${c.reset}${r.flagged ? ` ${c.red}!${c.reset}` : ''}`);
+    }
+  }
+  if (model.costModeIncomplete && model.costMode === 'display') {
+    L.push(`  ${c.dim}* some sessions had no external rate for one or more models — cost shown may be incomplete under --cost-mode display${c.reset}`);
+  }
   L.push('');
   return L.join('\n');
 }
@@ -230,6 +246,24 @@ export function renderReportMarkdown(model) {
     for (const i of model.insights) L.push(`- ${i.text}`);
     L.push('');
   }
+
+  if (model.pricingReconciliation?.length > 0) {
+    L.push('## Pricing reconciliation');
+    L.push('');
+    L.push('_Hardcoded rate vs external overlay rate, per model._');
+    L.push('');
+    L.push('| Model | Calculated | Overlay | Divergence |');
+    L.push('| --- | --- | --- | --- |');
+    for (const r of model.pricingReconciliation) {
+      const sign = r.pctDivergence > 0 ? '+' : '';
+      L.push(`| ${r.model} | ${fmtMoney(r.calculatedTotal)} | ${fmtMoney(r.overlayTotal)} | ${sign}${r.pctDivergence.toFixed(1)}%${r.flagged ? ' ⚠' : ''} |`);
+    }
+    L.push('');
+  }
+  if (model.costModeIncomplete && model.costMode === 'display') {
+    L.push('*Some sessions had no external rate for one or more models — cost shown may be incomplete under `--cost-mode display`.*');
+    L.push('');
+  }
   L.push(`*Costs are API-equivalent estimates from published per-token pricing${model.plan ? '; plan figures prorate your flat subscription fee' : ''}. All data computed locally from agent session logs and git history.*`);
   L.push('');
   return L.join('\n');
@@ -280,6 +314,19 @@ export function renderReportHtml(model) {
     ? `<h2>Insights</h2>\n<ul>\n${model.insights.map(i => `<li>${escapeHtml(i.text)}</li>`).join('\n')}\n</ul>`
     : '';
 
+  const reconciliationRows = (model.pricingReconciliation || []).map(r => {
+    const sign = r.pctDivergence > 0 ? '+' : '';
+    return `<tr><td>${escapeHtml(r.model)}</td><td>${fmtMoney(r.calculatedTotal)}</td><td>${fmtMoney(r.overlayTotal)}</td><td>${sign}${r.pctDivergence.toFixed(1)}%${r.flagged ? ' ⚠' : ''}</td></tr>`;
+  }).join('\n');
+  const reconciliation = model.pricingReconciliation?.length > 0 ? `
+  <h2>Pricing reconciliation</h2>
+  <p class="dim">Hardcoded rate vs external overlay rate, per model.</p>
+  <table><tr><th>Model</th><th>Calculated</th><th>Overlay</th><th>Divergence</th></tr>
+  ${reconciliationRows}</table>` : '';
+  const incompleteNote = model.costModeIncomplete && model.costMode === 'display'
+    ? `<p class="dim">* Some sessions had no external rate for one or more models — cost shown may be incomplete under <code>--cost-mode display</code>.</p>`
+    : '';
+
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -318,6 +365,8 @@ export function renderReportHtml(model) {
   ${model.models.length > 0 ? `<h2>Models</h2>\n<table><tr><th>Model family</th><th>Spend</th><th>$/commit</th><th>Commits</th></tr>\n${modelRows}</table>` : ''}
   ${attribution}
   ${insights}
+  ${reconciliation}
+  ${incompleteNote}
   <div class="footer">Costs are API-equivalent estimates from published per-token pricing${model.plan ? '; plan figures prorate your flat subscription fee' : ''}. All data computed locally from agent session logs and git history — nothing leaves your machine.</div>
 </body>
 </html>

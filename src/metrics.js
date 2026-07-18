@@ -816,6 +816,10 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
 
   // ---- Summary ----
   const totalCost = correlatedSessions.reduce((s, c) => s + c.cost.totalCost, 0);
+  // True when --cost-mode display couldn't find an overlay rate for every
+  // model in at least one session — report.js surfaces this as a footnote
+  // rather than letting a partial total pass as complete.
+  const costModeIncomplete = correlatedSessions.some(c => c.cost.costModeIncomplete);
   const totalSessions = correlatedSessions.length;
   const totalCommits = correlatedSessions.reduce((s, c) => s + c.commitCount, 0);
   const totalLinesAdded = correlatedSessions.reduce((s, c) => s + c.linesAdded, 0);
@@ -1274,6 +1278,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
 
   const summary = {
     totalCost,
+    costModeIncomplete,
     pricingEstimatedPct: totalCost > 0 ? Math.round((pricingEstimatedCost / totalCost) * 100) : 0,
     reconciliation,
     plan,

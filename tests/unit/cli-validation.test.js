@@ -45,6 +45,12 @@ test('rejects an unknown --source value', () => {
   assert.match(r.stderr, /Unknown --source "bogus"/);
 });
 
+test('rejects an unknown --cost-mode value', () => {
+  const r = runCli(['--cost-mode', 'bogus']);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /Unknown --cost-mode "bogus"/);
+});
+
 test('--json with zero sessions writes the literal null to stdout, progress to stderr', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'cli-validation-'));
   try {
