@@ -204,6 +204,26 @@
   const logoSvg = (agent, size, color, extra) =>
     `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="${color}" data-agent-logo="${agent}" ${extra || ''}><path d="${MARKS[agent]}"></path></svg>`;
 
+  // ── Agent registry ──
+  // Single source of truth for the agent set and each agent's presentation:
+  //   logo     — MARKS key for the brand mark
+  //   color    — accent hue (source tab, session badge, faceoff bars)
+  //   logoFill — fill for the wordmark logo in neutral chrome (Claude keeps its
+  //              brand terracotta; the rest are monochrome ink)
+  //   label    — full display name;  short — compact provider name
+  // Adding a future agent (Cursor, Gemini CLI, ...) here feeds the sidebar tabs,
+  // session badges, command palette, faceoff, share card, and boot/refresh
+  // fan-out — no per-map edits scattered across this file.
+  const AGENT_KEYS = ['claude', 'codex', 'copilot'];
+  const SRC_BADGE = {
+    claude:  { logo: 'claude',  color: '#D97757',     logoFill: '#D97757',    label: 'Claude Code',    short: 'Claude'  },
+    codex:   { logo: 'codex',   color: 'var(--cyan)', logoFill: 'var(--ink)', label: 'OpenAI Codex',   short: 'Codex'   },
+    copilot: { logo: 'copilot', color: 'var(--blue)', logoFill: 'var(--ink)', label: 'GitHub Copilot', short: 'Copilot' },
+  };
+  // Claude sessions may omit `source` (pipeline convention: s.source ||
+  // 'claude'), so anything unrecognised falls back to Claude.
+  const srcBadge = (source) => SRC_BADGE[source] || SRC_BADGE.claude;
+
   // ── State ──
   const state = {
     source: 'all', theme: 'dark', range: 30,
@@ -558,12 +578,8 @@
       const res = await fetch('/api/refresh', { method: 'POST' });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `Refresh failed (${res.status})`);
-      const [all, claude, codex, copilot] = await Promise.all([fetchPayload('all'), fetchPayload('claude'), fetchPayload('codex'), fetchPayload('copilot')]);
+      const all = await loadPayloads();
       if (all && all.meta) {
-        payloads.all = all;
-        payloads.claude = (claude && claude.meta && claude.meta.source === 'claude') ? claude : null;
-        payloads.codex = (codex && codex.meta && codex.meta.source === 'codex') ? codex : null;
-        payloads.copilot = (copilot && copilot.meta && copilot.meta.source === 'copilot') ? copilot : null;
         if (state.source !== 'all' && !payloads[state.source]) state.source = 'all';
         state.expanded = null; state.page = 1;
         renderAll();
@@ -579,18 +595,8 @@
 
   // ── Share report card — draws a self-contained canvas summary (grade,
   // headline stats, AI footprint, efficiency bars, heatmap, top insights) for copy/download. ──
-  const SRC_TITLES = { all: 'All Agents', claude: 'Claude Code', codex: 'OpenAI Codex', copilot: 'GitHub Copilot' };
-  // Per-session source identity (logo mark + accent hue + label). Claude
-  // sessions may omit `source` (pipeline convention: s.source || 'claude'), so
-  // anything unrecognised falls back to Claude.
-  const SRC_BADGE = {
-    claude: { logo: 'claude', color: '#D97757', label: 'Claude Code' },
-    codex: { logo: 'codex', color: 'var(--cyan)', label: 'OpenAI Codex' },
-    copilot: { logo: 'copilot', color: 'var(--blue)', label: 'GitHub Copilot' },
-  };
-  const srcBadge = (source) => SRC_BADGE[source] || SRC_BADGE.claude;
   function srcTitle() {
-    return SRC_TITLES[state.source] || 'All Agents';
+    return state.source === 'all' ? 'All Agents' : srcBadge(state.source).label;
   }
   function openShare() {
     state.shareOpen = true; state.shareTheme = state.theme;
@@ -617,15 +623,14 @@
       .sort(([, a], [, b]) => (b.tokens || 0) - (a.tokens || 0))[0] || [];
     const totalModelTokens = Object.values(models).reduce((sum, model) => sum + (model.tokens || 0), 0);
     const topModelShare = totalModelTokens > 0 ? Math.round((topModel?.tokens || 0) / totalModelTokens * 100) : 0;
-    const PROVIDER_NAMES = { claude: 'Claude', codex: 'Codex', copilot: 'Copilot' };
     const providerSessions = (v.sessions || []).reduce((counts, session) => {
-      const provider = PROVIDER_NAMES[session.source] || 'Claude';
-      counts[provider] = (counts[provider] || 0) + 1;
+      const short = srcBadge(session.source).short;
+      counts[short] = (counts[short] || 0) + 1;
       return counts;
     }, {});
-    const agentMix = ['Claude', 'Codex', 'Copilot']
-      .filter((provider) => providerSessions[provider] > 0)
-      .map((provider) => `${providerSessions[provider]} ${provider}`);
+    const agentMix = AGENT_KEYS.map((k) => SRC_BADGE[k].short)
+      .filter((short) => providerSessions[short] > 0)
+      .map((short) => `${providerSessions[short]} ${short}`);
     if (agentMix.length === 0) agentMix.push('No sessions');
     const W = 600, ctx = canvas.getContext('2d');
     const mono = (w) => `${w} 10px 'IBM Plex Mono', monospace`;
@@ -938,20 +943,19 @@
 
   function renderSidebar() {
     const v = view();
-    const counts = (v && v.meta.sources) || { claude: 0, codex: 0, copilot: 0 };
-    const srcMeta = { all: ['All Agents', 'var(--purple)'], claude: ['Claude Code', '#D97757'], codex: ['OpenAI Codex', 'var(--cyan)'], copilot: ['GitHub Copilot', 'var(--blue)'] };
-    // Per-agent logo fill (monochrome ink for the wordmark-style marks; Claude
-    // keeps its brand terracotta).
-    const AGENT_LOGO = { claude: '#D97757', codex: 'var(--ink)', copilot: 'var(--ink)' };
-    const tabs = ['all', 'claude', 'codex', 'copilot'].map((k) => {
+    const counts = (v && v.meta.sources) || {};
+    // Label + accent hue per tab, derived from the agent registry (+ the All tab).
+    const srcMeta = { all: ['All Agents', 'var(--purple)'] };
+    for (const k of AGENT_KEYS) srcMeta[k] = [SRC_BADGE[k].label, SRC_BADGE[k].color];
+    const tabs = ['all', ...AGENT_KEYS].map((k) => {
       const active = state.source === k;
       const [label, hue] = srcMeta[k];
       const op = active ? 1 : 0.55;
-      const oneMark = (agent) => logoSvg(agent, 13, AGENT_LOGO[agent], `style="opacity:${op};transition:opacity .2s"`);
+      const oneMark = (agent) => logoSvg(agent, 13, srcBadge(agent).logoFill, `style="opacity:${op};transition:opacity .2s"`);
       const marks = k === 'all'
-        ? ['claude', 'codex', 'copilot'].map(oneMark).join('')
+        ? AGENT_KEYS.map(oneMark).join('')
         : oneMark(k);
-      const count = k === 'all' ? counts.claude + counts.codex + counts.copilot : counts[k];
+      const count = k === 'all' ? AGENT_KEYS.reduce((n, a) => n + (counts[a] || 0), 0) : (counts[k] || 0);
       const disabled = k !== 'all' && !payloads[k];
       return `<button class="source-tab${active ? ' active' : ''}" data-act="source" data-arg="${k}" ${disabled ? 'disabled' : ''} style="display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border-radius:9px;border:1px solid ${active ? `color-mix(in srgb, ${hue} 45%, transparent)` : 'transparent'};background:${active ? `color-mix(in srgb, ${hue} 10%, var(--card))` : 'transparent'};color:${active ? 'var(--ink)' : 'var(--ink2)'};cursor:${disabled ? 'default' : 'pointer'};opacity:${disabled ? 0.4 : 1};font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.05em;text-align:left;transition:border-color .2s,background .2s,color .2s;">
         <span style="display:inline-flex;align-items:center;gap:4px;flex-shrink:0;">${marks}</span>
@@ -1369,12 +1373,9 @@
     // than one agent has sessions. Two agents keep the signature head-to-head
     // "VS" card (parameterised to whichever two are active); three agents fold
     // into a multi-column comparison so every agent gets a fair column.
-    const AGENT_META = [
-      { key: 'claude', label: 'Claude Code', color: '#D97757', logo: 'claude' },
-      { key: 'codex', label: 'OpenAI Codex', color: 'var(--cyan)', logo: 'codex' },
-      { key: 'copilot', label: 'GitHub Copilot', color: 'var(--blue)', logo: 'copilot' },
-    ];
-    const faceAgents = AGENT_META.map((a) => ({ ...a, p: payloads[a.key] })).filter((a) => a.p);
+    const faceAgents = AGENT_KEYS
+      .map((key) => ({ key, label: SRC_BADGE[key].label, color: SRC_BADGE[key].color, logo: SRC_BADGE[key].logo, p: payloads[key] }))
+      .filter((a) => a.p);
     const showFaceoff = state.source === 'all' && faceAgents.length >= 2;
     let faceoff = '';
     if (showFaceoff) {
@@ -1954,19 +1955,16 @@
       const el = $(id);
       if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 16, behavior: 'smooth' });
     };
-    const srcColors = { claude: '#D97757', codex: 'var(--cyan)', copilot: 'var(--blue)' };
     const all = [
       ...navDefs.map(([id, label]) => ({ icon: '→', iconColor: 'var(--accent)', label: 'Go to ' + label, hint: 'Section', runNow: () => goTo(id) })),
       { icon: '◉', iconColor: 'var(--purple)', label: 'View: All Agents', hint: 'Agent', runNow: () => { state.cmdOpen = false; switchSource('all'); } },
-      { icon: '◉', iconColor: '#D97757', label: 'View: Claude Code', hint: 'Agent', runNow: () => { state.cmdOpen = false; switchSource('claude'); } },
-      { icon: '◉', iconColor: 'var(--cyan)', label: 'View: OpenAI Codex', hint: 'Agent', runNow: () => { state.cmdOpen = false; switchSource('codex'); } },
-      { icon: '◉', iconColor: 'var(--blue)', label: 'View: GitHub Copilot', hint: 'Agent', runNow: () => { state.cmdOpen = false; switchSource('copilot'); } },
+      ...AGENT_KEYS.map((k) => ({ icon: '◉', iconColor: SRC_BADGE[k].color, label: 'View: ' + SRC_BADGE[k].label, hint: 'Agent', runNow: () => { state.cmdOpen = false; switchSource(k); } })),
       { icon: '◑', iconColor: 'var(--amber-hi)', label: 'Toggle light / dark theme', hint: 'Theme', runNow: () => { state.cmdOpen = false; renderCmd(); toggleThemeAt(window.innerWidth / 2, window.innerHeight / 3); } },
       { icon: '⇪', iconColor: 'var(--amber-hi)', label: 'Share AI report card', hint: 'Action', runNow: () => { state.cmdOpen = false; renderCmd(); openShare(); } },
       { icon: '↻', iconColor: 'var(--green)', label: 'Refresh dashboard data', hint: 'Action', runNow: () => { state.cmdOpen = false; renderCmd(); refreshData(); } },
       ...[7, 14, 30].map((rr) => ({ icon: '▤', iconColor: 'var(--blue)', label: `Chart range: last ${rr} days`, hint: 'Range', runNow: () => { state.range = rr; state.cmdOpen = false; renderFlow(); renderCmd(); scheduleCharts(['timeline', 'burn']); } })),
       ...v.sessions.slice(0, 40).map((x) => ({
-        icon: '⌁', iconColor: srcColors[x.source] || srcColors.claude,
+        icon: '⌁', iconColor: srcBadge(x.source).color,
         label: `${x.projectName} · ${fmtModel(x.model)} · ${fmtMoney(x.cost.totalCost)}`,
         hint: 'Session', searchOnly: true,
         runNow: () => {
@@ -2161,6 +2159,20 @@
     const url = '/api/all' + (src !== 'all' ? ('?source=' + src) : '');
     return fetch(url).then((r) => r.ok ? r.json() : null).catch(() => null);
   }
+  // Fetch the combined payload plus each agent's per-source view in parallel and
+  // assign them into `payloads`. An agent view sticks only if the server
+  // actually computed it (its meta.source matches). Returns the `all` payload,
+  // or null if it couldn't be loaded. Shared by boot and refresh.
+  async function loadPayloads() {
+    const [all, ...perAgent] = await Promise.all(['all', ...AGENT_KEYS].map(fetchPayload));
+    if (!all || !all.meta) return null;
+    payloads.all = all;
+    AGENT_KEYS.forEach((k, i) => {
+      const pv = perAgent[i];
+      payloads[k] = (pv && pv.meta && pv.meta.source === k) ? pv : null;
+    });
+    return all;
+  }
   function renderError(msg) {
     document.querySelector('.main-inner').innerHTML =
       `<div style="max-width:520px;margin:18vh auto 0;text-align:center;font-family:'Instrument Sans',sans-serif;">
@@ -2173,12 +2185,8 @@
     state.theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
     let savedSource = null;
     try { savedSource = localStorage.getItem('codelens-mc-source'); } catch (e) { /* ignore */ }
-    const [all, claude, codex, copilot] = await Promise.all([fetchPayload('all'), fetchPayload('claude'), fetchPayload('codex'), fetchPayload('copilot')]);
-    if (!all || !all.meta) { renderError('Could not load dashboard data from /api/all.'); return; }
-    payloads.all = all;
-    payloads.claude = (claude && claude.meta && claude.meta.source === 'claude') ? claude : null;
-    payloads.codex = (codex && codex.meta && codex.meta.source === 'codex') ? codex : null;
-    payloads.copilot = (copilot && copilot.meta && copilot.meta.source === 'copilot') ? copilot : null;
+    const all = await loadPayloads();
+    if (!all) { renderError('Could not load dashboard data from /api/all.'); return; }
     state.source = (savedSource && payloads[savedSource]) ? savedSource : 'all';
     renderAll();
     setupSpy();

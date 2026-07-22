@@ -231,17 +231,19 @@ export function getStaleFiles(claudeDir, cachedFileIndex, cutoffMs = 0, projectF
   return { currentFiles, newFiles, modifiedFiles, deletedFiles };
 }
 
-// Codex counterpart of getStaleFiles. Codex rollout files live in a date tree
-// (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl) with no per-project folders,
-// so there is no folder-level project filter — the parser filters by each
-// session's cwd after parsing, and the cache is keyed on (project) anyway.
-export function getCodexStaleFiles(codexDir, cachedFileIndex, cutoffMs = 0) {
+// Staleness scan for the agents whose sessions are a FLAT list of files (one
+// per session), as opposed to Claude's per-project folders with subagent
+// transcripts. Codex rollouts (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl)
+// and Copilot events (~/.copilot/session-state/<id>/events.jsonl) both parse by
+// each session's cwd after the fact, so there is no folder-level project
+// filter — the cache is keyed on (project) anyway.
+function getFlatStaleFiles(files, cachedFileIndex, cutoffMs = 0) {
   const currentFiles = {};
   const newFiles = [];
   const modifiedFiles = [];
   const deletedFiles = [];
 
-  for (const filePath of listCodexSessionFiles(codexDir)) {
+  for (const filePath of files) {
     let mtime;
     try {
       mtime = statSync(filePath).mtimeMs;
@@ -268,39 +270,10 @@ export function getCodexStaleFiles(codexDir, cachedFileIndex, cutoffMs = 0) {
   return { currentFiles, newFiles, modifiedFiles, deletedFiles };
 }
 
-// Copilot counterpart of getStaleFiles. Copilot's session-state tree holds one
-// directory per session with an events.jsonl inside; there are no per-project
-// folders (the parser filters by each session's cwd), so this scans the flat
-// list of events.jsonl files exactly like the Codex scanner.
+export function getCodexStaleFiles(codexDir, cachedFileIndex, cutoffMs = 0) {
+  return getFlatStaleFiles(listCodexSessionFiles(codexDir), cachedFileIndex, cutoffMs);
+}
+
 export function getCopilotStaleFiles(copilotDir, cachedFileIndex, cutoffMs = 0) {
-  const currentFiles = {};
-  const newFiles = [];
-  const modifiedFiles = [];
-  const deletedFiles = [];
-
-  for (const filePath of listCopilotSessionFiles(copilotDir)) {
-    let mtime;
-    try {
-      mtime = statSync(filePath).mtimeMs;
-    } catch {
-      continue;
-    }
-    // Same gate as the parser: files untouched since the cutoff are never
-    // parsed, so they must not register as "new".
-    if (mtime < cutoffMs) continue;
-    currentFiles[filePath] = mtime;
-    if (!cachedFileIndex[filePath]) {
-      newFiles.push(filePath);
-    } else if (mtime > cachedFileIndex[filePath]) {
-      modifiedFiles.push(filePath);
-    }
-  }
-
-  for (const filePath of Object.keys(cachedFileIndex)) {
-    if (!currentFiles[filePath]) {
-      deletedFiles.push(filePath);
-    }
-  }
-
-  return { currentFiles, newFiles, modifiedFiles, deletedFiles };
+  return getFlatStaleFiles(listCopilotSessionFiles(copilotDir), cachedFileIndex, cutoffMs);
 }
