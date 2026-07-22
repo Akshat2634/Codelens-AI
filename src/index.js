@@ -217,24 +217,32 @@ async function buildPayload(claudeDir, codexDir, copilotDir, days, project, forc
     }
   }
 
+  // Parse whichever sources the cache didn't already serve. They scan three
+  // independent directories, so run them concurrently — cold-parse wall time is
+  // the slowest single scan, not the sum of all three.
+  const parseTasks = [];
   if (!claudeSessions) {
-    const result = await parseAllProjects(claudeDir, days, project);
-    claudeSessions = result.sessions;
-    claudeIndex = result.fileIndex;
-    if (!cached) parseNotes.push(`claude: ${claudeSessions.length} parsed`);
+    parseTasks.push(parseAllProjects(claudeDir, days, project).then((result) => {
+      claudeSessions = result.sessions;
+      claudeIndex = result.fileIndex;
+      if (!cached) parseNotes.push(`claude: ${claudeSessions.length} parsed`);
+    }));
   }
   if (!codexSessions) {
-    const result = await parseCodexSessions(codexDir, days, project);
-    codexSessions = result.sessions;
-    codexIndex = result.fileIndex;
-    if (!cached) parseNotes.push(`codex: ${codexSessions.length} parsed`);
+    parseTasks.push(parseCodexSessions(codexDir, days, project).then((result) => {
+      codexSessions = result.sessions;
+      codexIndex = result.fileIndex;
+      if (!cached) parseNotes.push(`codex: ${codexSessions.length} parsed`);
+    }));
   }
   if (!copilotSessions) {
-    const result = await parseCopilotSessions(copilotDir, days, project);
-    copilotSessions = result.sessions;
-    copilotIndex = result.fileIndex;
-    if (!cached) parseNotes.push(`copilot: ${copilotSessions.length} parsed`);
+    parseTasks.push(parseCopilotSessions(copilotDir, days, project).then((result) => {
+      copilotSessions = result.sessions;
+      copilotIndex = result.fileIndex;
+      if (!cached) parseNotes.push(`copilot: ${copilotSessions.length} parsed`);
+    }));
   }
+  if (parseTasks.length) await Promise.all(parseTasks);
 
   const rawParsed = [...claudeSessions, ...codexSessions, ...copilotSessions];
   progress(`  ${icon.ok} Parsing sessions ${c.dim}── ${parseNotes.join(' · ')} (${fmt(Date.now() - startParse)})${c.reset}`);

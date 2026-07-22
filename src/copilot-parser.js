@@ -199,7 +199,6 @@ function createEmptyCopilotSession(sessionId) {
     readOnlyBashCalls: 0,
     estimatedCost: 0,
     cacheSavingsDollars: 0,
-    copilotPlanType: null,
   };
 }
 
