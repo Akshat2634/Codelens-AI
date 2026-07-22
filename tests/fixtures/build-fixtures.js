@@ -1,10 +1,12 @@
 // Generates synthetic agent session files for CI smoke tests.
 // Output: tests/fixtures/claude-projects/test-project/*.jsonl (Claude Code)
 //         tests/fixtures/codex-sessions/YYYY/MM/DD/rollout-*.jsonl (OpenAI Codex)
+//         tests/fixtures/copilot-sessions/<id>/events.jsonl (GitHub Copilot CLI)
 //
-// Shapes mirror what ~/.claude/projects/ and ~/.codex/sessions/ contain in
-// practice. The parsers pick these up and the dashboard renders with non-empty
-// data for both agent sources (which also makes the source tabs appear).
+// Shapes mirror what ~/.claude/projects/, ~/.codex/sessions/, and
+// ~/.copilot/session-state/ contain in practice. The parsers pick these up and
+// the dashboard renders with non-empty data for all three agent sources (which
+// also makes the source tabs appear).
 
 import { fileURLToPath } from 'node:url';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -13,8 +15,10 @@ import path from 'node:path';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(__dirname, 'claude-projects', 'test-project');
 const CODEX_DIR = path.join(__dirname, 'codex-sessions');
+const COPILOT_DIR = path.join(__dirname, 'copilot-sessions');
 mkdirSync(OUT_DIR, { recursive: true });
 rmSync(CODEX_DIR, { recursive: true, force: true });
+rmSync(COPILOT_DIR, { recursive: true, force: true });
 
 const FAKE_REPO = '/tmp/codelens-fixture-repo';
 
@@ -39,6 +43,17 @@ function codexSession(sessionId, lines) {
     path.join(dir, `rollout-2026-01-01T00-00-00-${sessionId}.jsonl`),
     lines.map(l => JSON.stringify(l)).join('\n') + '\n'
   );
+}
+
+// Write a GitHub Copilot CLI session: one directory per session id under
+// session-state/, holding events.jsonl (the transcript + usage) and a
+// workspace.yaml metadata sidecar (cwd + branch). Directory name is the
+// session id, matching the real ~/.copilot/session-state layout.
+function copilotSession(sessionId, branch, lines) {
+  const dir = path.join(COPILOT_DIR, sessionId);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, 'workspace.yaml'), `cwd: ${FAKE_REPO}\nbranch: ${branch}\n`);
+  writeFileSync(path.join(dir, 'events.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
 }
 
 // ── Session 1: Shipped work (Sonnet, 3 days ago)
@@ -201,5 +216,45 @@ codexSession(cx3, [
   { timestamp: iso(5 * 60 - 2), type: 'event_msg', payload: { type: 'agent_message', message: 'The auth flow uses middleware chaining…' } },
 ]);
 
+// ── Copilot Session 1: Shipped work (claude-sonnet-4.5 via Copilot, ~20h ago)
+const cp1 = 'copilot-1111-2222-3333-000000000001';
+copilotSession(cp1, 'main', [
+  { type: 'session.start', timestamp: iso(20 * 60), data: { sessionId: cp1, cwd: FAKE_REPO, gitBranch: 'main', model: 'claude-sonnet-4.5', client: 'cli' } },
+  { type: 'user.message', timestamp: iso(20 * 60 - 1), data: { role: 'user', kind: 'plain', text: 'Add input validation to the signup form.' } },
+  { type: 'assistant.turn_start', timestamp: iso(20 * 60 - 2), data: {} },
+  { type: 'tool.execution_start', timestamp: iso(20 * 60 - 3), data: { tool: 'str_replace', arguments: { file_path: FAKE_REPO + '/src/signup.js' } } },
+  { type: 'tool.execution_complete', timestamp: iso(20 * 60 - 3), data: { tool: 'str_replace', status: 'success' } },
+  { type: 'tool.execution_start', timestamp: iso(20 * 60 - 4), data: { tool: 'bash', arguments: { command: 'npm test' } } },
+  { type: 'tool.execution_complete', timestamp: iso(20 * 60 - 4), data: { tool: 'bash', status: 'success' } },
+  { type: 'assistant.message', timestamp: iso(20 * 60 - 5), data: { text: 'Added validation with tests.' } },
+  { type: 'session.shutdown', timestamp: iso(20 * 60 - 6), data: { modelMetrics: { 'claude-sonnet-4.5': { usage: { inputTokens: 6200, outputTokens: 1500, cacheReadTokens: 22000, cacheWriteTokens: 2600, reasoningTokens: 0 }, requests: { count: 4, cost: 16 } } } } },
+]);
+
+// ── Copilot Session 2: Chat-only exploration (gpt-5 via Copilot, ~7h ago)
+const cp2 = 'copilot-1111-2222-3333-000000000002';
+copilotSession(cp2, 'main', [
+  { type: 'session.start', timestamp: iso(7 * 60), data: { sessionId: cp2, cwd: FAKE_REPO, gitBranch: 'main', model: 'gpt-5', client: 'cli' } },
+  { type: 'user.message', timestamp: iso(7 * 60 - 1), data: { role: 'user', kind: 'plain', text: 'How is rate limiting implemented here?' } },
+  { type: 'assistant.turn_start', timestamp: iso(7 * 60 - 2), data: {} },
+  { type: 'tool.execution_start', timestamp: iso(7 * 60 - 3), data: { tool: 'bash', arguments: { command: 'grep -r rateLimit src/' } } },
+  { type: 'tool.execution_complete', timestamp: iso(7 * 60 - 3), data: { tool: 'bash', status: 'success' } },
+  { type: 'assistant.message', timestamp: iso(7 * 60 - 4), data: { text: 'It uses a token-bucket middleware…' } },
+  { type: 'session.shutdown', timestamp: iso(7 * 60 - 5), data: { modelMetrics: { 'gpt-5': { usage: { inputTokens: 8000, outputTokens: 900, cacheReadTokens: 5000, cacheWriteTokens: 0, reasoningTokens: 300 }, requests: { count: 2, cost: 2 } } } } },
+]);
+
+// ── Copilot Session 3: Prior-week work for narrative comparison
+//    (gemini-2.5-pro via Copilot, 8 days ago) — exercises the overlay-priced
+//    Gemini family + the "Gemini" model label.
+const cp3 = 'copilot-1111-2222-3333-000000000003';
+copilotSession(cp3, 'feature/copilot', [
+  { type: 'session.start', timestamp: iso(8 * 24 * 60), data: { sessionId: cp3, cwd: FAKE_REPO, gitBranch: 'feature/copilot', model: 'gemini-2.5-pro', client: 'cli' } },
+  { type: 'user.message', timestamp: iso(8 * 24 * 60 - 1), data: { role: 'user', kind: 'plain', text: 'Document the config loader.' } },
+  { type: 'assistant.turn_start', timestamp: iso(8 * 24 * 60 - 2), data: {} },
+  { type: 'tool.execution_start', timestamp: iso(8 * 24 * 60 - 3), data: { tool: 'create_file', arguments: { file_path: FAKE_REPO + '/docs/config.md' } } },
+  { type: 'tool.execution_complete', timestamp: iso(8 * 24 * 60 - 3), data: { tool: 'create_file', status: 'success' } },
+  { type: 'session.shutdown', timestamp: iso(8 * 24 * 60 - 4), data: { modelMetrics: { 'gemini-2.5-pro': { usage: { inputTokens: 12000, outputTokens: 2200, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, requests: { count: 3, cost: 3 } } } } },
+]);
+
 console.log('Wrote 5 synthetic Claude sessions to ' + OUT_DIR);
 console.log('Wrote 3 synthetic Codex sessions to ' + CODEX_DIR);
+console.log('Wrote 3 synthetic Copilot sessions to ' + COPILOT_DIR);

@@ -1,0 +1,6 @@
+{"type":"session.start","timestamp":"2026-07-14T22:10:51.499Z","data":{"sessionId":"copilot-1111-2222-3333-000000000003","cwd":"/tmp/codelens-fixture-repo","gitBranch":"feature/copilot","model":"gemini-2.5-pro","client":"cli"}}
+{"type":"user.message","timestamp":"2026-07-14T22:11:51.499Z","data":{"role":"user","kind":"plain","text":"Document the config loader."}}
+{"type":"assistant.turn_start","timestamp":"2026-07-14T22:12:51.499Z","data":{}}
+{"type":"tool.execution_start","timestamp":"2026-07-14T22:13:51.499Z","data":{"tool":"create_file","arguments":{"file_path":"/tmp/codelens-fixture-repo/docs/config.md"}}}
+{"type":"tool.execution_complete","timestamp":"2026-07-14T22:13:51.499Z","data":{"tool":"create_file","status":"success"}}
+{"type":"session.shutdown","timestamp":"2026-07-14T22:14:51.499Z","data":{"modelMetrics":{"gemini-2.5-pro":{"usage":{"inputTokens":12000,"outputTokens":2200,"cacheReadTokens":0,"cacheWriteTokens":0,"reasoningTokens":0},"requests":{"count":3,"cost":3}}}}}

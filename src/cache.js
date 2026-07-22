@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { listSubagentTranscripts } from './claude-parser.js';
 import { listCodexSessionFiles } from './codex-parser.js';
+import { listCopilotSessionFiles } from './copilot-parser.js';
 
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'agent-analytics');
 const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
@@ -12,12 +13,17 @@ const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
 // dir?" check below can't drift from the CLI's own defaults.
 export const DEFAULT_CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
 export const DEFAULT_CODEX_DIR = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
-// The primary cache file is reserved for the plain ~/.codex layout. Comparing
-// against DEFAULT_CODEX_DIR (which bakes in $CODEX_HOME at load) would let a
-// run with a temporary CODEX_HOME map onto parsed-sessions.json and evict the
-// cache built from the user's real sessions — overrides must fall through to
-// the hashed filename below, same as --codex-dir.
+// GitHub Copilot CLI stores per-session dirs under $COPILOT_HOME/session-state
+// (COPILOT_HOME defaults to ~/.copilot and replaces the whole path when set).
+export const DEFAULT_COPILOT_DIR = path.join(process.env.COPILOT_HOME || path.join(os.homedir(), '.copilot'), 'session-state');
+// The primary cache file is reserved for the plain ~/.codex + ~/.copilot layout.
+// Comparing against DEFAULT_CODEX_DIR / DEFAULT_COPILOT_DIR (which bake in
+// $CODEX_HOME / $COPILOT_HOME at load) would let a run with a temporary env
+// override map onto parsed-sessions.json and evict the cache built from the
+// user's real sessions — overrides must fall through to the hashed filename
+// below, same as --codex-dir / --copilot-dir.
 const PLAIN_CODEX_DIR = path.join(os.homedir(), '.codex', 'sessions');
+const PLAIN_COPILOT_DIR = path.join(os.homedir(), '.copilot', 'session-state');
 
 // Runs against custom --claude-dir/--codex-dir (tests, CI, fixtures) get their
 // own cache file, so they never evict the cache built from the user's real
@@ -26,8 +32,9 @@ const PLAIN_CODEX_DIR = path.join(os.homedir(), '.codex', 'sessions');
 function cacheFileFor(options = {}) {
   const claudeDir = options.claudeDir || DEFAULT_CLAUDE_DIR;
   const codexDir = options.codexDir || DEFAULT_CODEX_DIR;
-  if (claudeDir === DEFAULT_CLAUDE_DIR && codexDir === PLAIN_CODEX_DIR) return CACHE_FILE;
-  const hash = createHash('sha1').update(`${claudeDir}|${codexDir}`).digest('hex').slice(0, 8);
+  const copilotDir = options.copilotDir || DEFAULT_COPILOT_DIR;
+  if (claudeDir === DEFAULT_CLAUDE_DIR && codexDir === PLAIN_CODEX_DIR && copilotDir === PLAIN_COPILOT_DIR) return CACHE_FILE;
+  const hash = createHash('sha1').update(`${claudeDir}|${codexDir}|${copilotDir}`).digest('hex').slice(0, 8);
   return path.join(CACHE_DIR, `parsed-sessions-${hash}.json`);
 }
 // Bump whenever parsing or pricing logic changes so cached sessions (which store
@@ -60,7 +67,9 @@ function cacheFileFor(options = {}) {
 // 19: filesWrittenAbsolute added to sessions for --depth's workspace-parent
 //     explosion — cached sessions from 18 lack it, so --depth would silently
 //     no-op against a warm cache until something else invalidated it.
-const CACHE_VERSION = 19;
+// 20: GitHub Copilot CLI sessions (source:'copilot' on sessions,
+//     copilotFileIndex, cache keyed on copilotDir).
+const CACHE_VERSION = 20;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);
@@ -77,9 +86,10 @@ export function loadCache(options = {}) {
     // different options would display the wrong data — treat as a miss.
     if (data.days !== options.days) return null;
     if ((data.project || null) !== (options.project || null)) return null;
-    // A cache built from one --claude-dir / --codex-dir must not serve another.
+    // A cache built from one --claude-dir / --codex-dir / --copilot-dir must not serve another.
     if ((data.claudeDir || null) !== (options.claudeDir || null)) return null;
     if ((data.codexDir || null) !== (options.codexDir || null)) return null;
+    if ((data.copilotDir || null) !== (options.copilotDir || null)) return null;
     // The rolling window moves daily and sessions are clipped to it at parse
     // time, so a cache built on an earlier day would serve stale clipping.
     if (options.cutoffDay && data.cutoffDay !== options.cutoffDay) return null;
@@ -89,7 +99,7 @@ export function loadCache(options = {}) {
   }
 }
 
-export function saveCache(sessions, fileIndex, codexFileIndex, options = {}) {
+export function saveCache(sessions, fileIndex, codexFileIndex, copilotFileIndex, options = {}) {
   mkdirSync(CACHE_DIR, { recursive: true });
   const data = {
     version: CACHE_VERSION,
@@ -98,9 +108,11 @@ export function saveCache(sessions, fileIndex, codexFileIndex, options = {}) {
     project: options.project || null,
     claudeDir: options.claudeDir || null,
     codexDir: options.codexDir || null,
+    copilotDir: options.copilotDir || null,
     cutoffDay: options.cutoffDay || null,
     fileIndex,
     codexFileIndex: codexFileIndex || {},
+    copilotFileIndex: copilotFileIndex || {},
     sessions,
   };
   writeFileSync(cacheFileFor(options), JSON.stringify(data));
@@ -230,6 +242,43 @@ export function getCodexStaleFiles(codexDir, cachedFileIndex, cutoffMs = 0) {
   const deletedFiles = [];
 
   for (const filePath of listCodexSessionFiles(codexDir)) {
+    let mtime;
+    try {
+      mtime = statSync(filePath).mtimeMs;
+    } catch {
+      continue;
+    }
+    // Same gate as the parser: files untouched since the cutoff are never
+    // parsed, so they must not register as "new".
+    if (mtime < cutoffMs) continue;
+    currentFiles[filePath] = mtime;
+    if (!cachedFileIndex[filePath]) {
+      newFiles.push(filePath);
+    } else if (mtime > cachedFileIndex[filePath]) {
+      modifiedFiles.push(filePath);
+    }
+  }
+
+  for (const filePath of Object.keys(cachedFileIndex)) {
+    if (!currentFiles[filePath]) {
+      deletedFiles.push(filePath);
+    }
+  }
+
+  return { currentFiles, newFiles, modifiedFiles, deletedFiles };
+}
+
+// Copilot counterpart of getStaleFiles. Copilot's session-state tree holds one
+// directory per session with an events.jsonl inside; there are no per-project
+// folders (the parser filters by each session's cwd), so this scans the flat
+// list of events.jsonl files exactly like the Codex scanner.
+export function getCopilotStaleFiles(copilotDir, cachedFileIndex, cutoffMs = 0) {
+  const currentFiles = {};
+  const newFiles = [];
+  const modifiedFiles = [];
+  const deletedFiles = [];
+
+  for (const filePath of listCopilotSessionFiles(copilotDir)) {
     let mtime;
     try {
       mtime = statSync(filePath).mtimeMs;
