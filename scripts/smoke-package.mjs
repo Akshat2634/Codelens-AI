@@ -18,6 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
 const fixtures = path.join(repoRoot, 'tests', 'fixtures', 'claude-projects');
 const codexFixtures = path.join(repoRoot, 'tests', 'fixtures', 'codex-sessions');
+const copilotFixtures = path.join(repoRoot, 'tests', 'fixtures', 'copilot-sessions');
 const PORT = 39217;
 
 const run = (cmd, args, opts = {}) =>
@@ -57,7 +58,7 @@ try {
   //    actually starts.
   server = spawn(
     'node',
-    [path.join(installed, 'src', 'index.js'), '--no-open', '--port', String(PORT), '--days', '3650', '--claude-dir', fixtures, '--codex-dir', codexFixtures],
+    [path.join(installed, 'src', 'index.js'), '--no-open', '--port', String(PORT), '--days', '3650', '--claude-dir', fixtures, '--codex-dir', codexFixtures, '--copilot-dir', copilotFixtures],
     { stdio: ['ignore', 'pipe', 'pipe'] }
   );
   let serverLog = '';
@@ -91,7 +92,8 @@ try {
   const sources = payload.meta?.sources || {};
   if (!(sources.claude > 0)) fail('packed CLI parsed no Claude fixture sessions');
   if (!(sources.codex > 0)) fail('packed CLI parsed no Codex fixture sessions');
-  console.log(`  • packed parsers loaded ${sources.claude} claude + ${sources.codex} codex fixture sessions`);
+  if (!(sources.copilot > 0)) fail('packed CLI parsed no GitHub Copilot fixture sessions');
+  console.log(`  • packed parsers loaded ${sources.claude} claude + ${sources.codex} codex + ${sources.copilot} copilot fixture sessions`);
 
   const chart = await fetch(`${base}/vendor/chart.umd.min.js`);
   if (chart.status !== 200) fail(`GET /vendor/chart.umd.min.js returned ${chart.status} — this is the blank-dashboard bug`);

@@ -4,12 +4,12 @@
 
 **Agent Productivity-to-Cost Correlator** — Is your AI coding agent actually shipping code?
 
-Codelens AI ties AI coding agent token usage to actual git output. It reads your local **Claude Code** and **OpenAI Codex CLI** session files, correlates them with git commits, and serves a dashboard answering: *"Am I getting ROI from my AI coding agents?"* When both agents have sessions, the dashboard adds **All Agents / Claude Code / OpenAI Codex** tabs so you can compare them side by side.
+Codelens AI ties AI coding agent token usage to actual git output. It reads your local **Claude Code**, **OpenAI Codex CLI**, and **GitHub Copilot CLI** session files, correlates them with git commits, and serves a dashboard answering: *"Am I getting ROI from my AI coding agents?"* When more than one agent has sessions, the dashboard adds **All Agents / Claude Code / OpenAI Codex / GitHub Copilot** tabs so you can compare them side by side.
 
 - One command, zero config
 - All data stays local
-- Supports Claude Code and OpenAI Codex CLI in one dashboard
-- Works with any git repo where you've used either agent
+- Supports Claude Code, OpenAI Codex CLI, and GitHub Copilot CLI in one dashboard
+- Works with any git repo where you've used any of these agents
 
 ## Installation
 
@@ -88,6 +88,7 @@ npm install -g codelens-ai@latest   # ...or just update it
 - At least one supported agent with local session data:
   - **Claude Code** — [Claude Code](https://claude.com/claude-code) sessions at `~/.claude/projects/`
   - **OpenAI Codex CLI** — [Codex](https://developers.openai.com/codex) sessions at `~/.codex/sessions/` (`$CODEX_HOME` is honored)
+  - **GitHub Copilot CLI** — [Copilot CLI](https://docs.github.com/copilot) sessions at `~/.copilot/session-state/` (`$COPILOT_HOME` is honored)
 
 ## Quick Start
 
@@ -95,7 +96,7 @@ npm install -g codelens-ai@latest   # ...or just update it
 npx codelens-ai
 ```
 
-This parses your `~/.claude/projects/` and `~/.codex/sessions/` data, analyzes your git repos, and opens a dashboard at `http://localhost:3457`.
+This parses your `~/.claude/projects/`, `~/.codex/sessions/`, and `~/.copilot/session-state/` data, analyzes your git repos, and opens a dashboard at `http://localhost:3457`.
 
 ## What It Measures
 
@@ -108,8 +109,8 @@ This parses your `~/.claude/projects/` and `~/.codex/sessions/` data, analyzes y
 | **Orphaned Sessions** | Sessions with 10+ messages that produced zero commits           |
 | **ROI Grade (A-F)**   | Composite score based on tokens-per-commit and survival rate    |
 | **Trailer Attribution** | `Co-authored-by` agent trailers confirm commit attribution (near-ground-truth) |
-| **Model Comparison**  | Efficiency across Claude and Codex models, including GPT-5.6 Sol, Terra, and Luna |
-| **Agent Comparison**  | Per-agent dashboard tabs (All / Claude Code / OpenAI Codex)     |
+| **Model Comparison**  | Efficiency across Claude, Codex, and Copilot models (incl. GPT-5.6 Sol/Terra/Luna and Copilot's Claude/GPT/Gemini models) |
+| **Agent Comparison**  | Per-agent dashboard tabs (All / Claude Code / OpenAI Codex / GitHub Copilot) |
 | **Branch Awareness**  | What % of AI commits landed on production                       |
 | **Peak Hours**        | Hour-of-day x day-of-week productivity heatmap                  |
 | **Autonomy Score**    | Composite A-F grade measuring how independently the agent works |
@@ -128,14 +129,17 @@ codelens-ai --no-open              # don't auto-open browser
 codelens-ai --json                 # dump all metrics as JSON to stdout
 codelens-ai --project techops      # filter to a specific project
 codelens-ai --refresh              # force full re-parse (ignore cache)
-codelens-ai --source codex         # analyze a single agent only: claude | codex
+codelens-ai --source copilot       # analyze a single agent only: claude | codex | copilot
 codelens-ai --offline              # skip the network pricing refresh (use cached/hardcoded rates)
 codelens-ai --plan max20           # Claude subscription mode: effective $/commit vs your flat plan
 codelens-ai --plan-cost 150        # custom Claude monthly subscription cost (USD)
 codelens-ai --codex-plan plus      # ChatGPT/Codex subscription: free | go | plus | pro100 | pro | business | business-annual
 codelens-ai --codex-plan-cost 40   # custom Codex monthly subscription cost (USD)
+codelens-ai --copilot-plan pro     # GitHub Copilot subscription: free | pro | pro-plus | max | business | enterprise
+codelens-ai --copilot-plan-cost 39 # custom GitHub Copilot monthly subscription cost (USD)
 codelens-ai --claude-dir <path>    # override ~/.claude/projects (testing/CI)
 codelens-ai --codex-dir <path>     # override ~/.codex/sessions (testing/CI)
+codelens-ai --copilot-dir <path>   # override ~/.copilot/session-state (testing/CI)
 
 codelens-ai report                 # print an ROI scorecard to the terminal
 codelens-ai report --md            # export codelens-report.md (or --md <path>)
@@ -161,7 +165,7 @@ codelens-ai mcp                    # serve usage & ROI reports as MCP tools over
 ccusage-style token accounting over the same analyzed window — Input / Output / Cache Create /
 Cache Read / Total / Cost per period — plus the two ROI columns a pure usage tool can't give you:
 **Commits** and **$/Commit**. All the shared analysis flags (`--days`, `--source`, `--project`,
-`--claude-dir`, `--codex-dir`) apply.
+`--claude-dir`, `--codex-dir`, `--copilot-dir`) apply.
 
 ### Billing blocks (`codelens-ai blocks`)
 
@@ -186,7 +190,7 @@ claude mcp add codelens -- npx -y codelens-ai mcp
 Exposed tools: **`roi_summary`** (grade, spend, $/commit, survival, value leak — the scorecard),
 **`usage`** (daily/weekly/monthly token & cost table), **`blocks`** (5-hour billing windows + burn
 rate), **`sessions`**, **`projects`** (per-repo ROI), and **`refresh`** (force a re-parse). Most
-tools take an optional `source` (`all | claude | codex`), and all the shared analysis flags
+tools take an optional `source` (`all | claude | codex | copilot`), and all the shared analysis flags
 (`--days`, `--project`, `--claude-dir`, ...) apply to the server itself. Analysis runs once at
 startup and is served from memory; the `refresh` tool re-runs it on demand.
 
@@ -231,7 +235,7 @@ Then run `npx codelens-ai` (or `codelens-ai report`) whenever you want the "toda
 
 ### Effective cost (subscription mode)
 
-By default costs are **API-equivalent** — what your usage *would* cost at pay-as-you-go token rates. If you're on a flat-rate plan, those dollars aren't what you actually pay. Pass `--plan` (`pro` = $20/mo, `max5` = $100/mo, `max20` = $200/mo) / `--plan-cost <usd>` for Claude, or `--codex-plan` (`free` = $0/mo, `go` = $8/mo, `plus` = $20/mo, `pro100` = $100/mo, `pro` = $200/mo, `business` = $25/seat/mo monthly, `business-annual` = $20/seat/mo annually) / `--codex-plan-cost <usd>` for ChatGPT/Codex, to add an **Effective Cost** panel that prorates your subscription to the analyzed window and shows:
+By default costs are **API-equivalent** — what your usage *would* cost at pay-as-you-go token rates. If you're on a flat-rate plan, those dollars aren't what you actually pay. Pass `--plan` (`pro` = $20/mo, `max5` = $100/mo, `max20` = $200/mo) / `--plan-cost <usd>` for Claude, `--codex-plan` (`free` = $0/mo, `go` = $8/mo, `plus` = $20/mo, `pro100` = $100/mo, `pro` = $200/mo, `business` = $25/seat/mo monthly, `business-annual` = $20/seat/mo annually) / `--codex-plan-cost <usd>` for ChatGPT/Codex, or `--copilot-plan` (`free` = $0/mo, `pro` = $10/mo, `pro-plus` = $39/mo, `max` = $100/mo, `business` = $19/seat/mo, `enterprise` = $39/seat/mo) / `--copilot-plan-cost <usd>` for GitHub Copilot, to add an **Effective Cost** panel that prorates your subscription to the analyzed window and shows:
 
 - **Effective $/commit** and **$/surviving line** — your prorated fee ÷ output, the cost figures that actually reflect your bill.
 - **Plan utilization** — API-equivalent value ÷ prorated fee (e.g. `3.2×` means you extracted ~3.2× your subscription in pay-as-you-go value). This is an estimate of value extracted, **not** realized savings.
@@ -240,12 +244,12 @@ By default costs are **API-equivalent** — what your usage *would* cost at pay-
 
 The dashboard includes:
 
-- **Agent source tabs** — when both Claude Code and Codex sessions exist, switch between **All Agents**, **Claude Code**, and **OpenAI Codex** views; every section recomputes for the selected agent
+- **Agent source tabs** — when more than one agent has sessions, switch between **All Agents**, **Claude Code**, **OpenAI Codex**, and **GitHub Copilot** views; every section recomputes for the selected agent
 - **Hero stats** — total cost, commits shipped, cost per commit, ROI grade, **AI code share**, and **value leak**
 - **Attribution & Coverage** — per-commit confidence (high/medium/low) that a commit was really the AI's, `Co-authored-by` trailer confirmations, plus a reconciliation of AI-attributed vs co-authored vs organic (manual) lines, so the ROI numbers are auditable rather than a black box
 - **Smart insights** — auto-generated observations about your usage patterns
 - **Cost vs Output timeline** — dual-axis chart of daily cost and lines added
-- **Model comparison** — cost and efficiency breakdown across Claude Code and OpenAI Codex models
+- **Model comparison** — cost and efficiency breakdown across Claude Code, OpenAI Codex, and GitHub Copilot models
 - **Session length analysis** — which session sizes have the best ROI
 - **Productivity heatmap** — GitHub-style grid showing when you're most productive
 - **Agent Autonomy** — autonomy score badge, autopilot ratio, self-heal score, commit velocity, and top verification commands
@@ -254,10 +258,10 @@ The dashboard includes:
 
 ## How It Works
 
-1. **Parses** JSONL session files from `~/.claude/projects/` (Claude Code) and rollout files from `~/.codex/sessions/` (OpenAI Codex CLI — including `.jsonl.zst` archives on Node >= 22.15)
-2. **Analyzes** git history from each repo you've worked in with either agent, including `Co-authored-by` agent trailers on each commit. If a session starts in a workspace parent that contains multiple git repos, Codelens automatically discovers nested repos (up to three levels) and correlates the touched files with the right repo — no flag or configuration required.
-3. **Correlates** sessions to commits by file overlap and timing — all agents correlate together, so a commit is attributed to at most one session; a commit stamped `Co-authored-by: Claude/Codex` is routed to the matching agent and counts as high-confidence attribution
-4. **Calculates** cost using each provider's published API pricing (input, output, cache, and server-side web search when logged)
+1. **Parses** JSONL session files from `~/.claude/projects/` (Claude Code), rollout files from `~/.codex/sessions/` (OpenAI Codex CLI — including `.jsonl.zst` archives on Node >= 22.15), and `events.jsonl` from `~/.copilot/session-state/` (GitHub Copilot CLI)
+2. **Analyzes** git history from each repo you've worked in with any agent, including `Co-authored-by` agent trailers on each commit. If a session starts in a workspace parent that contains multiple git repos, Codelens automatically discovers nested repos (up to three levels) and correlates the touched files with the right repo — no flag or configuration required.
+3. **Correlates** sessions to commits by file overlap and timing — all agents correlate together, so a commit is attributed to at most one session; a commit stamped `Co-authored-by: Claude/Codex/Copilot` is routed to the matching agent and counts as high-confidence attribution
+4. **Calculates** cost using each provider's published pricing (input, output, cache, and server-side web search when logged; Copilot reuses the underlying provider rates its models run on)
 5. **Serves** an interactive dashboard on localhost with per-agent views
 
 ### Caching
@@ -326,6 +330,20 @@ Codex sessions are costed from the `token_count` events in each rollout file. In
 >
 > **Note — subscriptions:** If you use Codex through a ChatGPT plan (Free/Go/Plus/Pro/Business), the dollar figures are **API-equivalent value**, not what you were billed — pass `--codex-plan` to see effective cost against your flat fee. API-key mode can also include published server-side tool-call fees when the rollout logs expose them.
 
+#### GitHub Copilot models
+
+The standalone **GitHub Copilot CLI** (`@github/copilot`) records per-session token usage in `~/.copilot/session-state/<id>/events.jsonl`. Copilot lets you drive the same underlying models several providers offer (Claude, GPT/o-series, Gemini, …), and — since GitHub's 2026 move to usage-based billing — its published per-token rates match each provider's own. Codelens therefore prices Copilot usage by **delegating to the authoritative provider tables** rather than maintaining a separate GitHub table:
+
+- **Claude** model ids (e.g. `claude-sonnet-4.5`, `claude-opus-4.8`) use Anthropic's per-tier rates, including the 1.25× cache-write premium.
+- **GPT / o-series** ids (e.g. `gpt-5`, `o4-mini`) use the OpenAI table above (no cache-write premium).
+- **Gemini** and anything else are priced from the external LiteLLM overlay (see _Auto-pricing new models_ above), then a flagged Sonnet-tier estimate if still unknown.
+
+> **Note — usage record:** Copilot persists a session's token totals in the `session.shutdown` event's `modelMetrics`. Sessions that ended without one (crashed / force-killed — roughly 1 in 8) are still shown so their commits correlate, but their cost is left unknown (not a fabricated $0) and they are excluded from grading.
+>
+> **Note — subscriptions:** Copilot is billed as a flat plan (Free/Pro/Pro+/Max/Business/Enterprise) plus metered "premium requests", so the dollar figures are **API-equivalent value**, not what you were billed — pass `--copilot-plan` to see effective cost against your flat fee.
+>
+> **Note — surfaces:** Only the standalone Copilot CLI writes a parseable local session store. The retired `gh copilot` extension and IDE Copilot completions are not analyzed (no durable local token counts).
+
 ### Line Survival
 
 Line survival uses an approximate heuristic: if lines added in commit A are deleted by a subsequent commit on the same file within 24 hours, they're counted as "churned." This is not git-blame-based tracking and survival rates are rounded to the nearest 5%.
@@ -341,6 +359,7 @@ Codelens-AI/
     ├── index.js          # CLI entry point
     ├── claude-parser.js  # Parse Claude Code JSONL session files
     ├── codex-parser.js   # Parse OpenAI Codex CLI rollout files
+    ├── copilot-parser.js # Parse GitHub Copilot CLI events.jsonl session files
     ├── cache.js          # Parsed data caching layer (per-source staleness)
     ├── git-analyzer.js   # Parse git log with branch awareness
     ├── correlator.js     # Match sessions to commits by file overlap + timing + trailers

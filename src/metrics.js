@@ -1,11 +1,14 @@
 import { getModelFamily as getClaudeModelFamily } from './claude-parser.js';
 import { getCodexModelFamily } from './codex-parser.js';
+import { getCopilotModelFamily } from './copilot-parser.js';
 import { commitLinesForSession } from './correlator.js';
 
 // Family resolution across agent sources: Claude names first (opus/sonnet/
-// haiku/fable), then OpenAI Codex names (gpt-5-codex/gpt-5/o-series/...).
+// haiku/fable), then OpenAI Codex names (gpt-5-codex/gpt-5/o-series/...), then
+// Copilot-only families (gemini/...). Copilot's Claude and GPT models are
+// already claimed by the first two, so only the extras (Gemini) fall through.
 function getModelFamily(modelName) {
-  return getClaudeModelFamily(modelName) || getCodexModelFamily(modelName);
+  return getClaudeModelFamily(modelName) || getCodexModelFamily(modelName) || getCopilotModelFamily(modelName);
 }
 
 const CHURN_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -802,7 +805,7 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
 function capitalise(s) {
   // Display form of a model family. Codex families need casing that naive
   // capitalization can't produce ('gpt' → 'GPT', 'o-series' → 'o-series').
-  const special = { gpt: 'GPT', codex: 'Codex', 'o-series': 'o-series' };
+  const special = { gpt: 'GPT', codex: 'Codex', 'o-series': 'o-series', gemini: 'Gemini' };
   return special[s] || s.charAt(0).toUpperCase() + s.slice(1);
 }
 

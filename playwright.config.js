@@ -29,7 +29,7 @@ export default defineConfig({
   // the dashboard's rolling 7-day window.
   webServer: isCI
     ? {
-        command: `node tests/fixtures/build-fixtures.js && node src/index.js --no-open --port ${CI_PORT} --claude-dir tests/fixtures/claude-projects --codex-dir tests/fixtures/codex-sessions --days 30 --refresh --offline`,
+        command: `node tests/fixtures/build-fixtures.js && node src/index.js --no-open --port ${CI_PORT} --claude-dir tests/fixtures/claude-projects --codex-dir tests/fixtures/codex-sessions --copilot-dir tests/fixtures/copilot-sessions --days 30 --refresh --offline`,
         url: `http://localhost:${CI_PORT}/api/all`,
         reuseExistingServer: false,
         timeout: 30_000,
