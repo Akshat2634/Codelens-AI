@@ -1,0 +1,7 @@
+{"type":"session.start","timestamp":"2026-07-22T15:10:51.498Z","data":{"sessionId":"copilot-1111-2222-3333-000000000002","cwd":"/tmp/codelens-fixture-repo","gitBranch":"main","model":"gpt-5","client":"cli"}}
+{"type":"user.message","timestamp":"2026-07-22T15:11:51.498Z","data":{"role":"user","kind":"plain","text":"How is rate limiting implemented here?"}}
+{"type":"assistant.turn_start","timestamp":"2026-07-22T15:12:51.498Z","data":{}}
+{"type":"tool.execution_start","timestamp":"2026-07-22T15:13:51.498Z","data":{"tool":"bash","arguments":{"command":"grep -r rateLimit src/"}}}
+{"type":"tool.execution_complete","timestamp":"2026-07-22T15:13:51.498Z","data":{"tool":"bash","status":"success"}}
+{"type":"assistant.message","timestamp":"2026-07-22T15:14:51.498Z","data":{"text":"It uses a token-bucket middleware…"}}
+{"type":"session.shutdown","timestamp":"2026-07-22T15:15:51.498Z","data":{"modelMetrics":{"gpt-5":{"usage":{"inputTokens":8000,"outputTokens":900,"cacheReadTokens":5000,"cacheWriteTokens":0,"reasoningTokens":300},"requests":{"count":2,"cost":2}}}}}

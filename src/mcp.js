@@ -19,8 +19,8 @@ import { buildPeriodTable, periodTableJson } from './tables.js';
 const SOURCE_PROP = {
   source: {
     type: 'string',
-    enum: ['all', 'claude', 'codex'],
-    description: "Agent to scope the answer to (default 'all'; per-agent views exist only when both agents have sessions)",
+    enum: ['all', 'claude', 'codex', 'copilot'],
+    description: "Agent to scope the answer to (default 'all'; per-agent views exist only when more than one agent has sessions)",
   },
 };
 
