@@ -70,7 +70,10 @@ function cacheFileFor(options = {}) {
 // 20: GitHub Copilot CLI sessions (source:'copilot' on sessions,
 //     copilotFileIndex, cache keyed on copilotDir), and Codex task folders
 //     without a Git repository no longer masquerade as projects.
-const CACHE_VERSION = 20;
+// 21: Copilot's published pricing table and recorded workspace/context tier are
+//     now parsed locally; re-price warm Copilot sessions instead of retaining
+//     the prior provider-fallback and default-context figures.
+const CACHE_VERSION = 21;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);

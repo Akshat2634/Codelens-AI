@@ -53,7 +53,7 @@ test('getCopilotModelFamily claims only Gemini (Claude/GPT go to their own parse
   assert.equal(getCopilotModelFamily(null), null);
 });
 
-// ── pricing (delegates to the authoritative provider tables) ──
+// ── pricing (GitHub Copilot's published table) ──
 
 test('getCopilotPricing prices Claude models at Anthropic rates incl. cache write', () => {
   // Sonnet 4.5: $3 input / $15 output / $0.30 cache read / $3.75 cache write.
@@ -80,14 +80,30 @@ test('getCopilotPricing falls back to a flagged estimate for unknown models with
   assert.ok(p.input > 0 && p.output > 0);
 });
 
-test('getCopilotPricing uses the external overlay for Gemini when loaded', () => {
-  __setOverlayForTest({ 'gemini-2.5-pro': { input: 1.25, output: 10, cacheRead: 0.31, cacheWrite: 0 } });
-  const p = getCopilotPricing('gemini-2.5-pro');
+test('getCopilotPricing uses the external overlay only for unknown future models', () => {
+  __setOverlayForTest({ 'copilot-future-model': { input: 1.25, output: 10, cacheRead: 0.31, cacheWrite: 0 } });
+  const p = getCopilotPricing('copilot-future-model');
   assert.equal(p.input, 1.25);
   assert.equal(p.output, 10);
   assert.equal(p.cachedInput, 0.31);
   assert.equal(p.estimate, false, 'overlay rates are real, not estimated');
   __resetOverlayForTest();
+});
+
+test('getCopilotPricing keeps GitHub pricing available offline for Gemini and Copilot-only models', () => {
+  __resetOverlayForTest();
+  const gemini = getCopilotPricing('gemini-2.5-pro');
+  const raptor = getCopilotPricing('raptor-mini');
+  assert.deepEqual(gemini, { input: 1.25, cachedInput: 0.125, output: 10, cacheWrite: 0, estimate: false });
+  assert.deepEqual(raptor, { input: 0.25, cachedInput: 0.025, output: 2, cacheWrite: 0, estimate: false });
+});
+
+test('getCopilotPricing flags aggregate long-context model usage as estimated unless its tier is recorded', () => {
+  const aggregate = getCopilotPricing('gpt-5.4');
+  const long = getCopilotPricing('gpt-5.4', Date.now(), 0, 'long_context');
+  assert.equal(aggregate.estimate, true);
+  assert.equal(aggregate.input, 2.5, 'default price is a lower-bound when the tier is unknown');
+  assert.deepEqual(long, { input: 5, cachedInput: 0.5, output: 22.5, cacheWrite: 0, estimate: false });
 });
 
 test('calculateCopilotCost sums input/output/cacheRead/cacheWrite at the right rates', () => {
@@ -178,6 +194,24 @@ test('parseCopilotSessions reads cwd/branch from workspace.yaml when events omit
     const s = sessions[0];
     assert.equal(s.repoPath, CWD);
     assert.equal(s.gitBranch, 'feature/z');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('parseCopilotSessions uses session.context_changed when there is no YAML or session.start metadata', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'copilot-'));
+  try {
+    writeSession(root, 'sess-context', [
+      { type: 'user.message', timestamp: iso(2), data: { role: 'user', kind: 'plain', text: 'x' } },
+      { type: 'session.context_changed', timestamp: iso(2), data: { cwd: CWD, gitRoot: CWD, branch: 'feature/context' } },
+      { type: 'session.shutdown', timestamp: iso(2), data: { modelMetrics: { 'gemini-2.5-pro': { usage: { inputTokens: 100, outputTokens: 50 }, requests: { count: 1 } } } } },
+    ]);
+    const { sessions } = await parseCopilotSessions(root, 30, null);
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].repoPath, CWD);
+    assert.equal(sessions[0].projectName, 'copilot-fixture-repo');
+    assert.equal(sessions[0].gitBranch, 'feature/context');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

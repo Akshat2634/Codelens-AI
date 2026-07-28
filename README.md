@@ -332,13 +332,12 @@ Codex sessions are costed from the `token_count` events in each rollout file. In
 
 #### GitHub Copilot models
 
-The standalone **GitHub Copilot CLI** (`@github/copilot`) records per-session token usage in `~/.copilot/session-state/<id>/events.jsonl`. Copilot lets you drive the same underlying models several providers offer (Claude, GPT/o-series, Gemini, …), and — since GitHub's 2026 move to usage-based billing — its published per-token rates match each provider's own. Codelens therefore prices Copilot usage by **delegating to the authoritative provider tables** rather than maintaining a separate GitHub table:
+The standalone **GitHub Copilot CLI** (`@github/copilot`) records per-session token usage in `~/.copilot/session-state/<id>/events.jsonl`. Codelens prices its currently selectable models from a local copy of **GitHub's published Copilot per-token table**, so reports remain correct with `--offline` or when the pricing refresh is unavailable:
 
-- **Claude** model ids (e.g. `claude-sonnet-4.5`, `claude-opus-4.8`) use Anthropic's per-tier rates, including the 1.25× cache-write premium.
-- **GPT / o-series** ids (e.g. `gpt-5`, `o4-mini`) use the OpenAI table above (no cache-write premium).
-- **Gemini** and anything else are priced from the external LiteLLM overlay (see _Auto-pricing new models_ above), then a flagged Sonnet-tier estimate if still unknown.
+- The table covers Claude, GPT, Gemini, and Copilot-only models such as Raptor mini, MAI-Code-1-Flash, and Kimi K2.7 Code. Unknown future model ids use the LiteLLM overlay (see _Auto-pricing new models_ above), then a flagged estimate if still unknown.
+- Some GitHub models have a higher long-context rate. Copilot's shutdown totals do not say which requests crossed that threshold, so Codelens labels a session's cost as estimated unless the recorded event includes its context tier; a recorded long tier is priced at the published long-context rate.
 
-> **Note — usage record:** Copilot persists a session's token totals in the `session.shutdown` event's `modelMetrics`. Sessions that ended without one (crashed / force-killed — roughly 1 in 8) are still shown so their commits correlate, but their cost is left unknown (not a fabricated $0) and they are excluded from grading.
+> **Note — usage record:** Copilot persists a session's token totals in the `session.shutdown` event's `modelMetrics`. Its `session.context_changed` event provides the current workspace and branch for commit correlation. Sessions that ended without a usage record (crashed / force-killed — roughly 1 in 8) are still shown so their commits correlate, but their cost is left unknown (not a fabricated $0) and they are excluded from grading.
 >
 > **Note — subscriptions:** Copilot is billed as a flat plan (Free/Pro/Pro+/Max/Business/Enterprise) plus metered "premium requests", so the dollar figures are **API-equivalent value**, not what you were billed — pass `--copilot-plan` to see effective cost against your flat fee.
 >

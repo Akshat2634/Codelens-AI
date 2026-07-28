@@ -3,14 +3,10 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import {
   findGitRoot,
-  getModelFamily as getClaudeModelFamily,
-  getPricingTier,
   isReadOnlyCommand,
   isVerificationCommand,
-  PRICING,
   toRelativePath,
 } from './claude-parser.js';
-import { getCodexModelFamily, getCodexPricing } from './codex-parser.js';
 import { lookupExternalRate } from './pricing.js';
 
 // ── GitHub Copilot CLI session parser ──
@@ -62,13 +58,10 @@ import { lookupExternalRate } from './pricing.js';
 //   totalOutputTokens   = usage.outputTokens       (reasoning already included —
 //                         reasoningOutputTokens is informational only)
 //
-// Pricing: GitHub's usage-based (post-2026-06-01) per-token rates match each
-// underlying provider's own rates (verified against models-and-pricing.yml —
-// e.g. Claude Sonnet 4.5 $3/$15 with a $3.75 cache-write, identical to
-// Anthropic), so we REUSE the authoritative provider tables instead of
-// maintaining a drift-prone GitHub copy: Claude ids -> claude-parser's tiers,
-// GPT/o ids -> codex-parser's table, everything else (Gemini, ...) -> the
-// LiteLLM overlay, then a flagged Sonnet-ish estimate.
+// Pricing: GitHub bills Copilot usage in AI credits using its own published
+// per-token table. Keep the currently selectable Copilot models here so
+// --offline (and a failed pricing refresh) remains accurate; LiteLLM is only a
+// fallback for future, unrecognized model ids.
 
 const PER_MIL = 1_000_000;
 
@@ -81,44 +74,111 @@ const UNBUCKETED_DAY = '__unbucketed__';
 // last-resort in claude-parser). cacheWrite = 1.25x input like Anthropic.
 const COPILOT_FALLBACK = { input: 3, cachedInput: 0.30, output: 15, cacheWrite: 3.75, estimate: true };
 
-// Gemini is the only Copilot model family the Claude/Codex tables don't cover;
-// claude/gpt/o ids are already claimed by those parsers' family detectors.
+// GitHub Copilot per-million-token rates. `longContext` is selected only when
+// the session records its tier; shutdown modelMetrics are aggregate totals, so
+// an absent tier is deliberately marked estimated instead of silently treating
+// all requests as default-context usage.
+const COPILOT_PRICING = [
+  ['gpt-5-6-sol', { input: 5, cachedInput: 0.5, output: 30, longContext: { input: 10, cachedInput: 1, output: 45 }, longContextThreshold: 272_000 }],
+  ['gpt-5-6-terra', { input: 2.5, cachedInput: 0.25, output: 15, longContext: { input: 5, cachedInput: 0.5, output: 22.5 }, longContextThreshold: 272_000 }],
+  ['gpt-5-6-luna', { input: 1, cachedInput: 0.1, output: 6, longContext: { input: 2, cachedInput: 0.2, output: 9 }, longContextThreshold: 200_000 }],
+  ['gpt-5-6', { input: 5, cachedInput: 0.5, output: 30, longContext: { input: 10, cachedInput: 1, output: 45 }, longContextThreshold: 272_000 }],
+  ['gpt-5-5', { input: 5, cachedInput: 0.5, output: 30, longContext: { input: 10, cachedInput: 1, output: 45 }, longContextThreshold: 272_000 }],
+  ['gpt-5-4-mini', { input: 0.75, cachedInput: 0.075, output: 4.5 }],
+  ['gpt-5-4-nano', { input: 0.2, cachedInput: 0.02, output: 1.25 }],
+  ['gpt-5-4', { input: 2.5, cachedInput: 0.25, output: 15, longContext: { input: 5, cachedInput: 0.5, output: 22.5 }, longContextThreshold: 272_000 }],
+  ['gpt-5-3-codex', { input: 1.75, cachedInput: 0.175, output: 14 }],
+  ['gpt-5-mini', { input: 0.25, cachedInput: 0.025, output: 2 }],
+  ['gpt-5', { input: 1.25, cachedInput: 0.125, output: 10 }],
+  ['claude-haiku-4-5', { input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 5 }],
+  ['claude-sonnet-5', { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 }],
+  ['claude-sonnet-4', { input: 3, cachedInput: 0.3, cacheWrite: 3.75, output: 15 }],
+  ['claude-opus-4-8-fast', { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 }],
+  ['claude-opus-4', { input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 25 }],
+  ['claude-fable-5', { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 }],
+  ['gemini-3-6-flash', { input: 1.5, cachedInput: 0.15, output: 7.5 }],
+  ['gemini-3-5-flash', { input: 1.5, cachedInput: 0.15, output: 9 }],
+  ['gemini-3-1-pro', { input: 2, cachedInput: 0.2, output: 12, longContext: { input: 4, cachedInput: 0.4, output: 18 }, longContextThreshold: 200_000 }],
+  ['gemini-3-flash', { input: 0.5, cachedInput: 0.05, output: 3 }],
+  ['gemini-2-5-pro', { input: 1.25, cachedInput: 0.125, output: 10 }],
+  ['raptor-mini', { input: 0.25, cachedInput: 0.025, output: 2 }],
+  ['mai-code-1-flash', { input: 0.75, cachedInput: 0.075, output: 4.5 }],
+  ['kimi-k2-7-code', { input: 0.95, cachedInput: 0.19, output: 4 }],
+];
+
+function normalizeCopilotModelId(modelName) {
+  return String(modelName || '')
+    .toLowerCase()
+    .replace(/\[[^\]]*\]/g, '')
+    .replace(/[._]/g, '-')
+    .replace(/-latest$/, '');
+}
+
+function normalizeContextTier(contextTier) {
+  const tier = String(contextTier || '').toLowerCase().replace(/[-\s]/g, '_');
+  if (tier === 'long' || tier === 'long_context') return 'long';
+  if (tier === 'default' || tier === 'standard') return 'default';
+  return null;
+}
+
+function findCopilotPrice(modelName) {
+  const id = normalizeCopilotModelId(modelName);
+  // Copilot represents the fast Opus variant as `claude-opus-4.8[fast]`.
+  // Preserve that selector before normalization removes bracketed qualifiers.
+  if (id.startsWith('claude-opus-4-8') && /\[fast\]/i.test(String(modelName))) {
+    return COPILOT_PRICING.find(([key]) => key === 'claude-opus-4-8-fast')?.[1] || null;
+  }
+  return COPILOT_PRICING.find(([key]) => id === key || id.startsWith(`${key}-`))?.[1] || null;
+}
+
 export function getCopilotModelFamily(modelName) {
   if (!modelName) return null;
   const lower = modelName.toLowerCase();
   if (lower.includes('gemini')) return 'gemini';
+  if (lower.includes('raptor')) return 'raptor';
+  if (lower.includes('mai-')) return 'mai';
+  if (lower.includes('kimi')) return 'kimi';
   return null;
 }
 
-// Resolve a Copilot model id to per-million rates + an `estimate` flag,
-// delegating the actual matching (version tiers, date-tiering, long context,
-// external overlay) to the authoritative provider functions. Copilot ids use
-// dotted minor versions (claude-sonnet-4.5, opus-4.8) which getPricingTier's
-// `[-.]` matcher already accepts.
-export function getCopilotPricing(modelName, usageDateMs = Date.now()) {
+// Resolve a Copilot model id to per-million rates + an `estimate` flag.
+// requestInputTokens is intentionally optional: callers handling a real request
+// can use it to select a long-context tier, whereas session.shutdown contains
+// only aggregate totals and must pass a recorded contextTier instead.
+export function getCopilotPricing(modelName, usageDateMs = Date.now(), requestInputTokens = 0, contextTier = null) {
   if (!modelName) return null;
-  // Claude models keep Anthropic's per-tier rates (incl. the 1.25x cache-write).
-  if (getClaudeModelFamily(modelName)) {
-    const tier = getPricingTier(modelName, usageDateMs);
-    if (tier) {
-      const p = PRICING[tier];
-      return { input: p.input, cachedInput: p.cacheRead, output: p.output, cacheWrite: p.cacheWrite, estimate: false };
-    }
+  const p = findCopilotPrice(modelName);
+  if (p) {
+    // GitHub advertises Sonnet 5's reduced rate as a time-limited promotion.
+    // Historical sessions after the promotion use Sonnet's standard rate.
+    const isSonnet5 = normalizeCopilotModelId(modelName).startsWith('claude-sonnet-5');
+    const currentPrice = isSonnet5 && usageDateMs >= Date.UTC(2026, 8, 1)
+      ? { input: 3, cachedInput: 0.3, cacheWrite: 3.75, output: 15 }
+      : p;
+    const normalizedTier = normalizeContextTier(contextTier);
+    const explicitLong = String(modelName).toLowerCase().includes('[long]') || normalizedTier === 'long';
+    const longByInput = Number(requestInputTokens) > (currentPrice.longContextThreshold || Infinity);
+    const isLong = explicitLong || longByInput;
+    const tierKnown = !currentPrice.longContext || normalizedTier !== null || String(modelName).toLowerCase().includes('[long]') || Number(requestInputTokens) > 0;
+    const selected = isLong && currentPrice.longContext ? currentPrice.longContext : currentPrice;
+    return {
+      input: selected.input,
+      cachedInput: selected.cachedInput,
+      output: selected.output,
+      cacheWrite: selected.cacheWrite ?? 0,
+      // An aggregate shutdown total cannot reveal whether one of its requests
+      // crossed a long-context threshold. Keep the default-rate calculation as
+      // a useful lower-bound, but expose it as an estimate rather than exact.
+      estimate: !tierKnown,
+    };
   }
-  // GPT / o-series reuse the Codex (OpenAI) table. OpenAI's automatic caching
-  // has no write premium, so cacheWrite is 0.
-  if (getCodexModelFamily(modelName)) {
-    const p = getCodexPricing(modelName, usageDateMs);
-    if (p) return { input: p.input, cachedInput: p.cachedInput, output: p.output, cacheWrite: 0, estimate: !!p.estimate };
-  }
-  // Gemini and anything else: the external LiteLLM overlay carries real rates.
   const ext = lookupExternalRate(modelName);
   if (ext) return { input: ext.input, cachedInput: ext.cacheRead, output: ext.output, cacheWrite: ext.cacheWrite ?? 0, estimate: false };
   return COPILOT_FALLBACK;
 }
 
-function calculateCopilotCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, usageDateMs = Date.now()) {
-  const p = getCopilotPricing(modelName, usageDateMs) || COPILOT_FALLBACK;
+function calculateCopilotCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, usageDateMs = Date.now(), contextTier = null) {
+  const p = getCopilotPricing(modelName, usageDateMs, 0, contextTier) || COPILOT_FALLBACK;
   const inputCost = inputTokens * p.input / PER_MIL;
   const outputCost = outputTokens * p.output / PER_MIL;
   const cacheReadCost = cacheReadTokens * p.cachedInput / PER_MIL;
@@ -133,8 +193,8 @@ function calculateCopilotCostBreakdown(inputTokens, outputTokens, cacheReadToken
   };
 }
 
-export function calculateCopilotCost(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, usageDateMs = Date.now()) {
-  return calculateCopilotCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, usageDateMs).totalCost;
+export function calculateCopilotCost(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, usageDateMs = Date.now(), contextTier = null) {
+  return calculateCopilotCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, usageDateMs, contextTier).totalCost;
 }
 
 // List every session's events.jsonl under session-state/. Each session is a
@@ -280,14 +340,15 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
     // fields on session.start below.
   }
 
-  const modelTokens = {}; // model -> { input, output, cacheRead, cacheCreate }
-  const dailyModelTokens = {}; // dateStr -> model -> { input, output, cacheRead, cacheCreate }
+  const modelTokens = {}; // model -> { input, output, cacheRead, cacheCreate, contextTier }
+  const dailyModelTokens = {}; // dateStr -> model -> { input, output, cacheRead, cacheCreate, contextTier }
   const rawFiles = new Set();
   let turnStarts = 0;
   let assistantMessages = 0;
   let requestCount = 0; // summed modelMetrics.requests.count — the model-request analog
   let sawShutdownUsage = false;
   let sawToolStart = false;
+  let sessionContextTier = null;
   const completeOnlyTools = []; // completions held back until we know no starts were logged
 
   const trackToolCall = (name) => {
@@ -306,7 +367,7 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
   // Accumulate one model's session-total usage into the model + daily buckets
   // and push a usageEvents record (one per model, stamped at the session-end
   // day) for the 5-hour billing blocks / burn rate.
-  const accumulateModelUsage = (model, u, dayMs) => {
+  const accumulateModelUsage = (model, u, dayMs, contextTier = null) => {
     const input = Math.max(0, Number(u.inputTokens ?? u.input_tokens ?? u.input ?? 0));
     const cacheRead = Math.max(0, Number(u.cacheReadTokens ?? u.cache_read_tokens ?? u.cacheReadInputTokens ?? u.cache_read_input_tokens ?? 0));
     const cacheCreate = Math.max(0, Number(u.cacheWriteTokens ?? u.cache_write_tokens ?? u.cacheCreationTokens ?? u.cache_creation_tokens ?? 0));
@@ -320,25 +381,28 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
     session.cacheReadTokens += cacheRead;
     session.cacheCreationTokens += cacheCreate;
 
-    if (!modelTokens[model]) modelTokens[model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 };
+    const normalizedTier = normalizeContextTier(contextTier);
+    if (!modelTokens[model]) modelTokens[model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, contextTier: null };
     modelTokens[model].input += input;
     modelTokens[model].output += output;
     modelTokens[model].cacheRead += cacheRead;
     modelTokens[model].cacheCreate += cacheCreate;
+    if (normalizedTier === 'long' || !modelTokens[model].contextTier) modelTokens[model].contextTier = normalizedTier;
 
     const dateStr = Number.isFinite(dayMs) ? localDayStr(dayMs) : UNBUCKETED_DAY;
     if (!dailyModelTokens[dateStr]) dailyModelTokens[dateStr] = {};
-    if (!dailyModelTokens[dateStr][model]) dailyModelTokens[dateStr][model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 };
+    if (!dailyModelTokens[dateStr][model]) dailyModelTokens[dateStr][model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, contextTier: null };
     dailyModelTokens[dateStr][model].input += input;
     dailyModelTokens[dateStr][model].output += output;
     dailyModelTokens[dateStr][model].cacheRead += cacheRead;
     dailyModelTokens[dateStr][model].cacheCreate += cacheCreate;
+    if (normalizedTier === 'long' || !dailyModelTokens[dateStr][model].contextTier) dailyModelTokens[dateStr][model].contextTier = normalizedTier;
 
     if (Number.isFinite(dayMs)) {
       session.usageEvents.push({
         ts: dayMs,
         input, output, cacheRead, cacheCreate,
-        cost: calculateCopilotCost(input, output, cacheRead, cacheCreate, model, dayMs),
+        cost: calculateCopilotCost(input, output, cacheRead, cacheCreate, model, dayMs, normalizedTier),
       });
     }
   };
@@ -360,14 +424,27 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
     // ── session lifecycle ──
     if (type === 'session.start' || type === 'session.started' || type === 'session_start' || type === 'session.created') {
       session.sessionId = data.sessionId || data.session_id || data.id || session.sessionId;
-      const cwd = data.cwd || data.workingDirectory || data.working_directory || data.workspace?.path || data.workspacePath;
+      const cwd = data.gitRoot || data.git_root || data.cwd || data.workingDirectory || data.working_directory || data.workspace?.path || data.workspacePath;
       if (cwd && !session.repoPath) session.repoPath = cwd;
       const branch = data.gitBranch || data.git?.branch || data.branch;
       if (branch && !session.gitBranch) session.gitBranch = branch;
+      sessionContextTier = normalizeContextTier(data.contextTier || data.context_tier || data.context?.tier) || sessionContextTier;
       // Some builds record the client surface (cli / vscode / jetbrains).
       const surface = String(data.client || data.source || data.surface || '').toLowerCase();
       if (surface.includes('vscode') || surface.includes('vs-code')) session.entrypoint = 'copilot-vscode';
       else if (surface.includes('jetbrains') || surface.includes('intellij')) session.entrypoint = 'copilot-jetbrains';
+      continue;
+    }
+
+    // This is Copilot's persistent workspace event. Unlike session.start it is
+    // emitted whenever the workspace changes, so it is the authoritative source
+    // for correlation metadata in long-lived sessions.
+    if (type === 'session.context_changed' || type === 'session.contextchanged' || type === 'session_context_changed') {
+      const cwd = data.gitRoot || data.git_root || data.cwd || data.workingDirectory || data.working_directory || data.workspace?.path || data.workspacePath;
+      if (cwd) session.repoPath = cwd;
+      const branch = data.gitBranch || data.git?.branch || data.branch;
+      if (branch) session.gitBranch = branch;
+      sessionContextTier = normalizeContextTier(data.contextTier || data.context_tier || data.context?.tier) || sessionContextTier;
       continue;
     }
 
@@ -382,7 +459,8 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
           // Window clipping: a session-total record dated before the cutoff is
           // not this window's spend.
           if (cutoffMs && Number.isFinite(shutdownMs) && shutdownMs < cutoffMs) continue;
-          accumulateModelUsage(model, usage, shutdownMs);
+          const contextTier = m.contextTier || m.context_tier || usage.contextTier || usage.context_tier || data.contextTier || data.context_tier || data.context?.tier || sessionContextTier;
+          accumulateModelUsage(model, usage, shutdownMs, contextTier);
           sawShutdownUsage = true;
           const reqs = m.requests || m.request;
           if (reqs && Number.isFinite(Number(reqs.count))) requestCount += Number(reqs.count);
@@ -440,7 +518,6 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
 
     if (type === 'subagent.started' || type === 'subagent.start' || type === 'agent.spawned' || type === 'subagent.completed') {
       if (type.includes('start') || type.includes('spawn')) session.subagentTranscriptCount++;
-      continue;
     }
 
     // assistant.turn_end / tool nested output / compaction / unknown: ignored.
@@ -470,8 +547,9 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
     const target = localDayStr(targetMs);
     const day = dailyModelTokens[target] || (dailyModelTokens[target] = {});
     for (const [model, tk] of Object.entries(dailyModelTokens[UNBUCKETED_DAY])) {
-      if (!day[model]) day[model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 };
-      for (const k of Object.keys(tk)) day[model][k] += tk[k];
+      if (!day[model]) day[model] = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, contextTier: null };
+      for (const key of ['input', 'output', 'cacheRead', 'cacheCreate']) day[model][key] += tk[key];
+      if (tk.contextTier === 'long' || !day[model].contextTier) day[model].contextTier = tk.contextTier;
     }
     delete dailyModelTokens[UNBUCKETED_DAY];
   }
@@ -481,8 +559,8 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
   let maxTokens = 0;
   let primaryModel = null;
   for (const [model, tokens] of Object.entries(modelTokens)) {
-    const bd = calculateCopilotCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, sessionDateMs);
-    const p = getCopilotPricing(model, sessionDateMs) || COPILOT_FALLBACK;
+    const bd = calculateCopilotCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, sessionDateMs, tokens.contextTier);
+    const p = getCopilotPricing(model, sessionDateMs, 0, tokens.contextTier) || COPILOT_FALLBACK;
     session.cacheSavingsDollars += tokens.cacheRead * (p.input - p.cachedInput) / PER_MIL;
     if (p.estimate) session.estimatedCost += bd.totalCost;
     const totalTokens = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
@@ -515,7 +593,7 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
     const dayByModel = {};
     const dayMs = Date.parse(dateStr + 'T12:00:00Z');
     for (const [model, tokens] of Object.entries(models)) {
-      const bd = calculateCopilotCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, dayMs);
+      const bd = calculateCopilotCostBreakdown(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheCreate, model, dayMs, tokens.contextTier);
       dayCost += bd.totalCost;
       dailyModelCost[model] = (dailyModelCost[model] || 0) + bd.totalCost;
       dailyTotal.inputCost += bd.inputCost;
@@ -523,7 +601,7 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
       dailyTotal.cacheReadCost += bd.cacheReadCost;
       dailyTotal.cacheCreationCost += bd.cacheCreationCost;
       dailyTotal.totalCost += bd.totalCost;
-      const p = getCopilotPricing(model, dayMs) || COPILOT_FALLBACK;
+      const p = getCopilotPricing(model, dayMs, 0, tokens.contextTier) || COPILOT_FALLBACK;
       dailySavings += tokens.cacheRead * (p.input - p.cachedInput) / PER_MIL;
       if (p.estimate) dailyEstimated += bd.totalCost;
       dailyCoveredTokens += tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
