@@ -122,6 +122,8 @@ This parses your `~/.claude/projects/` and `~/.codex/sessions/` data, analyzes y
 ```bash
 codelens-ai                        # default: last 30 days, port 3457
 codelens-ai --days 90              # look back 90 days
+codelens-ai --since 2026-06-01 --until 2026-06-30   # a fixed date range instead of a rolling window
+codelens-ai --tz America/New_York  # timezone for day bucketing (default: local time)
 codelens-ai --port 8080            # custom port
 codelens-ai --host 0.0.0.0         # expose the dashboard beyond localhost (off by default)
 codelens-ai --no-open              # don't auto-open browser
@@ -156,12 +158,30 @@ codelens-ai blocks -t max          # warn against a token limit (a number, or "m
 codelens-ai mcp                    # serve usage & ROI reports as MCP tools over stdio
 ```
 
+### Date ranges & timezones
+
+By default the window is a rolling **`--days N`** lookback (30 by default). For a fixed calendar
+range instead, use **`--since YYYY-MM-DD`** / **`--until YYYY-MM-DD`** (both inclusive) — mutually
+exclusive with `--days`. **`--tz <IANA zone>`** (e.g. `America/New_York`, `Asia/Kolkata`) controls
+which calendar day a given moment falls into for every day-bucketed number (daily/weekly/monthly
+tables, the dashboard timeline, billing blocks); it defaults to the machine's local time and works
+with either `--days` or `--since`/`--until`. All three apply across every analysis command
+(dashboard, `report`, `daily`/`weekly`/`monthly`, `blocks`, `mcp`).
+
+```bash
+codelens-ai report --since 2026-06-01 --until 2026-06-30       # exactly June, whatever timezone you're in
+codelens-ai daily --since 2026-06-01 --until 2026-06-30 --tz America/New_York
+```
+
+Switching between `--days`, `--since`/`--until`, or `--tz` never forces a re-parse of unrelated
+history — each distinct window is its own cache entry, so re-running the same range is instant.
+
 ### Usage tables (`codelens-ai daily|weekly|monthly`)
 
 ccusage-style token accounting over the same analyzed window — Input / Output / Cache Create /
 Cache Read / Total / Cost per period — plus the two ROI columns a pure usage tool can't give you:
-**Commits** and **$/Commit**. All the shared analysis flags (`--days`, `--source`, `--project`,
-`--claude-dir`, `--codex-dir`) apply.
+**Commits** and **$/Commit**. All the shared analysis flags (`--days` or `--since`/`--until`,
+`--tz`, `--source`, `--project`, `--claude-dir`, `--codex-dir`) apply.
 
 ### Billing blocks (`codelens-ai blocks`)
 

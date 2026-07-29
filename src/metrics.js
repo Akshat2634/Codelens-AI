@@ -1,6 +1,7 @@
 import { getModelFamily as getClaudeModelFamily } from './claude-parser.js';
 import { getCodexModelFamily } from './codex-parser.js';
 import { commitLinesForSession } from './correlator.js';
+import { dayKeyInZone, resolveWindow } from './window.js';
 
 // Family resolution across agent sources: Claude names first (opus/sonnet/
 // haiku/fable), then OpenAI Codex names (gpt-5-codex/gpt-5/o-series/...).
@@ -98,7 +99,7 @@ function computeTokenAnalytics(correlatedSessions, lineSurvival, totalCommits, t
   };
 }
 
-function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics) {
+function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics, tz = null) {
   if (!correlatedSessions.length) return null;
 
   const now = Date.now();
@@ -122,10 +123,7 @@ function buildWeeklyNarrative(correlatedSessions, _autonomyMetrics) {
   // exact commit timestamps against day-bucketed cost would count a boundary
   // commit in a week that excludes its spend. This is also costByPeriod's
   // rule, so "this week" is one population everywhere it's displayed.
-  const dayKey = (ms) => {
-    const d = new Date(ms);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
+  const dayKey = (ms) => dayKeyInZone(ms, tz);
   const dayInRange = (dateStr, startMs, endMs) => {
     const t = Date.parse(dateStr + 'T12:00:00');
     return t >= startMs && t < endMs;
@@ -806,13 +804,13 @@ function capitalise(s) {
   return special[s] || s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days, planConfig = null) {
-  // Same calendar cutoff as the parser and git-analyzer — used to clamp
+export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo, days, planConfig = null, since = null, until = null, tz = null) {
+  // Same window resolution as the parser and git-analyzer — used to clamp
   // whole-session fields (startTime) that precede the window when a session
-  // was resumed inside it.
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - days);
-  const cutoffMs = cutoffDate.getTime();
+  // was resumed inside it. `days` here is resolved (a derived span in range
+  // mode) for display/proration below — the raw possibly-null param is never
+  // used directly past this point.
+  const { cutoffMs, days: resolvedDays } = resolveWindow({ days, since, until, tz });
 
   // ---- Summary ----
   const totalCost = correlatedSessions.reduce((s, c) => s + c.cost.totalCost, 0);
@@ -855,10 +853,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     }
     return dailyMap.get(date);
   };
-  const toDateStr = (ts) => {
-    const d = new Date(ts);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
+  const toDateStr = (ts) => dayKeyInZone(ts, tz);
   for (const session of correlatedSessions) {
     // Fallback day for sessions with no per-day data, clamped so a straddling
     // session can't create timeline days before the analyzed window.
@@ -1259,11 +1254,11 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   // of value extracted, NOT realized savings (subscription users pay the flat fee
   // regardless of usage).
   const plan = planConfig ? (() => {
-    const windowCost = planConfig.monthlyCost * (days / 30);
+    const windowCost = planConfig.monthlyCost * (resolvedDays / 30);
     return {
       name: planConfig.name,
       monthlyCost: planConfig.monthlyCost,
-      windowDays: days,
+      windowDays: resolvedDays,
       windowCost: Math.round(windowCost * 100) / 100,
       apiEquivalentCost: Math.round(totalCost * 100) / 100,
       utilizationRatio: windowCost > 0 ? Math.round((totalCost / windowCost) * 100) / 100 : null,
@@ -1323,12 +1318,14 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
 
   const insights = generateInsights(summary, correlatedSessions, modelBreakdown, sessionBuckets, tokenAnalytics, autonomyMetrics);
 
-  const weeklyNarrative = buildWeeklyNarrative(correlatedSessions, autonomyMetrics);
+  const weeklyNarrative = buildWeeklyNarrative(correlatedSessions, autonomyMetrics, tz);
 
   return {
     meta: {
       generatedAt: new Date().toISOString(),
-      daysAnalyzed: days,
+      daysAnalyzed: resolvedDays,
+      since,
+      until,
       // Clamped to the window cutoff — a session resumed inside the window
       // carries a pre-window startTime, but every number displayed under this
       // date range excludes that period (mirror of the endTime-based endDate).

@@ -18,6 +18,7 @@ import { createServer } from './server.js';
 import { installStatusline, runStatusline } from './statusline.js';
 import { buildPeriodTable, periodTableJson, renderPeriodTableText } from './tables.js';
 import { checkForUpdate } from './update-check.js';
+import { resolveWindow, validateDateStr, validateTz } from './window.js';
 
 const { version: VERSION } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8')
@@ -146,7 +147,7 @@ export function explodeWorkspaceSessions(sessions, depth = NESTED_REPO_DEPTH) {
   return out;
 }
 
-async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null, offline = false) {
+async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null, offline = false, since = null, until = null, tz = null) {
   // Step 0: Load the external pricing overlay before any costing happens, so
   // models the hardcoded tables don't know get a real published rate instead of
   // the Sonnet estimate. Cached to disk (~24h TTL); --refresh forces a refetch,
@@ -157,15 +158,16 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
 
   // Step 1: Parse sessions from every agent source (with caching)
   const startParse = Date.now();
-  // Same cutoff computation as the parsers, so the cache staleness scan and
+  // Same window resolution as the parsers, so the cache staleness scan and
   // the parsers agree on which files are inside the lookback window.
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - days);
-  const cutoffMs = cutoffDate.getTime();
-  // cutoffDay keys the cache to the day it was built: sessions are clipped to
-  // the rolling window at parse time, so yesterday's cache would serve
-  // yesterday's clipping. Costs one full re-parse per day.
-  const cacheOptions = { days, project: project || null, claudeDir, codexDir, cutoffDay: cutoffDate.toDateString() };
+  const { cutoffMs, untilMs, cutoffDay } = resolveWindow({ days, since, until, tz });
+  // cutoffDay keys the cache to the window it was built for: in days-mode it
+  // changes daily (the rolling window moves), in range-mode it's the
+  // since:until:tz triple — either way, a stale key forces one re-parse.
+  // since/until/tz are separate fingerprint fields (below) so a coincidental
+  // `days` match (a range that happens to span the same day-count as some
+  // rolling window) can never serve the wrong cache.
+  const cacheOptions = { days, project: project || null, claudeDir, codexDir, cutoffDay, since, until, tz };
 
   if (forceRefresh) {
     deleteCache(cacheOptions);
@@ -173,7 +175,10 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   }
 
   const cached = forceRefresh ? null : loadCache(cacheOptions);
-  const inWindow = (s) => new Date(s.endTime || s.startTime).getTime() >= cutoffMs;
+  const inWindow = (s) => {
+    const t = new Date(s.endTime || s.startTime).getTime();
+    return t >= cutoffMs && (!untilMs || new Date(s.startTime).getTime() <= untilMs);
+  };
 
   // Each source keeps its own file index and staleness scan, so a fresh Codex
   // rollout doesn't force a full Claude re-parse (and vice versa) — the
@@ -207,13 +212,13 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   }
 
   if (!claudeSessions) {
-    const result = await parseAllProjects(claudeDir, days, project);
+    const result = await parseAllProjects(claudeDir, days, project, since, until, tz);
     claudeSessions = result.sessions;
     claudeIndex = result.fileIndex;
     if (!cached) parseNotes.push(`claude: ${claudeSessions.length} parsed`);
   }
   if (!codexSessions) {
-    const result = await parseCodexSessions(codexDir, days, project);
+    const result = await parseCodexSessions(codexDir, days, project, since, until, tz);
     codexSessions = result.sessions;
     codexIndex = result.fileIndex;
     if (!cached) parseNotes.push(`codex: ${codexSessions.length} parsed`);
@@ -261,7 +266,7 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   for (const repoPath of repoPathsSet) {
     const analysisPath = aliasMap.get(repoPath) || repoPath;
     if (!(analysisPath in analysisCache)) {
-      analysisCache[analysisPath] = analyzeGitRepo(analysisPath, days);
+      analysisCache[analysisPath] = analyzeGitRepo(analysisPath, days, since, until);
     }
     commitsByRepo[repoPath] = analysisCache[analysisPath];
   }
@@ -313,7 +318,7 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   // per-agent view it also includes commits the OTHER agent claimed — from this
   // agent's ROI perspective those are code it didn't write.
   const mkView = (subset, planConfig, sourceName, viewOrganic, otherAgentClaimed = 0) => {
-    const p = computeMetrics(subset, viewOrganic, commitsByRepo, days, planConfig);
+    const p = computeMetrics(subset, viewOrganic, commitsByRepo, days, planConfig, since, until, tz);
     p.meta.source = sourceName;
     p.meta.sources = sourceCounts;
     p.meta.gitUser = gitUser;
@@ -372,7 +377,13 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
 
 // Analysis flags shared by the dashboard (default) command and `report`.
 const addAnalysisOptions = (cmd) => cmd
-  .option('-d, --days <number>', 'number of days to look back', '30')
+  // No default: undefined means "the user didn't type --days", which is how
+  // mutual exclusivity with --since/--until is detected below — a literal
+  // '30' default would be indistinguishable from an explicit --days 30.
+  .option('-d, --days <number>', 'number of days to look back (default 30; mutually exclusive with --since/--until)')
+  .option('--since <date>', 'analyze from this date (YYYY-MM-DD), inclusive — mutually exclusive with --days')
+  .option('--until <date>', 'analyze until this date (YYYY-MM-DD), inclusive — mutually exclusive with --days')
+  .option('--tz <zone>', 'IANA timezone for day bucketing, e.g. America/New_York (default: local time)')
   .option('--project <name>', 'filter to specific project')
   .option('--refresh', 'force full re-parse, ignore cache')
   .option('--claude-dir <path>', 'override path to Claude Code projects directory (for testing/CI)')
@@ -388,12 +399,40 @@ const addAnalysisOptions = (cmd) => cmd
 // every command shares (invokedAs stamping, statusline quickstats). Returns
 // everything the calling command needs to render or serve.
 async function runAnalysis(opts) {
-  const days = parseInt(opts.days, 10);
+  const hasRange = opts.since !== undefined || opts.until !== undefined;
+  if (opts.days !== undefined && hasRange) {
+    console.error(`  ${icon.err} ${c.red}--days cannot be combined with --since/--until.${c.reset}`);
+    process.exit(1);
+  }
+  for (const [value, flag] of [[opts.since, '--since'], [opts.until, '--until']]) {
+    if (value === undefined) continue;
+    const err = validateDateStr(value, flag);
+    if (err) {
+      console.error(`  ${icon.err} ${c.red}${err}${c.reset}`);
+      process.exit(1);
+    }
+  }
+  if (opts.since && opts.until && opts.until < opts.since) {
+    console.error(`  ${icon.err} ${c.red}--until (${opts.until}) is before --since (${opts.since}).${c.reset}`);
+    process.exit(1);
+  }
+  const tzError = validateTz(opts.tz);
+  if (tzError) {
+    console.error(`  ${icon.err} ${c.red}${tzError}${c.reset}`);
+    process.exit(1);
+  }
+
   // Validate before any work: a bad --days would otherwise clobber the cache
   // with days:NaN and die later with a cryptic "Invalid time value".
-  if (!/^\d+$/.test(String(opts.days)) || days < 1) {
-    console.error(`  ${icon.err} ${c.red}--days must be a positive integer, got "${opts.days}".${c.reset}`);
-    process.exit(1);
+  let days = 30;
+  if (opts.days !== undefined) {
+    days = parseInt(opts.days, 10);
+    if (!/^\d+$/.test(String(opts.days)) || days < 1) {
+      console.error(`  ${icon.err} ${c.red}--days must be a positive integer, got "${opts.days}".${c.reset}`);
+      process.exit(1);
+    }
+  } else if (hasRange) {
+    days = null; // resolved from since/until downstream (window.js:resolveWindow)
   }
 
   // Optional subscription "effective cost" mode, per agent.
@@ -446,7 +485,7 @@ async function runAnalysis(opts) {
     console.error(`  ${icon.warn} ${c.yellow}--codex-dir does not exist:${c.reset} ${codexDir}`);
   }
 
-  const payloads = await buildPayload(claudeDir, codexDir, days, opts.project, opts.refresh, planConfigs, sourceFilter, !!opts.offline);
+  const payloads = await buildPayload(claudeDir, codexDir, days, opts.project, opts.refresh, planConfigs, sourceFilter, !!opts.offline, opts.since, opts.until, opts.tz);
   if (payloads) {
     const invokedAs = path.basename(process.argv[1]);
     for (const p of Object.values(payloads)) {
@@ -481,7 +520,7 @@ async function runAnalysis(opts) {
       }, { claudeDir, codexDir });
     }
   }
-  return { payloads, days, claudeDir, codexDir, planConfigs, sourceFilter };
+  return { payloads, days, claudeDir, codexDir, planConfigs, sourceFilter, since: opts.since, until: opts.until, tz: opts.tz };
 }
 
 // The deprecation nudge for the legacy claude-roi alias plus the version line.
@@ -501,9 +540,15 @@ function printBanner(commandLabel = '', { big = false } = {}) {
   progress(`${icon.dot} ${c.bold}${c.cyan}codelens-ai${commandLabel}${c.reset} v${VERSION}\n`);
 }
 
-function printNoSessions(sourceFilter, days, claudeDir, codexDir) {
+// "the last 30 days" or "2026-06-01 to 2026-06-30" — used everywhere a plain
+// `days` count would otherwise print as "null days" in range mode.
+function describeWindow(days, since, until) {
+  return since && until ? `${since} to ${until}` : `the last ${days} days`;
+}
+
+function printNoSessions(sourceFilter, days, claudeDir, codexDir, since, until) {
   if (sourceFilter) {
-    progress(`  ${icon.warn} ${c.yellow}No ${sourceFilter} sessions found in the last ${days} days.${c.reset}`);
+    progress(`  ${icon.warn} ${c.yellow}No ${sourceFilter} sessions found in ${describeWindow(days, since, until)}.${c.reset}`);
     progress(`    Drop --source to analyze every agent, or check ${sourceFilter === 'claude' ? claudeDir : codexDir}`);
   } else {
     progress(`  ${icon.warn} ${c.yellow}No AI coding agent sessions found.${c.reset}`);
@@ -520,10 +565,10 @@ async function runDashboard(opts) {
   }
   printBanner('', { big: !opts.json && process.stdout.isTTY === true });
 
-  const { payloads, days, claudeDir, codexDir, planConfigs, sourceFilter } = await runAnalysis(opts);
+  const { payloads, days, claudeDir, codexDir, planConfigs, sourceFilter, since, until, tz } = await runAnalysis(opts);
 
   if (!payloads) {
-    printNoSessions(sourceFilter, days, claudeDir, codexDir);
+    printNoSessions(sourceFilter, days, claudeDir, codexDir, since, until);
     if (opts.json) {
       // Still emit a parseable document: the warning went to stderr above.
       process.stdout.write('null', () => process.exit(0));
@@ -543,7 +588,7 @@ async function runDashboard(opts) {
 
   // Start server — pass a rebuild function so /api/refresh can re-run the pipeline
   const rebuild = async () => {
-    const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline);
+    const fresh = await buildPayload(claudeDir, codexDir, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline, since, until, tz);
     if (fresh) {
       for (const p of Object.values(fresh)) p.meta.invokedAs = payload.meta.invokedAs;
     }
@@ -583,9 +628,9 @@ async function runReport(opts) {
   progress = console.error;
   printBanner(' report');
 
-  const { payloads, days, claudeDir, codexDir, sourceFilter } = await runAnalysis(opts);
+  const { payloads, days, claudeDir, codexDir, sourceFilter, since, until, tz } = await runAnalysis(opts);
   if (!payloads) {
-    printNoSessions(sourceFilter, days, claudeDir, codexDir);
+    printNoSessions(sourceFilter, days, claudeDir, codexDir, since, until);
     process.exit(0);
   }
 
@@ -621,9 +666,9 @@ async function runTable(period, opts) {
     process.exit(1);
   }
 
-  const { payloads, days, claudeDir, codexDir, sourceFilter } = await runAnalysis(opts);
+  const { payloads, days, claudeDir, codexDir, sourceFilter, since, until, tz } = await runAnalysis(opts);
   if (!payloads) {
-    printNoSessions(sourceFilter, days, claudeDir, codexDir);
+    printNoSessions(sourceFilter, days, claudeDir, codexDir, since, until);
     if (opts.json) {
       process.stdout.write('null', () => process.exit(0));
       return;
@@ -632,23 +677,23 @@ async function runTable(period, opts) {
   }
 
   const payload = payloads.all;
-  // Same cutoff the pipeline used — clamps fallback days for sessions that
-  // started before the window (mirrors the metrics daily timeline).
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days);
+  // payload.meta.startDate is already the correctly-resolved window start
+  // (days, or --since/--until/--tz) — reusing it avoids re-deriving a cutoff
+  // from a bare day-count, which breaks in range mode (days is null there).
   const table = buildPeriodTable(payload.sessions, {
     period,
     startOfWeek: opts.startOfWeek,
-    cutoffMs: cutoff.getTime(),
+    cutoffMs: payload.meta.startDate ? Date.parse(payload.meta.startDate) : 0,
+    tz,
   });
 
   if (opts.json) {
-    const doc = periodTableJson(table, { source: payload.meta.source, daysAnalyzed: days });
+    const doc = periodTableJson(table, { source: payload.meta.source, daysAnalyzed: payload.meta.daysAnalyzed });
     process.stdout.write(JSON.stringify(doc, null, 2), () => process.exit(0));
     return;
   }
   const src = payload.meta.source !== 'all' ? `, ${payload.meta.source} only` : '';
-  const title = `\n  ${c.bold}${c.cyan}Usage by ${period === 'daily' ? 'day' : period === 'weekly' ? 'week' : 'month'}${c.reset} ${c.dim}· last ${days} days${src}${c.reset}\n`;
+  const title = `\n  ${c.bold}${c.cyan}Usage by ${period === 'daily' ? 'day' : period === 'weekly' ? 'week' : 'month'}${c.reset} ${c.dim}· ${describeWindow(days, since, until)}${src}${c.reset}\n`;
   process.stdout.write(`${title}\n${renderPeriodTableText(table, { breakdown: opts.breakdown })}\n\n`, () => process.exit(0));
 }
 
@@ -674,9 +719,9 @@ async function runBlocks(opts) {
     }
   }
 
-  const { payloads, days, claudeDir, codexDir, sourceFilter } = await runAnalysis(opts);
+  const { payloads, days, claudeDir, codexDir, sourceFilter, since, until, tz } = await runAnalysis(opts);
   if (!payloads) {
-    printNoSessions(sourceFilter, days, claudeDir, codexDir);
+    printNoSessions(sourceFilter, days, claudeDir, codexDir, since, until);
     if (opts.json) {
       process.stdout.write('null', () => process.exit(0));
       return;
@@ -689,12 +734,12 @@ async function runBlocks(opts) {
   if (opts.recent) result = filterRecentBlocks(result, 3);
 
   if (opts.json) {
-    const doc = blocksJson(result, { source: payload.meta.source, daysAnalyzed: days });
+    const doc = blocksJson(result, { source: payload.meta.source, daysAnalyzed: payload.meta.daysAnalyzed });
     process.stdout.write(JSON.stringify(doc, null, 2), () => process.exit(0));
     return;
   }
   const src = payload.meta.source !== 'all' ? `, ${payload.meta.source} only` : '';
-  const scope = opts.active ? 'active 5-hour block' : opts.recent ? '5-hour blocks · last 3 days' : `5-hour blocks · last ${days} days`;
+  const scope = opts.active ? 'active 5-hour block' : opts.recent ? '5-hour blocks · last 3 days' : `5-hour blocks · ${describeWindow(days, since, until)}`;
   const title = `\n  ${c.bold}${c.cyan}Billing blocks${c.reset} ${c.dim}· ${scope}${src}${c.reset}\n`;
   process.stdout.write(`${title}${renderBlocksText(result, { active: opts.active })}\n\n`, () => process.exit(0));
 }
@@ -727,7 +772,7 @@ async function runMcp(opts) {
     });
   const initialLoad = load();
   const ctx = {
-    days: parseInt(opts.days, 10),
+    tz: opts.tz || null,
     ready: () => initialLoad,
     getPayloads: () => payloads,
     getError: () => lastError?.message,
@@ -747,7 +792,7 @@ async function runMcp(opts) {
     } else {
       // Still serve: an MCP client has already spawned us, so exiting here reads
       // as a broken server. Tools answer with a clear "no sessions" message.
-      printNoSessions(initial.sourceFilter, initial.days, initial.claudeDir, initial.codexDir);
+      printNoSessions(initial.sourceFilter, initial.days, initial.claudeDir, initial.codexDir, initial.since, initial.until);
     }
   }
   progress(`  ${icon.ok} ${c.green}MCP server ready${c.reset} ${c.dim}── ${payloads ? payloads.all.sessions.length : 0} sessions loaded, serving on stdio${c.reset}`);
@@ -834,7 +879,7 @@ async function main() {
   const ANALYSIS_SUBCOMMANDS = new Set(['report', 'daily', 'weekly', 'monthly', 'blocks', 'mcp']);
   program.hook('preSubcommand', (thisCommand, subcommand) => {
     if (!ANALYSIS_SUBCOMMANDS.has(subcommand.name())) return;
-    for (const key of ['days', 'project', 'refresh', 'claudeDir', 'codexDir', 'source', 'offline', 'plan', 'planCost', 'codexPlan', 'codexPlanCost']) {
+    for (const key of ['days', 'since', 'until', 'tz', 'project', 'refresh', 'claudeDir', 'codexDir', 'source', 'offline', 'plan', 'planCost', 'codexPlan', 'codexPlanCost']) {
       if (thisCommand.getOptionValueSource(key) === 'cli') {
         subcommand.setOptionValueWithSource(key, thisCommand.getOptionValue(key), 'cli');
       }

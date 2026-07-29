@@ -116,7 +116,8 @@ function pickView(payloads, source) {
  * Execute one tool call against the current payloads.
  *   ctx.getPayloads() — returns the current { all, claude?, codex? } payloads (or null when no sessions)
  *   ctx.refresh()     — async; re-runs the pipeline and returns fresh payloads (or null)
- *   ctx.days          — the analyzed lookback window in days
+ *   ctx.tz            — the --tz zone in effect, or null (day count comes from
+ *                        view.meta.daysAnalyzed, already resolved for --days or --since/--until)
  * Pure of transport concerns, so tests can drive it directly.
  */
 export async function callMcpTool(name, args, ctx) {
@@ -133,14 +134,14 @@ export async function callMcpTool(name, args, ctx) {
     if (!fresh) return err(ctx.getError?.() ?? 'Refresh completed, but no AI coding agent sessions were found in the analyzed window.');
     return json({
       refreshed: true,
-      daysAnalyzed: ctx.days,
+      daysAnalyzed: fresh.all.meta.daysAnalyzed,
       sessions: fresh.all.sessions.length,
       sources: fresh.all.meta.sources,
     });
   }
 
   const payloads = ctx.getPayloads();
-  if (!payloads) return err(ctx.getError?.() ?? `No AI coding agent sessions found in the last ${ctx.days} days. Nothing to report.`);
+  if (!payloads) return err(ctx.getError?.() ?? 'No AI coding agent sessions found in the analyzed window. Nothing to report.');
   const view = pickView(payloads, args.source);
   if (!view) return err(`No ${args.source} sessions in the analyzed window — that per-agent view was not computed. Use source "all".`);
 
@@ -150,20 +151,23 @@ export async function callMcpTool(name, args, ctx) {
 
     case 'usage': {
       const period = args.period || 'daily';
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - ctx.days);
+      // view.meta.startDate is already the correctly-resolved window start
+      // (days, or --since/--until/--tz) — reusing it avoids re-deriving a
+      // cutoff from a bare day-count, which breaks in range mode (no single
+      // "N days ago" exists for an explicit date range).
       const table = buildPeriodTable(view.sessions, {
         period,
         startOfWeek: args.startOfWeek || 'monday',
-        cutoffMs: cutoff.getTime(),
+        cutoffMs: view.meta.startDate ? Date.parse(view.meta.startDate) : 0,
+        tz: ctx.tz,
       });
-      return json(periodTableJson(table, { source: view.meta.source, daysAnalyzed: ctx.days }));
+      return json(periodTableJson(table, { source: view.meta.source, daysAnalyzed: view.meta.daysAnalyzed }));
     }
 
     case 'blocks': {
       let result = buildBlocks(view.sessions);
       if (args.recent) result = filterRecentBlocks(result, 3);
-      return json(blocksJson(result, { source: view.meta.source, daysAnalyzed: ctx.days }));
+      return json(blocksJson(result, { source: view.meta.source, daysAnalyzed: view.meta.daysAnalyzed }));
     }
 
     case 'sessions': {
@@ -182,7 +186,7 @@ export async function callMcpTool(name, args, ctx) {
           linesAdded: s.linesAdded,
           grade: s.grade,
         }));
-      return json({ daysAnalyzed: ctx.days, source: view.meta.source, total: view.sessions.length, sessions: rows });
+      return json({ daysAnalyzed: view.meta.daysAnalyzed, source: view.meta.source, total: view.sessions.length, sessions: rows });
     }
 
     case 'projects': {
@@ -198,7 +202,7 @@ export async function callMcpTool(name, args, ctx) {
           linesAdded: p.linesAdded,
           mainBranchPct: p.mainBranchPct,
         }));
-      return json({ daysAnalyzed: ctx.days, source: view.meta.source, projects: rows });
+      return json({ daysAnalyzed: view.meta.daysAnalyzed, source: view.meta.source, projects: rows });
     }
 
     default:

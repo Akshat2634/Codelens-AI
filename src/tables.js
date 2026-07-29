@@ -4,6 +4,8 @@
 // (commits, $/commit) that a pure token accounting tool can't provide.
 // Pure functions over the metrics payload's sessions; no parsing or git here.
 
+import { dayKeyInZone } from './window.js';
+
 const c = {
   reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m',
   green: '\x1b[32m', yellow: '\x1b[33m', cyan: '\x1b[36m',
@@ -12,15 +14,21 @@ const c = {
 
 const DAY_MS = 24 * 3600 * 1000;
 
-// Local calendar day, matching the parsers' localDayStr / metrics' toDateStr —
+// Local calendar day, matching the parsers' dayKeyInZone / metrics' toDateStr —
 // tables must bucket the same way or their totals drift from the dashboard's.
+// No `tz` here deliberately: this is pure day-string arithmetic (see
+// weekStartOf below), never a real instant→zone conversion, so the server's
+// local zone is always the right (and only) answer for it.
 function toDateStr(ts) {
   const d = new Date(ts);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 // Week-start date (YYYY-MM-DD) containing the given day. Noon-anchored so DST
-// transitions can't step over or repeat a date.
+// transitions can't step over or repeat a date. Operates only on the date
+// *string* (never re-derives from a real timestamp), so it's correct
+// regardless of --tz — the string was already bucketed in the right zone by
+// whoever produced it.
 function weekStartOf(dateStr, startOfWeek) {
   const t = Date.parse(dateStr + 'T12:00:00');
   const dow = new Date(t).getDay(); // 0 = Sunday
@@ -51,7 +59,10 @@ function emptyRow(key) {
 //   startOfWeek: 'monday' (default) | 'sunday' — weekly only
 //   cutoffMs: lookback start; clamps the fallback day for sessions without
 //             per-day usage data so they can't create pre-window rows.
-export function buildPeriodTable(sessions, { period = 'daily', startOfWeek = 'monday', cutoffMs = 0 } = {}) {
+//   tz: IANA zone for that same fallback day (default: local time) — sessions
+//       *with* dailyUsage are unaffected, since those keys are already
+//       tz-bucketed by the parser.
+export function buildPeriodTable(sessions, { period = 'daily', startOfWeek = 'monday', cutoffMs = 0, tz = null } = {}) {
   const keyOf = periodKeyFn(period, startOfWeek);
   const rows = new Map();
   const ensure = (key) => {
@@ -62,7 +73,7 @@ export function buildPeriodTable(sessions, { period = 'daily', startOfWeek = 'mo
   for (const session of sessions) {
     // Same fallback rule as the metrics daily timeline: a session without
     // per-day data lands whole on its (window-clamped) start day.
-    const startDate = toDateStr(Math.max(new Date(session.startTime).getTime(), cutoffMs));
+    const startDate = dayKeyInZone(Math.max(new Date(session.startTime).getTime(), cutoffMs), tz);
     const usage = session.dailyUsage && Object.keys(session.dailyUsage).length > 0
       ? session.dailyUsage
       : {

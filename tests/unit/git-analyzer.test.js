@@ -429,3 +429,24 @@ test('findNestedGitRepos still finds a real repo under an unrelated "worktrees"-
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('analyzeGitRepo --since/--until: excludes commits authored before --since or after --until', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'git-analyzer-until-'));
+  try {
+    const dir = path.join(root, 'repo');
+    mkdirSync(dir, { recursive: true });
+    execSync('git init -q -b main', { cwd: dir });
+    execSync('git config user.email a@b.com', { cwd: dir });
+    execSync('git config user.name A', { cwd: dir });
+
+    gitCommit(dir, 'before.txt', 'a\n', 'before range', '2026-05-15T12:00:00Z');
+    gitCommit(dir, 'in-range.txt', 'b\n', 'in range', '2026-06-15T12:00:00Z');
+    gitCommit(dir, 'after.txt', 'c\n', 'after range', '2026-07-15T12:00:00Z');
+
+    const { commits } = analyzeGitRepo(dir, null, '2026-06-01', '2026-06-30');
+    assert.equal(commits.length, 1, 'only the June commit survives the --since/--until filter');
+    assert.equal(commits[0].subject, 'in range');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
