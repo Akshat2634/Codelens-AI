@@ -27,7 +27,7 @@
     --line: #2A251D; --line2: #211D16;
     --ink: #F4F1EA; --ink2: #A9A296; --ink3: #746D60;
     --amber: #C4840B; --amber-hi: #E8A93C; --green: #2E9E4F; --red: #E66767;
-    --blue: #3987E5; --purple: #9085E9; --cyan: #1FA97C; --pink: #D55181;
+    --blue: #3987E5; --purple: #9085E9; --cyan: #1FA97C; --pink: #D55181; --magenta: #B253BC;
     --grade-a: #2E9E4F; --grade-b: #3987E5; --grade-c: #C4840B; --grade-d: #D95926; --grade-f: #E66767;
     --glass: rgba(22, 20, 17, 0.78); --glass-line: rgba(244, 241, 234, 0.08);
     --accent: #C4840B;
@@ -41,7 +41,7 @@
     --line: #D9D3C6; --line2: #E8E3D8;
     --ink: #1B1811; --ink2: #59534A; --ink3: #8B8375;
     --amber: #B57603; --amber-hi: #A56A00; --green: #20813C; --red: #D64444;
-    --blue: #2A78D6; --purple: #5D50C9; --cyan: #14936B; --pink: #C74A74;
+    --blue: #2A78D6; --purple: #5D50C9; --cyan: #14936B; --pink: #C74A74; --magenta: #94419C;
     --grade-a: #20813C; --grade-b: #2A78D6; --grade-c: #B57603; --grade-d: #C24E1D; --grade-f: #D64444;
     --glass: rgba(253, 252, 250, 0.85); --glass-line: rgba(27, 24, 17, 0.09);
     --shadow: 0 18px 40px -20px rgba(63, 55, 40, 0.28);
@@ -413,7 +413,7 @@
     const T = {
       blue: cssVar('--blue'), purple: cssVar('--purple'), cyan: cssVar('--cyan'),
       orange: cssVar('--amber'), green: cssVar('--green'), pink: cssVar('--pink'),
-      amberHi: cssVar('--amber-hi'),
+      magenta: cssVar('--magenta'),
       red: cssVar('--red'), muted: cssVar('--ink3'), secondary: cssVar('--ink2'),
       grid: cssVar('--line2'), card: cssVar('--card'),
     };
@@ -504,7 +504,10 @@
       } catch (e) { console.warn('chart burn:', e.message); }
     }
 
-    const famColor = { opus: T.purple, sonnet: T.blue, haiku: T.green, fable: T.pink, codex: T.cyan, gpt: T.orange, 'o-series': T.red, gemini: T.amberHi, unknown: T.muted };
+    // gemini gets its own hue rather than a lighter amber: as a shade of the
+    // gpt amber it was indistinguishable from it (ΔE 4.4 in light), and Copilot
+    // is exactly the source that puts Gemini and GPT in one chart.
+    const famColor = { opus: T.purple, sonnet: T.blue, haiku: T.green, fable: T.pink, codex: T.cyan, gpt: T.orange, 'o-series': T.red, gemini: T.magenta, unknown: T.muted };
     const models = displayedModels(v);
     const fams = Object.keys(models).filter((k) => models[k].cost > 0);
 
@@ -1313,7 +1316,7 @@
   function renderModels() {
     const v = view();
     const sum = v.summary;
-    const famColorVar = { opus: 'var(--purple)', sonnet: 'var(--blue)', haiku: 'var(--green)', fable: 'var(--pink)', codex: 'var(--cyan)', gpt: 'var(--amber)', 'o-series': 'var(--red)', gemini: 'var(--amber-hi)', unknown: 'var(--ink3)' };
+    const famColorVar = { opus: 'var(--purple)', sonnet: 'var(--blue)', haiku: 'var(--green)', fable: 'var(--pink)', codex: 'var(--cyan)', gpt: 'var(--amber)', 'o-series': 'var(--red)', gemini: 'var(--magenta)', unknown: 'var(--ink3)' };
     const models = displayedModels(v);
     const fams = Object.keys(models).filter((k) => models[k].cost > 0).sort((a, b) => models[b].cost - models[a].cost);
     const famPcts = pctTo100(fams.map((fm) => models[fm].cost));

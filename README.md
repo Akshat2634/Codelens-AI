@@ -261,7 +261,7 @@ The dashboard includes:
 1. **Parses** JSONL session files from `~/.claude/projects/` (Claude Code), rollout files from `~/.codex/sessions/` (OpenAI Codex CLI — including `.jsonl.zst` archives on Node >= 22.15), and `events.jsonl` from `~/.copilot/session-state/` (GitHub Copilot CLI)
 2. **Analyzes** git history from each repo you've worked in with any agent, including `Co-authored-by` agent trailers on each commit. If a session starts in a workspace parent that contains multiple git repos, Codelens automatically discovers nested repos (up to three levels) and correlates the touched files with the right repo — no flag or configuration required.
 3. **Correlates** sessions to commits by file overlap and timing — all agents correlate together, so a commit is attributed to at most one session; a commit stamped `Co-authored-by: Claude/Codex/Copilot` is routed to the matching agent and counts as high-confidence attribution
-4. **Calculates** cost using each provider's published pricing (input, output, cache, and server-side web search when logged; Copilot reuses the underlying provider rates its models run on)
+4. **Calculates** cost using each provider's published pricing (input, output, cache, and server-side web search when logged; Copilot is priced from GitHub's own published per-token table — see _GitHub Copilot models_ below)
 5. **Serves** an interactive dashboard on localhost with per-agent views
 
 ### Caching

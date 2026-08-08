@@ -364,16 +364,30 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
     if (!session.endTime || ms > Date.parse(session.endTime)) session.endTime = ts;
   };
 
+  // A model's session TOTALS can be logged more than once in a single file: a
+  // build that emits two of the shutdown aliases below (session.end at the end
+  // of the conversation, session.shutdown at process exit), or a resumed
+  // session that appends a second shutdown record. Summing a re-log would
+  // silently DOUBLE the session's cost, so — exactly as codex-parser dedups
+  // re-logged usage — identity is the reported usage itself. Two genuinely
+  // different runs report different totals and both still count.
+  const seenModelUsage = new Set();
+
   // Accumulate one model's session-total usage into the model + daily buckets
   // and push a usageEvents record (one per model, stamped at the session-end
-  // day) for the 5-hour billing blocks / burn rate.
+  // day) for the 5-hour billing blocks / burn rate. Returns false when the
+  // record contributed nothing (all-zero, or a re-log already counted).
   const accumulateModelUsage = (model, u, dayMs, contextTier = null) => {
     const input = Math.max(0, Number(u.inputTokens ?? u.input_tokens ?? u.input ?? 0));
     const cacheRead = Math.max(0, Number(u.cacheReadTokens ?? u.cache_read_tokens ?? u.cacheReadInputTokens ?? u.cache_read_input_tokens ?? 0));
     const cacheCreate = Math.max(0, Number(u.cacheWriteTokens ?? u.cache_write_tokens ?? u.cacheCreationTokens ?? u.cache_creation_tokens ?? 0));
     const output = Math.max(0, Number(u.outputTokens ?? u.output_tokens ?? u.output ?? 0));
     const reasoning = Math.max(0, Number(u.reasoningTokens ?? u.reasoning_tokens ?? u.reasoningOutputTokens ?? 0));
-    if (input === 0 && cacheRead === 0 && cacheCreate === 0 && output === 0) return;
+    if (input === 0 && cacheRead === 0 && cacheCreate === 0 && output === 0) return false;
+
+    const usageKey = `${model}|${input}|${output}|${cacheRead}|${cacheCreate}|${reasoning}`;
+    if (seenModelUsage.has(usageKey)) return false;
+    seenModelUsage.add(usageKey);
 
     session.totalInputTokens += input;
     session.totalOutputTokens += output;
@@ -405,6 +419,7 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
         cost: calculateCopilotCost(input, output, cacheRead, cacheCreate, model, dayMs, normalizedTier),
       });
     }
+    return true;
   };
 
   for await (const line of eventLines(filePath)) {
@@ -452,16 +467,22 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
       // The authoritative usage record: modelMetrics keyed by model id.
       const metrics = data.modelMetrics || data.model_metrics || data.usage?.modelMetrics || data.metrics?.model;
       const shutdownMs = ts ? Date.parse(ts) : (session.endTime ? Date.parse(session.endTime) : Date.now());
-      if (metrics && typeof metrics === 'object') {
+      // Window clipping: a session-total record dated before the cutoff is not
+      // this window's spend. Keyed on the record, so it is decided once here
+      // rather than re-tested per model.
+      const inWindow = !cutoffMs || !Number.isFinite(shutdownMs) || shutdownMs >= cutoffMs;
+      if (metrics && typeof metrics === 'object' && inWindow) {
         for (const [model, m] of Object.entries(metrics)) {
           if (!m || typeof m !== 'object') continue;
           const usage = m.usage || m;
-          // Window clipping: a session-total record dated before the cutoff is
-          // not this window's spend.
-          if (cutoffMs && Number.isFinite(shutdownMs) && shutdownMs < cutoffMs) continue;
           const contextTier = m.contextTier || m.context_tier || usage.contextTier || usage.context_tier || data.contextTier || data.context_tier || data.context?.tier || sessionContextTier;
-          accumulateModelUsage(model, usage, shutdownMs, contextTier);
+          // A usage record was persisted, so this session's cost is KNOWN even
+          // if it is zero — that must stay distinct from a crashed session's
+          // unknown cost, so this is set regardless of the dedup below.
           sawShutdownUsage = true;
+          // Skip the request count too when the record was a re-log, otherwise
+          // the autopilot ratio inherits the same double-count as the tokens.
+          if (!accumulateModelUsage(model, usage, shutdownMs, contextTier)) continue;
           const reqs = m.requests || m.request;
           if (reqs && Number.isFinite(Number(reqs.count))) requestCount += Number(reqs.count);
         }
@@ -516,8 +537,9 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
       continue;
     }
 
-    if (type === 'subagent.started' || type === 'subagent.start' || type === 'agent.spawned' || type === 'subagent.completed') {
-      if (type.includes('start') || type.includes('spawn')) session.subagentTranscriptCount++;
+    // Count spawns only — a subagent's completion is the same subagent.
+    if (type === 'subagent.started' || type === 'subagent.start' || type === 'agent.spawned') {
+      session.subagentTranscriptCount++;
     }
 
     // assistant.turn_end / tool nested output / compaction / unknown: ignored.

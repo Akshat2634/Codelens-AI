@@ -182,6 +182,74 @@ test('parseCopilotSessions accumulates usage across multiple models in one shutd
   }
 });
 
+test('parseCopilotSessions counts a re-logged shutdown record once, not twice', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'copilot-'));
+  try {
+    // A build that emits BOTH shutdown aliases (session.end at end-of-turn,
+    // session.shutdown at process exit) repeats the same session TOTALS. Summing
+    // them would silently double the session's cost.
+    const usage = { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    writeSession(root, 'sess-relog', [
+      { type: 'session.start', timestamp: iso(3), data: { sessionId: 'sess-relog', cwd: CWD, model: 'gpt-5' } },
+      { type: 'user.message', timestamp: iso(3), data: { role: 'user', kind: 'plain', text: 'hi' } },
+      { type: 'session.shutdown', timestamp: iso(3), data: { modelMetrics: { 'gpt-5': { usage, requests: { count: 3 } } } } },
+      { type: 'session.end', timestamp: iso(3), data: { modelMetrics: { 'gpt-5': { usage, requests: { count: 3 } } } } },
+    ]);
+    const { sessions } = await parseCopilotSessions(root, 30, null);
+    const s = sessions[0];
+    assert.equal(s.totalInputTokens, 1000);
+    assert.equal(s.totalOutputTokens, 100);
+    // The request count feeds the autopilot ratio — it must not double either.
+    assert.equal(s.assistantMessageCount, 3);
+    assert.equal(s.usageEvents.length, 1);
+    assert.ok(!s.costZeroed);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('parseCopilotSessions still sums two shutdown records with genuinely different totals', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'copilot-'));
+  try {
+    // The dedup keys on the reported usage itself, so a resumed session whose
+    // second run did different work is counted in full — only verbatim
+    // re-logs collapse.
+    writeSession(root, 'sess-resume', [
+      { type: 'session.start', timestamp: iso(4), data: { sessionId: 'sess-resume', cwd: CWD, model: 'gpt-5' } },
+      { type: 'user.message', timestamp: iso(4), data: { role: 'user', kind: 'plain', text: 'run one' } },
+      { type: 'session.shutdown', timestamp: iso(4), data: { modelMetrics: { 'gpt-5': { usage: { inputTokens: 1000, outputTokens: 100 }, requests: { count: 2 } } } } },
+      { type: 'user.message', timestamp: iso(3), data: { role: 'user', kind: 'plain', text: 'run two' } },
+      { type: 'session.shutdown', timestamp: iso(3), data: { modelMetrics: { 'gpt-5': { usage: { inputTokens: 2500, outputTokens: 400 }, requests: { count: 3 } } } } },
+    ]);
+    const { sessions } = await parseCopilotSessions(root, 30, null);
+    const s = sessions[0];
+    assert.equal(s.totalInputTokens, 3500);
+    assert.equal(s.totalOutputTokens, 500);
+    assert.equal(s.assistantMessageCount, 5);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('parseCopilotSessions treats a zero-usage shutdown as known-$0, not unknown cost', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'copilot-'));
+  try {
+    // A persisted all-zero record means the session really spent nothing. That
+    // must stay distinct from a crashed session, whose cost is UNKNOWN.
+    writeSession(root, 'sess-zero', [
+      { type: 'session.start', timestamp: iso(2), data: { sessionId: 'sess-zero', cwd: CWD, model: 'gpt-5' } },
+      { type: 'user.message', timestamp: iso(2), data: { role: 'user', kind: 'plain', text: 'never answered' } },
+      { type: 'session.shutdown', timestamp: iso(2), data: { modelMetrics: { 'gpt-5': { usage: { inputTokens: 0, outputTokens: 0 }, requests: { count: 0 } } } } },
+    ]);
+    const { sessions } = await parseCopilotSessions(root, 30, null);
+    const s = sessions[0];
+    assert.equal(s.cost.totalCost, 0);
+    assert.ok(!s.costZeroed, 'a persisted zero-usage record is a known $0, so it stays gradeable');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('parseCopilotSessions reads cwd/branch from workspace.yaml when events omit them', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'copilot-'));
   try {

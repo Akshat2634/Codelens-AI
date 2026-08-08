@@ -73,7 +73,9 @@ function cacheFileFor(options = {}) {
 // 21: Copilot's published pricing table and recorded workspace/context tier are
 //     now parsed locally; re-price warm Copilot sessions instead of retaining
 //     the prior provider-fallback and default-context figures.
-const CACHE_VERSION = 21;
+// 22: Copilot re-logged shutdown records are deduped — a session cached under
+//     21 may hold double-counted tokens/cost, so it must be re-parsed.
+const CACHE_VERSION = 22;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);
