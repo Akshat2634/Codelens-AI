@@ -52,8 +52,8 @@ import { lookupExternalRate } from './pricing.js';
 //                         inputTokens is inclusive of cache reads, subtract
 //                         cacheRead here.)
 //   cacheReadTokens     = usage.cacheReadTokens
-//   cacheCreationTokens = usage.cacheWriteTokens   (Anthropic-style write; 0 for
-//                         OpenAI/Gemini models, which have no write premium)
+//   cacheCreationTokens = usage.cacheWriteTokens   (priced only for models with
+//                         a published write rate; this includes GPT-5.6)
 //   cacheCreation1hTokens = 0
 //   totalOutputTokens   = usage.outputTokens       (reasoning already included —
 //                         reasoningOutputTokens is informational only)
@@ -79,10 +79,10 @@ const COPILOT_FALLBACK = { input: 3, cachedInput: 0.30, output: 15, cacheWrite: 
 // an absent tier is deliberately marked estimated instead of silently treating
 // all requests as default-context usage.
 const COPILOT_PRICING = [
-  ['gpt-5-6-sol', { input: 5, cachedInput: 0.5, output: 30, longContext: { input: 10, cachedInput: 1, output: 45 }, longContextThreshold: 272_000 }],
-  ['gpt-5-6-terra', { input: 2.5, cachedInput: 0.25, output: 15, longContext: { input: 5, cachedInput: 0.5, output: 22.5 }, longContextThreshold: 272_000 }],
-  ['gpt-5-6-luna', { input: 1, cachedInput: 0.1, output: 6, longContext: { input: 2, cachedInput: 0.2, output: 9 }, longContextThreshold: 200_000 }],
-  ['gpt-5-6', { input: 5, cachedInput: 0.5, output: 30, longContext: { input: 10, cachedInput: 1, output: 45 }, longContextThreshold: 272_000 }],
+  ['gpt-5-6-sol', { input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 30, longContext: { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 45 }, longContextThreshold: 272_000 }],
+  ['gpt-5-6-terra', { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12, longContext: { input: 4, cachedInput: 0.4, cacheWrite: 5, output: 18 }, longContextThreshold: 272_000 }],
+  ['gpt-5-6-luna', { input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1.2, longContext: { input: 0.4, cachedInput: 0.04, cacheWrite: 0.5, output: 1.8 }, longContextThreshold: 200_000 }],
+  ['gpt-5-6', { input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 30, longContext: { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 45 }, longContextThreshold: 272_000 }],
   ['gpt-5-5', { input: 5, cachedInput: 0.5, output: 30, longContext: { input: 10, cachedInput: 1, output: 45 }, longContextThreshold: 272_000 }],
   ['gpt-5-4-mini', { input: 0.75, cachedInput: 0.075, output: 4.5 }],
   ['gpt-5-4-nano', { input: 0.2, cachedInput: 0.02, output: 1.25 }],
@@ -347,6 +347,7 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
   let assistantMessages = 0;
   let requestCount = 0; // summed modelMetrics.requests.count — the model-request analog
   let sawShutdownUsage = false;
+  let latestShutdownUsage = null;
   let sawToolStart = false;
   let sessionContextTier = null;
   const completeOnlyTools = []; // completions held back until we know no starts were logged
@@ -364,19 +365,10 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
     if (!session.endTime || ms > Date.parse(session.endTime)) session.endTime = ts;
   };
 
-  // A model's session TOTALS can be logged more than once in a single file: a
-  // build that emits two of the shutdown aliases below (session.end at the end
-  // of the conversation, session.shutdown at process exit), or a resumed
-  // session that appends a second shutdown record. Summing a re-log would
-  // silently DOUBLE the session's cost, so — exactly as codex-parser dedups
-  // re-logged usage — identity is the reported usage itself. Two genuinely
-  // different runs report different totals and both still count.
-  const seenModelUsage = new Set();
-
   // Accumulate one model's session-total usage into the model + daily buckets
   // and push a usageEvents record (one per model, stamped at the session-end
-  // day) for the 5-hour billing blocks / burn rate. Returns false when the
-  // record contributed nothing (all-zero, or a re-log already counted).
+  // day) for the 5-hour billing blocks / burn rate. Returns false for all-zero
+  // usage; a persisted zero still marks the session as known-$0 below.
   const accumulateModelUsage = (model, u, dayMs, contextTier = null) => {
     const input = Math.max(0, Number(u.inputTokens ?? u.input_tokens ?? u.input ?? 0));
     const cacheRead = Math.max(0, Number(u.cacheReadTokens ?? u.cache_read_tokens ?? u.cacheReadInputTokens ?? u.cache_read_input_tokens ?? 0));
@@ -384,10 +376,6 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
     const output = Math.max(0, Number(u.outputTokens ?? u.output_tokens ?? u.output ?? 0));
     const reasoning = Math.max(0, Number(u.reasoningTokens ?? u.reasoning_tokens ?? u.reasoningOutputTokens ?? 0));
     if (input === 0 && cacheRead === 0 && cacheCreate === 0 && output === 0) return false;
-
-    const usageKey = `${model}|${input}|${output}|${cacheRead}|${cacheCreate}|${reasoning}`;
-    if (seenModelUsage.has(usageKey)) return false;
-    seenModelUsage.add(usageKey);
 
     session.totalInputTokens += input;
     session.totalOutputTokens += output;
@@ -472,20 +460,21 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
       // rather than re-tested per model.
       const inWindow = !cutoffMs || !Number.isFinite(shutdownMs) || shutdownMs >= cutoffMs;
       if (metrics && typeof metrics === 'object' && inWindow) {
+        const models = [];
         for (const [model, m] of Object.entries(metrics)) {
           if (!m || typeof m !== 'object') continue;
           const usage = m.usage || m;
           const contextTier = m.contextTier || m.context_tier || usage.contextTier || usage.context_tier || data.contextTier || data.context_tier || data.context?.tier || sessionContextTier;
           // A usage record was persisted, so this session's cost is KNOWN even
           // if it is zero — that must stay distinct from a crashed session's
-          // unknown cost, so this is set regardless of the dedup below.
+          // unknown cost.
           sawShutdownUsage = true;
-          // Skip the request count too when the record was a re-log, otherwise
-          // the autopilot ratio inherits the same double-count as the tokens.
-          if (!accumulateModelUsage(model, usage, shutdownMs, contextTier)) continue;
           const reqs = m.requests || m.request;
-          if (reqs && Number.isFinite(Number(reqs.count))) requestCount += Number(reqs.count);
+          models.push({ model, usage, contextTier, requestCount: reqs && Number.isFinite(Number(reqs.count)) ? Number(reqs.count) : 0 });
         }
+        // modelMetrics is an accumulated session snapshot. A resumed session
+        // appends a newer snapshot, so only the final one may contribute.
+        latestShutdownUsage = { models, shutdownMs };
       }
       continue;
     }
@@ -543,6 +532,13 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
     }
 
     // assistant.turn_end / tool nested output / compaction / unknown: ignored.
+  }
+
+  if (latestShutdownUsage) {
+    for (const { model, usage, contextTier, requestCount: modelRequests } of latestShutdownUsage.models) {
+      if (!accumulateModelUsage(model, usage, latestShutdownUsage.shutdownMs, contextTier)) continue;
+      requestCount += modelRequests;
+    }
   }
 
   // Sessions that only logged tool completions (never starts) still need their

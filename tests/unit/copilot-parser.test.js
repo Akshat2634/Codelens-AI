@@ -65,12 +65,27 @@ test('getCopilotPricing prices Claude models at Anthropic rates incl. cache writ
   assert.equal(p.estimate, false);
 });
 
-test('getCopilotPricing prices GPT models at OpenAI rates with no cache-write premium', () => {
+test('getCopilotPricing keeps pre-5.6 GPT models free of cache-write pricing', () => {
   const p = getCopilotPricing('gpt-5');
   assert.equal(p.input, 1.25);
   assert.equal(p.output, 10);
   assert.equal(p.cacheWrite, 0, 'OpenAI automatic caching has no write premium');
   assert.equal(p.estimate, false);
+});
+
+test('getCopilotPricing uses GitHub GPT-5.6 rates including cache writes', () => {
+  const cases = [
+    ['gpt-5.6-sol', 'default', { input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 30, estimate: false }],
+    ['gpt-5.6-sol', 'long', { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 45, estimate: false }],
+    ['gpt-5.6-terra', 'default', { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12, estimate: false }],
+    ['gpt-5.6-terra', 'long', { input: 4, cachedInput: 0.4, cacheWrite: 5, output: 18, estimate: false }],
+    ['gpt-5.6-luna', 'default', { input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1.2, estimate: false }],
+    ['gpt-5.6-luna', 'long', { input: 0.4, cachedInput: 0.04, cacheWrite: 0.5, output: 1.8, estimate: false }],
+  ];
+  for (const [model, tier, expected] of cases) {
+    assert.deepEqual(getCopilotPricing(model, Date.now(), 0, tier), expected, `${model} ${tier}`);
+  }
+  assert.deepEqual(getCopilotPricing('gpt-5.6', Date.now(), 0, 'long'), cases[1][2], 'the unsuffixed alias uses Sol rates');
 });
 
 test('getCopilotPricing falls back to a flagged estimate for unknown models with no overlay', () => {
@@ -208,12 +223,12 @@ test('parseCopilotSessions counts a re-logged shutdown record once, not twice', 
   }
 });
 
-test('parseCopilotSessions still sums two shutdown records with genuinely different totals', async () => {
+test('parseCopilotSessions keeps the latest cumulative shutdown snapshot after resume', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'copilot-'));
   try {
-    // The dedup keys on the reported usage itself, so a resumed session whose
-    // second run did different work is counted in full — only verbatim
-    // re-logs collapse.
+    // Shutdown modelMetrics are accumulated session totals. The resumed
+    // session's second snapshot replaces the first; it is not an independent
+    // delta to add again.
     writeSession(root, 'sess-resume', [
       { type: 'session.start', timestamp: iso(4), data: { sessionId: 'sess-resume', cwd: CWD, model: 'gpt-5' } },
       { type: 'user.message', timestamp: iso(4), data: { role: 'user', kind: 'plain', text: 'run one' } },
@@ -223,9 +238,10 @@ test('parseCopilotSessions still sums two shutdown records with genuinely differ
     ]);
     const { sessions } = await parseCopilotSessions(root, 30, null);
     const s = sessions[0];
-    assert.equal(s.totalInputTokens, 3500);
-    assert.equal(s.totalOutputTokens, 500);
-    assert.equal(s.assistantMessageCount, 5);
+    assert.equal(s.totalInputTokens, 2500);
+    assert.equal(s.totalOutputTokens, 400);
+    assert.equal(s.assistantMessageCount, 3);
+    assert.equal(s.usageEvents.length, 1, 'billing windows receive only the final accumulated snapshot');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

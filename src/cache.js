@@ -75,7 +75,9 @@ function cacheFileFor(options = {}) {
 //     the prior provider-fallback and default-context figures.
 // 22: Copilot re-logged shutdown records are deduped — a session cached under
 //     21 may hold double-counted tokens/cost, so it must be re-parsed.
-const CACHE_VERSION = 22;
+// 23: Copilot shutdown modelMetrics now use only the final cumulative snapshot,
+//     and GPT-5.6 Copilot rates include GitHub's current cache-write pricing.
+const CACHE_VERSION = 23;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);
