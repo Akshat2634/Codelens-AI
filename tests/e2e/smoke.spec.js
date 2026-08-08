@@ -201,7 +201,7 @@ test.describe('UI modernization (brand marks, face-off, command palette)', () =>
     await page.goto('/');
     await page.waitForSelector('.source-tabs .source-tab');
     // Tabs: Claude tab carries the starburst, Codex the knot, Copilot the
-    // goggle-bot; All Agents carries all three.
+    // visor bot; All Agents carries all three.
     await expect(page.locator('.source-tabs .source-tab', { hasText: 'Claude Code' }).locator('svg[data-agent-logo="claude"]')).toHaveCount(1);
     await expect(page.locator('.source-tabs .source-tab', { hasText: 'OpenAI Codex' }).locator('svg[data-agent-logo="codex"]')).toHaveCount(1);
     await expect(page.locator('.source-tabs .source-tab', { hasText: 'GitHub Copilot' }).locator('svg[data-agent-logo="copilot"]')).toHaveCount(1);
