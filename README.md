@@ -236,6 +236,31 @@ By default costs are **API-equivalent** — what your usage *would* cost at pay-
 - **Effective $/commit** and **$/surviving line** — your prorated fee ÷ output, the cost figures that actually reflect your bill.
 - **Plan utilization** — API-equivalent value ÷ prorated fee (e.g. `3.2×` means you extracted ~3.2× your subscription in pay-as-you-go value). This is an estimate of value extracted, **not** realized savings.
 
+## Configuration
+
+Repeat users can put CLI defaults in a `codelens.json` file instead of retyping flags every run, and correct costs for negotiated/enterprise rates or self-hosted models the hardcoded tables and LiteLLM overlay don't know about.
+
+**Precedence** (highest wins): CLI flags > project `./codelens.json` > user `~/.config/codelens/codelens.json` > built-in defaults.
+
+```json
+{
+  "days": 30,
+  "port": 3457,
+  "plan": "max20",
+  "codexPlan": "plus",
+  "offline": false,
+  "pricingOverrides": {
+    "claude-opus-4-8": { "input": 5, "output": 25, "cacheRead": 0.5, "cacheWrite": 6.25 },
+    "my-internal-model": { "input": 0.1, "output": 0.4 }
+  }
+}
+```
+
+- `days` / `port` / `plan` / `codexPlan` / `offline` mirror their equivalent CLI flags.
+- `pricingOverrides` rates are **per-million tokens**, keyed by model id (matched the same way as the LiteLLM overlay: exact, then date-stripped, then longest-prefix). Overrides win over the hardcoded tables and the LiteLLM overlay. `cacheRead`/`cacheWrite` are optional — omitted ones fall back to the standard ratios (read ≈ 0.1× input, write ≈ 1.25× input).
+- Unknown top-level keys print a warning and are ignored; malformed JSON fails fast with the offending file path.
+- Changing `pricingOverrides` invalidates the cost cache, so the next run re-prices instead of serving stale numbers.
+
 ## Dashboard
 
 The dashboard includes:

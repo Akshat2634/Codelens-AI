@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import zlib from 'node:zlib';
 import { findGitRoot, isReadOnlyCommand, isVerificationCommand, toRelativePath } from './claude-parser.js';
+import { getPricingOverride } from './config.js';
 import { lookupExternalRate } from './pricing.js';
 
 // ── OpenAI Codex CLI session parser ──
@@ -155,6 +156,11 @@ export function getCodexModelFamily(modelName) {
 
 export function getCodexPricing(modelName, usageDateMs = Date.now()) {
   if (!modelName) return null;
+  // User-configured pricingOverrides always win — checked before the id-family
+  // gate below so a synthetic/self-hosted model id (e.g. "my-internal-model",
+  // which wouldn't match gpt-/o-series/codex) can still be priced.
+  const override = getPricingOverride(modelName);
+  if (override) return { input: override.input, cachedInput: override.cacheRead, output: override.output };
   const id = normalizeCodexModelId(modelName);
   if (!/^(gpt-|o\d|codex)/.test(id)) return null;
   for (const [key, price] of CODEX_PRICING) {

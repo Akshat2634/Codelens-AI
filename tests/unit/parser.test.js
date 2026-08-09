@@ -14,6 +14,7 @@ import {
   parseAllProjects,
   toRelativePath,
 } from '../../src/claude-parser.js';
+import { __resetPricingOverridesForTest, __setPricingOverridesForTest } from '../../src/config.js';
 import { __resetOverlayForTest, __setOverlayForTest } from '../../src/pricing.js';
 
 test('getModelFamily maps common Claude model strings', () => {
@@ -160,6 +161,15 @@ test('calculateCost prices unknown models from the external overlay when loaded'
   const sonnet = calculateCost(1_000_000, 0, 0, 0, 'claude-sonnet-4-5');
   assert.equal(sonnet, PRICING.sonnet.input); // $3, not the overlay's $999
   __resetOverlayForTest();
+});
+
+test('calculateCost prefers a pricingOverrides rate over the hardcoded table and the overlay', () => {
+  __setOverlayForTest({ 'claude-sonnet-4-5': { input: 999, output: 999, cacheRead: 999, cacheWrite: 999 } });
+  __setPricingOverridesForTest({ 'claude-sonnet-4-5': { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 } });
+  const cost = calculateCost(1_000_000, 1_000_000, 0, 0, 'claude-sonnet-4-5');
+  assert.equal(cost, 1 + 2); // negotiated override wins over both the table and the overlay
+  __resetOverlayForTest();
+  __resetPricingOverridesForTest();
 });
 
 test('calculateCostBreakdown splits costs and sums correctly', () => {

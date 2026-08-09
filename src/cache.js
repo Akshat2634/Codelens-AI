@@ -80,6 +80,9 @@ export function loadCache(options = {}) {
     // A cache built from one --claude-dir / --codex-dir must not serve another.
     if ((data.claudeDir || null) !== (options.claudeDir || null)) return null;
     if ((data.codexDir || null) !== (options.codexDir || null)) return null;
+    // Changing (or setting/clearing) codelens.json's pricingOverrides must
+    // re-price every session — cached costs were computed under the old rates.
+    if ((data.overridesHash || null) !== (options.overridesHash || null)) return null;
     // The rolling window moves daily and sessions are clipped to it at parse
     // time, so a cache built on an earlier day would serve stale clipping.
     if (options.cutoffDay && data.cutoffDay !== options.cutoffDay) return null;
@@ -99,6 +102,7 @@ export function saveCache(sessions, fileIndex, codexFileIndex, options = {}) {
     claudeDir: options.claudeDir || null,
     codexDir: options.codexDir || null,
     cutoffDay: options.cutoffDay || null,
+    overridesHash: options.overridesHash || null,
     fileIndex,
     codexFileIndex: codexFileIndex || {},
     sessions,

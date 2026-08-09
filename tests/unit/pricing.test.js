@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import {
   __resetOverlayForTest,
   __setOverlayForTest,
+  fillRateDefaults,
   loadPricingOverlay,
   lookupExternalRate,
   normalizeExternalId,
@@ -27,6 +28,16 @@ test('normalizeExternalId strips markers, provider prefix, and lowercases', () =
   assert.equal(normalizeExternalId('anthropic/claude-sonnet-4-5'), 'claude-sonnet-4-5');
   assert.equal(normalizeExternalId('OpenAI/GPT-5'), 'gpt-5');
   assert.equal(normalizeExternalId(null), '');
+});
+
+test('fillRateDefaults: fills missing cacheRead/cacheWrite from the standard ratios', () => {
+  const r = fillRateDefaults({ input: 10, output: 40 });
+  assert.equal(r.cacheRead, 1); // 0.1x input
+  assert.equal(r.cacheWrite, 12.5); // 1.25x input
+  // Explicit rates pass through untouched.
+  const explicit = fillRateDefaults({ input: 10, output: 40, cacheRead: 2, cacheWrite: 3 });
+  assert.equal(explicit.cacheRead, 2);
+  assert.equal(explicit.cacheWrite, 3);
 });
 
 test('lookupExternalRate: null when no overlay is loaded', () => {
