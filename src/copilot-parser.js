@@ -186,7 +186,7 @@ export function getCopilotPricing(modelName, usageDateMs = Date.now(), requestIn
   return COPILOT_FALLBACK;
 }
 
-function calculateCopilotCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, usageDateMs = Date.now(), contextTier = null) {
+export function calculateCopilotCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, modelName, usageDateMs = Date.now(), contextTier = null) {
   const p = getCopilotPricing(modelName, usageDateMs, 0, contextTier) || COPILOT_FALLBACK;
   const inputCost = inputTokens * p.input / PER_MIL;
   const outputCost = outputTokens * p.output / PER_MIL;

@@ -1,0 +1,7 @@
+{"kind":0,"v":{"version":3,"sessionId":"copilot-vscode-1111-2222-3333-000000000001","creationDate":1786900443322,"responderUsername":"GitHub Copilot","requests":[{"requestId":"request-vscode-1","timestamp":1786900443322,"responseTimestamp":1786900443322,"message":{"text":"Add the VS Code integration fixture.","parts":[]},"response":[],"modelId":"copilot/auto","agent":{"extensionId":{"value":"GitHub.copilot-chat","_lower":"github.copilot-chat"},"id":"github.copilot.editsAgent","extensionDisplayName":"GitHub Copilot"},"modeInfo":{"kind":"agent"}}]}}
+{"kind":1,"k":["requests",0,"result"],"v":{"metadata":{"resolvedModel":"gpt-5-mini","toolCallRounds":[{"thinking":{"tokens":250},"toolCalls":[{"id":"fixture-call__vscode-1","name":"create_file","arguments":"{\"filePath\":\"/tmp/codelens-fixture-repo/src/vscode-copilot.js\"}"}]}]}}}
+{"kind":1,"k":["requests",0,"promptTokens"],"v":7500}
+{"kind":1,"k":["requests",0,"completionTokens"],"v":900}
+{"kind":1,"k":["requests",0,"copilotCredits"],"v":1.25}
+{"kind":1,"k":["requests",0,"modelState"],"v":{"value":1,"completedAt":1786900503322}}
+{"kind":2,"k":["requests",0,"response"],"v":[{"kind":"textEditGroup","uri":{"scheme":"file","fsPath":"/tmp/codelens-fixture-repo/src/vscode-copilot.js","path":"/tmp/codelens-fixture-repo/src/vscode-copilot.js"},"edits":[],"done":true}]}

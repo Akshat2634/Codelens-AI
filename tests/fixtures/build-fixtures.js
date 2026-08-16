@@ -2,13 +2,14 @@
 // Output: tests/fixtures/claude-projects/test-project/*.jsonl (Claude Code)
 //         tests/fixtures/codex-sessions/YYYY/MM/DD/rollout-*.jsonl (OpenAI Codex)
 //         tests/fixtures/copilot-sessions/<id>/events.jsonl (GitHub Copilot CLI)
+//         tests/fixtures/copilot-vscode/<workspace>/chatSessions/<id>.jsonl
 //
 // Shapes mirror what ~/.claude/projects/, ~/.codex/sessions/, and
 // ~/.copilot/session-state/ contain in practice. The parsers pick these up and
 // the dashboard renders with non-empty data for all three agent sources (which
 // also makes the source tabs appear).
 
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -17,9 +18,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(__dirname, 'claude-projects', 'test-project');
 const CODEX_DIR = path.join(__dirname, 'codex-sessions');
 const COPILOT_DIR = path.join(__dirname, 'copilot-sessions');
+const COPILOT_VSCODE_DIR = path.join(__dirname, 'copilot-vscode');
 mkdirSync(OUT_DIR, { recursive: true });
 rmSync(CODEX_DIR, { recursive: true, force: true });
 rmSync(COPILOT_DIR, { recursive: true, force: true });
+rmSync(COPILOT_VSCODE_DIR, { recursive: true, force: true });
 
 const FAKE_REPO = '/tmp/codelens-fixture-repo';
 const NON_REPO_WORKSPACE = '/tmp/codelens-fixture-chat-task';
@@ -59,6 +62,14 @@ function copilotSession(sessionId, branch, lines) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, 'workspace.yaml'), `cwd: ${FAKE_REPO}\nbranch: ${branch}\n`);
   writeFileSync(path.join(dir, 'events.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+}
+
+function copilotVsCodeSession(sessionId, lines) {
+  const workspaceDir = path.join(COPILOT_VSCODE_DIR, 'fixture-workspace');
+  const chatDir = path.join(workspaceDir, 'chatSessions');
+  mkdirSync(chatDir, { recursive: true });
+  writeFileSync(path.join(workspaceDir, 'workspace.json'), JSON.stringify({ folder: pathToFileURL(FAKE_REPO).href }));
+  writeFileSync(path.join(chatDir, `${sessionId}.jsonl`), lines.map(l => JSON.stringify(l)).join('\n') + '\n');
 }
 
 // ── Session 1: Shipped work (Sonnet, 3 days ago)
@@ -271,6 +282,59 @@ copilotSession(cp3, 'feature/copilot', [
   { type: 'session.shutdown', timestamp: iso(8 * 24 * 60 - 4), data: { modelMetrics: { 'gemini-2.5-pro': { usage: { inputTokens: 12000, outputTokens: 2200, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, requests: { count: 3, cost: 3 } } } } },
 ]);
 
+// ── VS Code Copilot Chat Session: same product source, separate client store
+const cpVsCode = 'copilot-vscode-1111-2222-3333-000000000001';
+const cpVsCodeTs = Date.now() - 4 * 60 * 60_000;
+const cpVsCodeFile = FAKE_REPO + '/src/vscode-copilot.js';
+copilotVsCodeSession(cpVsCode, [
+  {
+    kind: 0,
+    v: {
+      version: 3,
+      sessionId: cpVsCode,
+      creationDate: cpVsCodeTs,
+      responderUsername: 'GitHub Copilot',
+      requests: [{
+        requestId: 'request-vscode-1',
+        timestamp: cpVsCodeTs,
+        responseTimestamp: cpVsCodeTs,
+        message: { text: 'Add the VS Code integration fixture.', parts: [] },
+        response: [],
+        modelId: 'copilot/auto',
+        agent: {
+          extensionId: { value: 'GitHub.copilot-chat', _lower: 'github.copilot-chat' },
+          id: 'github.copilot.editsAgent',
+          extensionDisplayName: 'GitHub Copilot',
+        },
+        modeInfo: { kind: 'agent' },
+      }],
+    },
+  },
+  {
+    kind: 1,
+    k: ['requests', 0, 'result'],
+    v: {
+      metadata: {
+        resolvedModel: 'gpt-5-mini',
+        toolCallRounds: [{
+          thinking: { tokens: 250 },
+          toolCalls: [{ id: 'fixture-call__vscode-1', name: 'create_file', arguments: JSON.stringify({ filePath: cpVsCodeFile }) }],
+        }],
+      },
+    },
+  },
+  { kind: 1, k: ['requests', 0, 'promptTokens'], v: 7_500 },
+  { kind: 1, k: ['requests', 0, 'completionTokens'], v: 900 },
+  { kind: 1, k: ['requests', 0, 'copilotCredits'], v: 1.25 },
+  { kind: 1, k: ['requests', 0, 'modelState'], v: { value: 1, completedAt: cpVsCodeTs + 60_000 } },
+  {
+    kind: 2,
+    k: ['requests', 0, 'response'],
+    v: [{ kind: 'textEditGroup', uri: { scheme: 'file', fsPath: cpVsCodeFile, path: cpVsCodeFile }, edits: [], done: true }],
+  },
+]);
+
 console.log('Wrote 5 synthetic Claude sessions to ' + OUT_DIR);
 console.log('Wrote 4 synthetic Codex sessions to ' + CODEX_DIR);
 console.log('Wrote 3 synthetic Copilot sessions to ' + COPILOT_DIR);
+console.log('Wrote 1 synthetic VS Code Copilot session to ' + COPILOT_VSCODE_DIR);

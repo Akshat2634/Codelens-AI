@@ -5,6 +5,7 @@ import path from 'node:path';
 import { listSubagentTranscripts } from './claude-parser.js';
 import { listCodexSessionFiles } from './codex-parser.js';
 import { listCopilotSessionFiles } from './copilot-parser.js';
+import { listCopilotVsCodeSessionFiles } from './copilot-vscode-parser.js';
 
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'agent-analytics');
 const CACHE_FILE = path.join(CACHE_DIR, 'parsed-sessions.json');
@@ -16,6 +17,18 @@ export const DEFAULT_CODEX_DIR = path.join(process.env.CODEX_HOME || path.join(o
 // GitHub Copilot CLI stores per-session dirs under $COPILOT_HOME/session-state
 // (COPILOT_HOME defaults to ~/.copilot and replaces the whole path when set).
 export const DEFAULT_COPILOT_DIR = path.join(process.env.COPILOT_HOME || path.join(os.homedir(), '.copilot'), 'session-state');
+// VS Code keeps Copilot Chat/agent sessions in the client-side workspace store.
+// Include stable + Insiders; nonexistent paths are harmless and keep discovery
+// deterministic across upgrades.
+const vscodeConfigRoot = process.platform === 'darwin'
+  ? path.join(os.homedir(), 'Library', 'Application Support')
+  : process.platform === 'win32'
+    ? (process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'))
+    : (process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'));
+export const DEFAULT_COPILOT_VSCODE_DIRS = [
+  path.join(vscodeConfigRoot, 'Code', 'User', 'workspaceStorage'),
+  path.join(vscodeConfigRoot, 'Code - Insiders', 'User', 'workspaceStorage'),
+];
 // The primary cache file is reserved for the plain ~/.codex + ~/.copilot layout.
 // Comparing against DEFAULT_CODEX_DIR / DEFAULT_COPILOT_DIR (which bake in
 // $CODEX_HOME / $COPILOT_HOME at load) would let a run with a temporary env
@@ -24,6 +37,7 @@ export const DEFAULT_COPILOT_DIR = path.join(process.env.COPILOT_HOME || path.jo
 // below, same as --codex-dir / --copilot-dir.
 const PLAIN_CODEX_DIR = path.join(os.homedir(), '.codex', 'sessions');
 const PLAIN_COPILOT_DIR = path.join(os.homedir(), '.copilot', 'session-state');
+const PLAIN_COPILOT_VSCODE_DIRS = DEFAULT_COPILOT_VSCODE_DIRS;
 
 // Runs against custom --claude-dir/--codex-dir (tests, CI, fixtures) get their
 // own cache file, so they never evict the cache built from the user's real
@@ -33,8 +47,10 @@ function cacheFileFor(options = {}) {
   const claudeDir = options.claudeDir || DEFAULT_CLAUDE_DIR;
   const codexDir = options.codexDir || DEFAULT_CODEX_DIR;
   const copilotDir = options.copilotDir || DEFAULT_COPILOT_DIR;
-  if (claudeDir === DEFAULT_CLAUDE_DIR && codexDir === PLAIN_CODEX_DIR && copilotDir === PLAIN_COPILOT_DIR) return CACHE_FILE;
-  const hash = createHash('sha1').update(`${claudeDir}|${codexDir}|${copilotDir}`).digest('hex').slice(0, 8);
+  const copilotVsCodeDirs = options.copilotVsCodeDirs || DEFAULT_COPILOT_VSCODE_DIRS;
+  const defaultVsCodeDirs = JSON.stringify(copilotVsCodeDirs) === JSON.stringify(PLAIN_COPILOT_VSCODE_DIRS);
+  if (claudeDir === DEFAULT_CLAUDE_DIR && codexDir === PLAIN_CODEX_DIR && copilotDir === PLAIN_COPILOT_DIR && defaultVsCodeDirs) return CACHE_FILE;
+  const hash = createHash('sha1').update(`${claudeDir}|${codexDir}|${copilotDir}|${copilotVsCodeDirs.join('|')}`).digest('hex').slice(0, 8);
   return path.join(CACHE_DIR, `parsed-sessions-${hash}.json`);
 }
 // Bump whenever parsing or pricing logic changes so cached sessions (which store
@@ -79,7 +95,9 @@ function cacheFileFor(options = {}) {
 //     and GPT-5.6 Copilot rates include GitHub's current cache-write pricing.
 // 24: Current GitHub AI Credit pricing, conservative multi-repository Copilot
 //     correlation, and mixed-log tool-call deduplication require a re-parse.
-const CACHE_VERSION = 24;
+// 25: VS Code Copilot Chat/agent sessions join the Copilot source with recorded
+//     AI Credit costs, models, tools, files, and per-request usage timelines.
+const CACHE_VERSION = 25;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);
@@ -100,6 +118,7 @@ export function loadCache(options = {}) {
     if ((data.claudeDir || null) !== (options.claudeDir || null)) return null;
     if ((data.codexDir || null) !== (options.codexDir || null)) return null;
     if ((data.copilotDir || null) !== (options.copilotDir || null)) return null;
+    if (JSON.stringify(data.copilotVsCodeDirs || []) !== JSON.stringify(options.copilotVsCodeDirs || [])) return null;
     // The rolling window moves daily and sessions are clipped to it at parse
     // time, so a cache built on an earlier day would serve stale clipping.
     if (options.cutoffDay && data.cutoffDay !== options.cutoffDay) return null;
@@ -119,6 +138,7 @@ export function saveCache(sessions, fileIndex, codexFileIndex, copilotFileIndex,
     claudeDir: options.claudeDir || null,
     codexDir: options.codexDir || null,
     copilotDir: options.copilotDir || null,
+    copilotVsCodeDirs: options.copilotVsCodeDirs || [],
     cutoffDay: options.cutoffDay || null,
     fileIndex,
     codexFileIndex: codexFileIndex || {},
@@ -284,6 +304,9 @@ export function getCodexStaleFiles(codexDir, cachedFileIndex, cutoffMs = 0) {
   return getFlatStaleFiles(listCodexSessionFiles(codexDir), cachedFileIndex, cutoffMs);
 }
 
-export function getCopilotStaleFiles(copilotDir, cachedFileIndex, cutoffMs = 0) {
-  return getFlatStaleFiles(listCopilotSessionFiles(copilotDir), cachedFileIndex, cutoffMs);
+export function getCopilotStaleFiles(copilotDir, copilotVsCodeDirs, cachedFileIndex, cutoffMs = 0) {
+  return getFlatStaleFiles([
+    ...listCopilotSessionFiles(copilotDir),
+    ...listCopilotVsCodeSessionFiles(copilotVsCodeDirs),
+  ], cachedFileIndex, cutoffMs);
 }

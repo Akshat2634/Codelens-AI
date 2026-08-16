@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Codelens AI** (`codelens-ai` on npm) is a CLI tool that measures ROI from AI coding agents by correlating token usage with git commit output. It parses **Claude Code** session files (`~/.claude/projects/`), **OpenAI Codex CLI** rollout files (`~/.codex/sessions/`), and **GitHub Copilot CLI** session files (`~/.copilot/session-state/`), analyzes git history, and serves an interactive dashboard at `http://localhost:3457` with per-agent source tabs (All Agents / Claude Code / OpenAI Codex / GitHub Copilot).
+**Codelens AI** (`codelens-ai` on npm) is a CLI tool that measures ROI from AI coding agents by correlating token usage with git commit output. It parses **Claude Code** session files (`~/.claude/projects/`), **OpenAI Codex CLI** rollout files (`~/.codex/sessions/`), and **GitHub Copilot** sessions from the standalone CLI (`~/.copilot/session-state/`) plus official VS Code Chat/agent mode (`workspaceStorage/*/chatSessions/`), analyzes git history, and serves an interactive dashboard at `http://localhost:3457` with per-agent source tabs (All Agents / Claude Code / OpenAI Codex / GitHub Copilot).
 
 **Version:** 0.9.0
 **License:** MIT
@@ -27,6 +27,7 @@ src/
 ├── claude-parser.js   # Parses JSONL session files from ~/.claude/projects/
 ├── codex-parser.js    # Parses OpenAI Codex rollout files from ~/.codex/sessions/
 ├── copilot-parser.js  # Parses GitHub Copilot CLI events.jsonl from ~/.copilot/session-state/ (GitHub pricing table + LiteLLM fallback)
+├── copilot-vscode-parser.js # Parses VS Code Copilot Chat/agent JSONL (recorded AI Credits + tool/file metadata)
 ├── git-analyzer.js    # Git log analysis, branch detection, diff stats
 ├── correlator.js      # Matches sessions to commits via file overlap + time window + Co-authored-by trailers
 ├── metrics.js         # ROI calculations, grades, insights, heatmap, survival rate, AI code share, value leak
@@ -57,12 +58,13 @@ tests/
 ```
 Claude Sessions (JSONL)  → claude-parser.js  ┐
 Codex Rollouts (JSONL)   → codex-parser.js   ┼→ [Cache] → git-analyzer.js
-Copilot events (JSONL)   → copilot-parser.js ┘
+Copilot CLI events       → copilot-parser.js ┐
+Copilot VS Code sessions → copilot-vscode-parser.js ┘
 → correlator.js (all sources together) → metrics.js (per-source payloads)
 → server.js (REST API, ?source=) → dashboard.html (source tabs)
 ```
 
-Every session object carries `source: 'claude' | 'codex' | 'copilot'` and an identical shape (codex-parser and copilot-parser mirror claude-parser's output). Correlation runs over ALL sessions together so a commit is claimed by at most one session across agents; per-source payloads filter the correlated set.
+Every session object carries `source: 'claude' | 'codex' | 'copilot'` and an identical shape (the Codex and both Copilot parsers mirror claude-parser's output). Correlation runs over ALL sessions together so a commit is claimed by at most one session across agents; per-source payloads filter the correlated set.
 
 ## Key API Routes (server.js)
 
@@ -101,6 +103,7 @@ npx codelens-ai --offline       # skip network pricing refresh (cached/hardcoded
 npx codelens-ai --claude-dir X  # override ~/.claude/projects (testing/CI)
 npx codelens-ai --codex-dir X   # override ~/.codex/sessions (testing/CI)
 npx codelens-ai --copilot-dir X # override ~/.copilot/session-state (testing/CI)
+npx codelens-ai --copilot-vscode-dir X # override VS Code workspaceStorage (testing/CI)
 npx codelens-ai --plan max20 --codex-plan plus --copilot-plan pro  # per-agent subscription mode
 npx codelens-ai --host 0.0.0.0  # expose dashboard beyond localhost (default 127.0.0.1)
 npx codelens-ai report          # terminal ROI scorecard (--md / --html to export)
@@ -124,11 +127,11 @@ node --check src/*.js           # syntax validation
 ## Key Design Decisions
 
 - **Single-file dashboard** — no build step, served directly by Express
-- **Zero-config** — auto-discovers `~/.claude/projects/`, `~/.codex/sessions/` (`$CODEX_HOME` honored), and `~/.copilot/session-state/` (`$COPILOT_HOME` honored)
+- **Zero-config** — auto-discovers `~/.claude/projects/`, `~/.codex/sessions/` (`$CODEX_HOME` honored), `~/.copilot/session-state/` (`$COPILOT_HOME` honored), and VS Code stable/Insiders `workspaceStorage/`
 - **Smart caching** — incremental parsing with per-source staleness, so a new Codex rollout doesn't force a Claude re-parse (`~/.cache/agent-analytics/`)
 - **File-first correlation** — sessions matched to commits by file overlap, 2-hour temporal buffer; all agent sources correlate together so a commit is attributed to at most one session. `Co-authored-by` agent trailers (parsed from git log) route trailer-stamped commits to the matching agent and upgrade attribution confidence to high
-- **Uniform session shape** — codex-parser and copilot-parser produce the exact claude-parser session shape so correlator/metrics/server are source-agnostic (codex: `cacheReadTokens` = OpenAI `cached_input_tokens`, `cacheCreationTokens` = 0; copilot: `cacheReadTokens` = `usage.cacheReadTokens`, `cacheCreationTokens` = `usage.cacheWriteTokens`)
-- **Copilot pricing and context** — `copilot-parser.js` carries GitHub's published per-token rates for current and historical Copilot models; LiteLLM is a flagged estimate for unknown future ids because provider prices can differ from GitHub AI Credit rates. Copilot usage comes from the final `session.shutdown` event's accumulated `modelMetrics` snapshot, while `session.context_changed` provides workspace and branch metadata. Multi-repository sessions retain aggregate spend but do not claim one repository's commits. A long-context model without a recorded tier is estimated, and sessions missing a shutdown usage record are marked `costZeroed` so unknown cost cannot grade as a fabricated 'A'
+- **Uniform session shape** — codex-parser, copilot-parser, and copilot-vscode-parser produce the claude-parser session shape so correlator/metrics/server are source-agnostic (VS Code does not expose cache-token counts, but its recorded AI Credit total remains authoritative)
+- **Copilot pricing and context** — `copilot-parser.js` carries GitHub's published per-token rates for CLI sessions; LiteLLM is a flagged estimate for unknown future ids because provider prices can differ from GitHub AI Credit rates. CLI usage comes from the final `session.shutdown.modelMetrics` snapshot. `copilot-vscode-parser.js` replays VS Code's version-3 incremental records, uses recorded `copilotCredits` as authoritative total cost, and reads per-request tokens/resolved models/tools/edited-file URIs without caching prompt or response text. Both clients emit `source: 'copilot'`; `entrypoint` distinguishes `copilot-cli` from `copilot-vscode`. Multi-repository sessions retain aggregate spend but do not claim one repository's commits, and sessions with no durable usage are marked `costZeroed` so unknown cost cannot grade as a fabricated 'A'
 - **Privacy-first** — all data stays local, no telemetry; the dashboard binds 127.0.0.1 by default (`--host` to override)
 - **Version-aware pricing** — token costs reflect each provider's pricing tiers per model (Anthropic per-version tiers; OpenAI per-model-id, with o3's Jun 2025 price cut date-tiered)
 - **Auto-pricing fallback** — models the hardcoded tables don't match are priced from LiteLLM's public map (`src/pricing.js`): fetched on demand, disk-cached ~24h (`pricing.json`), refreshed on `--refresh`, skipped with `--offline`, and graceful on failure (cache → hardcoded Sonnet/`CODEX_FALLBACK` estimate). **Hardcoded tables win** when both have a model. Provider overlay rates are exact for direct Claude/Codex pricing but remain flagged estimates for Copilot, whose GitHub AI Credit rates can differ. The overlay must be loaded (`loadPricingOverlay`, awaited in `buildPayload`) before any costing; `lookupExternalRate` is a no-op until then
@@ -159,9 +162,9 @@ Use these skills when working on this project:
 
 - The dashboard is a single 4000+ line HTML file — changes should maintain the inline architecture
 - Cache is stored at `~/.cache/agent-analytics/parsed-sessions.json` (plus `quickstats.json`, a tiny summary the statusline reads); runs with custom `--claude-dir`/`--codex-dir` write to a separate `parsed-sessions-<hash>.json` so tests/CI never evict the real cache
-- Claude session JSONL files are at `~/.claude/projects/`; Codex rollouts at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (zstd-compressed `.jsonl.zst` after ~7 days — readable on Node >= 22.15); GitHub Copilot CLI sessions at `~/.copilot/session-state/<session-id>/events.jsonl` (+ a `workspace.yaml` sidecar for cwd/branch)
-- Token pricing is hardcoded in `claude-parser.js` (Anthropic) and `codex-parser.js` (OpenAI) — update when providers change pricing. `copilot-parser.js` reuses both plus the overlay, so it needs no separate pricing table
-- Copilot gotchas handled in `copilot-parser.js`: the `events.jsonl` envelope is undocumented/reverse-engineered (all fields read defensively with aliases); the U+2028/U+2029 raw-char corruption bug is skipped by the per-line `try/catch` JSON.parse (same as Codex); `session.shutdown.modelMetrics` is the authoritative session-total usage record (per-turn `assistant.usage` is ephemeral and NOT summed, to avoid double-counting); `inputTokens` is treated as FRESH input (cacheReadTokens is a separate field — not subtracted); tool start/complete pairs are counted once; files touched are scraped from edit-tool args
+- Claude session JSONL files are at `~/.claude/projects/`; Codex rollouts at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (zstd-compressed `.jsonl.zst` after ~7 days — readable on Node >= 22.15); GitHub Copilot CLI sessions at `~/.copilot/session-state/<session-id>/events.jsonl` (+ `workspace.yaml`); and VS Code Copilot sessions at the platform-specific `Code/User/workspaceStorage/<workspace>/chatSessions/<session-id>.jsonl` (+ `workspace.json`)
+- Token pricing is hardcoded in `claude-parser.js` (Anthropic), `codex-parser.js` (OpenAI), and `copilot-parser.js` (GitHub AI Credit rates) — update when the respective provider changes pricing. The overlay remains a flagged fallback for unknown Copilot models
+- Copilot gotchas: CLI `events.jsonl` uses the final cumulative `session.shutdown.modelMetrics` snapshot and dedupes tool start/complete pairs. VS Code's generic chat store must be filtered to the official GitHub extension, then replayed as kind-0 base / kind-1 replace / kind-2 append records; final per-request usage fields replace streaming updates. `copilotCredits × $0.01` is the exact VS Code total cost, while its input/output cost split is proportional because the local record does not expose cached-token counts. Do not retain prompt/response bodies. Both parsers skip malformed lines and preserve usage-less active sessions for correlation without fabricating a grade
 - Codex gotchas already handled in `codex-parser.js`: `token_count` totals are cumulative (use `last_token_usage` deltas), duplicate re-logged usage events (deduped only when the cumulative total is unchanged), `cached_input_tokens ⊂ input_tokens`, `reasoning_output_tokens ⊂ output_tokens`, subagent `thread_spawn` rollouts replay parent history (skipped), legacy pre-envelope 2025 format, long-context pricing only above 272K input tokens per request
 - Playwright tests require session fixtures to run (regenerated by `tests/fixtures/build-fixtures.js`)
 - CI runs syntax checks, unit tests, and a fixture-backed CLI smoke run for all agents; Playwright E2E tests are local-only

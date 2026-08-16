@@ -5,10 +5,11 @@ import path from 'node:path';
 import { Command } from 'commander';
 import { renderBanner } from './banner.js';
 import { blocksJson, buildBlocks, filterRecentBlocks, renderBlocksText } from './blocks.js';
-import { DEFAULT_CLAUDE_DIR, DEFAULT_CODEX_DIR, DEFAULT_COPILOT_DIR, deleteCache, getCodexStaleFiles, getCopilotStaleFiles, getStaleFiles, loadCache, saveCache, saveQuickstats } from './cache.js';
+import { DEFAULT_CLAUDE_DIR, DEFAULT_CODEX_DIR, DEFAULT_COPILOT_DIR, DEFAULT_COPILOT_VSCODE_DIRS, deleteCache, getCodexStaleFiles, getCopilotStaleFiles, getStaleFiles, loadCache, saveCache, saveQuickstats } from './cache.js';
 import { parseAllProjects } from './claude-parser.js';
 import { parseCodexSessions } from './codex-parser.js';
 import { parseCopilotSessions } from './copilot-parser.js';
+import { parseCopilotVsCodeSessions } from './copilot-vscode-parser.js';
 import { correlateSessions } from './correlator.js';
 import { analyzeGitRepo, findNestedGitRepos, getGitUser, resolveMovedRepoPaths } from './git-analyzer.js';
 import { serveMcpStdio } from './mcp.js';
@@ -147,7 +148,7 @@ export function explodeWorkspaceSessions(sessions, depth = NESTED_REPO_DEPTH) {
   return out;
 }
 
-async function buildPayload(claudeDir, codexDir, copilotDir, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null, offline = false) {
+async function buildPayload(claudeDir, codexDir, copilotDir, copilotVsCodeDirs, days, project, forceRefresh = false, planConfigs = {}, sourceFilter = null, offline = false) {
   // Step 0: Load the external pricing overlay before any costing happens, so
   // models the hardcoded tables don't know get a real published rate instead of
   // the Sonnet estimate. Cached to disk (~24h TTL); --refresh forces a refetch,
@@ -166,7 +167,7 @@ async function buildPayload(claudeDir, codexDir, copilotDir, days, project, forc
   // cutoffDay keys the cache to the day it was built: sessions are clipped to
   // the rolling window at parse time, so yesterday's cache would serve
   // yesterday's clipping. Costs one full re-parse per day.
-  const cacheOptions = { days, project: project || null, claudeDir, codexDir, copilotDir, cutoffDay: cutoffDate.toDateString() };
+  const cacheOptions = { days, project: project || null, claudeDir, codexDir, copilotDir, copilotVsCodeDirs, cutoffDay: cutoffDate.toDateString() };
 
   if (forceRefresh) {
     deleteCache(cacheOptions);
@@ -207,7 +208,7 @@ async function buildPayload(claudeDir, codexDir, copilotDir, days, project, forc
     } else {
       parseNotes.push(`codex: ${staleCodex.newFiles.length} new, ${staleCodex.modifiedFiles.length} updated, ${staleCodex.deletedFiles.length} deleted`);
     }
-    const staleCopilot = getCopilotStaleFiles(copilotDir, cached.copilotFileIndex || {}, cutoffMs);
+    const staleCopilot = getCopilotStaleFiles(copilotDir, copilotVsCodeDirs, cached.copilotFileIndex || {}, cutoffMs);
     if (staleCopilot.newFiles.length === 0 && staleCopilot.modifiedFiles.length === 0 && staleCopilot.deletedFiles.length === 0) {
       copilotSessions = cached.sessions.filter(s => s.source === 'copilot' && inWindow(s));
       copilotIndex = cached.copilotFileIndex || {};
@@ -236,9 +237,24 @@ async function buildPayload(claudeDir, codexDir, copilotDir, days, project, forc
     }));
   }
   if (!copilotSessions) {
-    parseTasks.push(parseCopilotSessions(copilotDir, days, project).then((result) => {
-      copilotSessions = result.sessions;
-      copilotIndex = result.fileIndex;
+    parseTasks.push(Promise.all([
+      parseCopilotSessions(copilotDir, days, project),
+      parseCopilotVsCodeSessions(copilotVsCodeDirs, days, project),
+    ]).then(([cli, vscode]) => {
+      // Both storage formats represent one product source. Session ids should
+      // be unique, but defensively keep the richer record if a synced session
+      // appears in both stores.
+      const byId = new Map();
+      for (const session of [...cli.sessions, ...vscode.sessions]) {
+        const existing = byId.get(session.sessionId);
+        const score = session.totalInputTokens + session.totalOutputTokens + session.userMessageCount + session.assistantMessageCount;
+        const existingScore = existing
+          ? existing.totalInputTokens + existing.totalOutputTokens + existing.userMessageCount + existing.assistantMessageCount
+          : -1;
+        if (score > existingScore) byId.set(session.sessionId, session);
+      }
+      copilotSessions = [...byId.values()].sort((a, b) => Date.parse(b.startTime) - Date.parse(a.startTime));
+      copilotIndex = { ...cli.fileIndex, ...vscode.fileIndex };
       if (!cached) parseNotes.push(`copilot: ${copilotSessions.length} parsed`);
     }));
   }
@@ -421,6 +437,7 @@ const addAnalysisOptions = (cmd) => cmd
   .option('--claude-dir <path>', 'override path to Claude Code projects directory (for testing/CI)')
   .option('--codex-dir <path>', 'override path to OpenAI Codex sessions directory (for testing/CI)')
   .option('--copilot-dir <path>', 'override path to GitHub Copilot CLI session-state directory (for testing/CI)')
+  .option('--copilot-vscode-dir <path>', 'override path to VS Code workspaceStorage containing Copilot Chat sessions (for testing/CI)')
   .option('--source <agent>', 'analyze a single agent only: claude | codex | copilot | all')
   .option('--offline', 'skip the network pricing refresh; use cached/hardcoded pricing only')
   .option('--plan <tier>', 'Claude subscription mode — effective $/commit vs your flat plan: pro | max5 | max20')
@@ -499,6 +516,9 @@ async function runAnalysis(opts) {
   const claudeDir = opts.claudeDir ? path.resolve(opts.claudeDir) : DEFAULT_CLAUDE_DIR;
   const codexDir = opts.codexDir ? path.resolve(opts.codexDir) : DEFAULT_CODEX_DIR;
   const copilotDir = opts.copilotDir ? path.resolve(opts.copilotDir) : DEFAULT_COPILOT_DIR;
+  const copilotVsCodeDirs = opts.copilotVscodeDir
+    ? [path.resolve(opts.copilotVscodeDir)]
+    : DEFAULT_COPILOT_VSCODE_DIRS;
   // An explicit override pointing nowhere is almost certainly a typo — but the
   // other agents' default dirs may still hold sessions, so warn without exiting.
   if (opts.claudeDir && !existsSync(claudeDir)) {
@@ -510,8 +530,11 @@ async function runAnalysis(opts) {
   if (opts.copilotDir && !existsSync(copilotDir)) {
     console.error(`  ${icon.warn} ${c.yellow}--copilot-dir does not exist:${c.reset} ${copilotDir}`);
   }
+  if (opts.copilotVscodeDir && !existsSync(copilotVsCodeDirs[0])) {
+    console.error(`  ${icon.warn} ${c.yellow}--copilot-vscode-dir does not exist:${c.reset} ${copilotVsCodeDirs[0]}`);
+  }
 
-  const payloads = await buildPayload(claudeDir, codexDir, copilotDir, days, opts.project, opts.refresh, planConfigs, sourceFilter, !!opts.offline);
+  const payloads = await buildPayload(claudeDir, codexDir, copilotDir, copilotVsCodeDirs, days, opts.project, opts.refresh, planConfigs, sourceFilter, !!opts.offline);
   if (payloads) {
     const invokedAs = path.basename(process.argv[1]);
     for (const p of Object.values(payloads)) {
@@ -543,10 +566,10 @@ async function runAnalysis(opts) {
         todayCommits: today?.commits ?? 0,
         grade: payloads.all.summary.overallGrade,
         activeBlock: blockSnapshot,
-      }, { claudeDir, codexDir, copilotDir });
+      }, { claudeDir, codexDir, copilotDir, copilotVsCodeDirs });
     }
   }
-  return { payloads, days, claudeDir, codexDir, copilotDir, planConfigs, sourceFilter };
+  return { payloads, days, claudeDir, codexDir, copilotDir, copilotVsCodeDirs, planConfigs, sourceFilter };
 }
 
 // The deprecation nudge for the legacy claude-roi alias plus the version line.
@@ -566,16 +589,18 @@ function printBanner(commandLabel = '', { big = false } = {}) {
   progress(`${icon.dot} ${c.bold}${c.cyan}codelens-ai${commandLabel}${c.reset} v${VERSION}\n`);
 }
 
-function printNoSessions(sourceFilter, days, claudeDir, codexDir, copilotDir) {
+function printNoSessions(sourceFilter, days, claudeDir, codexDir, copilotDir, copilotVsCodeDirs) {
   if (sourceFilter) {
     const dir = sourceFilter === 'claude' ? claudeDir : sourceFilter === 'codex' ? codexDir : copilotDir;
     progress(`  ${icon.warn} ${c.yellow}No ${sourceFilter} sessions found in the last ${days} days.${c.reset}`);
     progress(`    Drop --source to analyze every agent, or check ${dir}`);
+    if (sourceFilter === 'copilot') progress(`    VS Code Copilot: ${copilotVsCodeDirs.join(', ')}`);
   } else {
     progress(`  ${icon.warn} ${c.yellow}No AI coding agent sessions found.${c.reset}`);
     progress(`    Claude Code: ${claudeDir}`);
     progress(`    OpenAI Codex: ${codexDir}`);
-    progress(`    GitHub Copilot: ${copilotDir}`);
+    progress(`    GitHub Copilot CLI: ${copilotDir}`);
+    progress(`    GitHub Copilot VS Code: ${copilotVsCodeDirs.join(', ')}`);
   }
 }
 
@@ -588,10 +613,10 @@ async function runDashboard(opts) {
   }
   printBanner('', { big: !opts.json && process.stdout.isTTY === true });
 
-  const { payloads, days, claudeDir, codexDir, copilotDir, planConfigs, sourceFilter } = await runAnalysis(opts);
+  const { payloads, days, claudeDir, codexDir, copilotDir, copilotVsCodeDirs, planConfigs, sourceFilter } = await runAnalysis(opts);
 
   if (!payloads) {
-    printNoSessions(sourceFilter, days, claudeDir, codexDir, copilotDir);
+    printNoSessions(sourceFilter, days, claudeDir, codexDir, copilotDir, copilotVsCodeDirs);
     if (opts.json) {
       // Still emit a parseable document: the warning went to stderr above.
       process.stdout.write('null', () => process.exit(0));
@@ -611,7 +636,7 @@ async function runDashboard(opts) {
 
   // Start server — pass a rebuild function so /api/refresh can re-run the pipeline
   const rebuild = async () => {
-    const fresh = await buildPayload(claudeDir, codexDir, copilotDir, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline);
+    const fresh = await buildPayload(claudeDir, codexDir, copilotDir, copilotVsCodeDirs, days, opts.project, true, planConfigs, sourceFilter, !!opts.offline);
     if (fresh) {
       for (const p of Object.values(fresh)) p.meta.invokedAs = payload.meta.invokedAs;
     }
@@ -651,9 +676,9 @@ async function runReport(opts) {
   progress = console.error;
   printBanner(' report');
 
-  const { payloads, days, claudeDir, codexDir, copilotDir, sourceFilter } = await runAnalysis(opts);
+  const { payloads, days, claudeDir, codexDir, copilotDir, copilotVsCodeDirs, sourceFilter } = await runAnalysis(opts);
   if (!payloads) {
-    printNoSessions(sourceFilter, days, claudeDir, codexDir, copilotDir);
+    printNoSessions(sourceFilter, days, claudeDir, codexDir, copilotDir, copilotVsCodeDirs);
     process.exit(0);
   }
 
@@ -689,9 +714,9 @@ async function runTable(period, opts) {
     process.exit(1);
   }
 
-  const { payloads, days, claudeDir, codexDir, copilotDir, sourceFilter } = await runAnalysis(opts);
+  const { payloads, days, claudeDir, codexDir, copilotDir, copilotVsCodeDirs, sourceFilter } = await runAnalysis(opts);
   if (!payloads) {
-    printNoSessions(sourceFilter, days, claudeDir, codexDir, copilotDir);
+    printNoSessions(sourceFilter, days, claudeDir, codexDir, copilotDir, copilotVsCodeDirs);
     if (opts.json) {
       process.stdout.write('null', () => process.exit(0));
       return;
@@ -742,9 +767,9 @@ async function runBlocks(opts) {
     }
   }
 
-  const { payloads, days, claudeDir, codexDir, copilotDir, sourceFilter } = await runAnalysis(opts);
+  const { payloads, days, claudeDir, codexDir, copilotDir, copilotVsCodeDirs, sourceFilter } = await runAnalysis(opts);
   if (!payloads) {
-    printNoSessions(sourceFilter, days, claudeDir, codexDir, copilotDir);
+    printNoSessions(sourceFilter, days, claudeDir, codexDir, copilotDir, copilotVsCodeDirs);
     if (opts.json) {
       process.stdout.write('null', () => process.exit(0));
       return;
@@ -815,7 +840,7 @@ async function runMcp(opts) {
     } else {
       // Still serve: an MCP client has already spawned us, so exiting here reads
       // as a broken server. Tools answer with a clear "no sessions" message.
-      printNoSessions(initial.sourceFilter, initial.days, initial.claudeDir, initial.codexDir, initial.copilotDir);
+      printNoSessions(initial.sourceFilter, initial.days, initial.claudeDir, initial.codexDir, initial.copilotDir, initial.copilotVsCodeDirs);
     }
   }
   progress(`  ${icon.ok} ${c.green}MCP server ready${c.reset} ${c.dim}── ${payloads ? payloads.all.sessions.length : 0} sessions loaded, serving on stdio${c.reset}`);
@@ -902,7 +927,7 @@ async function main() {
   const ANALYSIS_SUBCOMMANDS = new Set(['report', 'daily', 'weekly', 'monthly', 'blocks', 'mcp']);
   program.hook('preSubcommand', (thisCommand, subcommand) => {
     if (!ANALYSIS_SUBCOMMANDS.has(subcommand.name())) return;
-    for (const key of ['days', 'project', 'refresh', 'claudeDir', 'codexDir', 'copilotDir', 'source', 'offline', 'plan', 'planCost', 'codexPlan', 'codexPlanCost', 'copilotPlan', 'copilotPlanCost']) {
+    for (const key of ['days', 'project', 'refresh', 'claudeDir', 'codexDir', 'copilotDir', 'copilotVscodeDir', 'source', 'offline', 'plan', 'planCost', 'codexPlan', 'codexPlanCost', 'copilotPlan', 'copilotPlanCost']) {
       if (thisCommand.getOptionValueSource(key) === 'cli') {
         subcommand.setOptionValueWithSource(key, thisCommand.getOptionValue(key), 'cli');
       }

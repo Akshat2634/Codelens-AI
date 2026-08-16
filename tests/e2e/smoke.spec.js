@@ -127,6 +127,9 @@ test.describe('Dashboard smoke (fixtures)', () => {
     expect(copilot.meta.source).toBe('copilot');
     expect(copilot.sessions.length).toBe(all.meta.sources.copilot);
     expect(copilot.sessions.every((s) => s.source === 'copilot')).toBe(true);
+    expect(new Set(copilot.sessions.map((s) => s.entrypoint))).toEqual(
+      new Set(['copilot-cli', 'copilot-vscode'])
+    );
 
     // The combined view is a true sum of every provider for capability/tool
     // counts, while retaining every provider's exact model rows.
@@ -144,6 +147,14 @@ test.describe('Dashboard smoke (fixtures)', () => {
     for (const model of Object.keys(codex.modelDetailBreakdown)) {
       expect(all.modelDetailBreakdown[model].cost).toBeCloseTo(codex.modelDetailBreakdown[model].cost, 10);
     }
+  });
+
+  test('Copilot CLI and VS Code render under one GitHub Copilot source', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#sec-skills');
+    await expect(page.locator('#sec-skills')).toContainText('Copilot CLI');
+    await expect(page.locator('#sec-skills')).toContainText('Copilot VS Code');
+    await expect(page.locator('.source-tab', { hasText: 'GitHub Copilot' })).toHaveCount(1);
   });
 
   test('non-Git Codex tasks keep usage without repository-only metrics', async ({ page, request }) => {

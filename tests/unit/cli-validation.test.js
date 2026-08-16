@@ -79,15 +79,23 @@ test('warns on stderr (without exiting) when an explicit override dir does not e
     const claudeDir = path.join(root, 'claude-projects');
     mkdirSync(claudeDir, { recursive: true });
     const missingCodexDir = path.join(root, 'nope', 'codex-sessions');
+    const missingCopilotVsCodeDir = path.join(root, 'nope', 'workspaceStorage');
 
     const r = runCli(
-      ['--json', '--claude-dir', claudeDir, '--codex-dir', missingCodexDir],
+      [
+        '--json',
+        '--claude-dir', claudeDir,
+        '--codex-dir', missingCodexDir,
+        '--copilot-vscode-dir', missingCopilotVsCodeDir,
+      ],
       { HOME: root }
     );
 
     assert.equal(r.status, 0);
     assert.match(r.stderr, /--codex-dir does not exist/);
     assert.ok(r.stderr.includes(missingCodexDir));
+    assert.match(r.stderr, /--copilot-vscode-dir does not exist/);
+    assert.ok(r.stderr.includes(missingCopilotVsCodeDir));
     assert.equal(r.stdout, 'null');
   } finally {
     rmSync(root, { recursive: true, force: true });
