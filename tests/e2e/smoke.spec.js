@@ -166,6 +166,7 @@ test.describe('Dashboard smoke (fixtures)', () => {
     await expect(row.locator('.session-lines')).toHaveText('—');
     await expect(row.locator('.session-grade')).toHaveText('N/A');
     await expect(page.locator('#sec-projects')).not.toContainText('codelens-fixture-chat-task');
+    await expect(page.locator('#sec-overview')).toContainText('of repository spend');
 
     await page.getByRole('button', { name: 'Other tasks' }).click();
     await expect(page.locator('.session-row')).toHaveCount(1);
@@ -173,6 +174,36 @@ test.describe('Dashboard smoke (fixtures)', () => {
 
     await page.getByRole('button', { name: 'Repository work' }).click();
     await expect(page.locator('.session-row').filter({ hasText: 'codelens-fixture-chat-task' })).toHaveCount(0);
+  });
+
+  test('task-only activity renders aggregate repository ROI as not applicable', async ({ page, request }) => {
+    const codex = await (await request.get('/api/all?source=codex')).json();
+    const task = codex.sessions.find(s => s.contextType === 'task');
+    const taskOnly = structuredClone(codex);
+    taskOnly.sessions = [task];
+    taskOnly.projects = [];
+    taskOnly.summary = {
+      ...taskOnly.summary,
+      totalSessions: 1,
+      totalCost: task.cost.totalCost,
+      totalCommits: 0,
+      avgCostPerCommit: null,
+      overallGrade: 'N/A',
+      efficiencyScore: {
+        score: null,
+        tier: 'Not applicable',
+        letter: 'N/A',
+        explanation: 'No Git repository work was recorded in this window.',
+        tip: 'Repository ROI is calculated only for tasks attached to Git repositories.',
+      },
+    };
+    taskOnly.weeklyNarrative = null;
+
+    await page.route('**/api/all*', route => route.fulfill({ json: taskOnly }));
+    await page.goto('/');
+    await expect(page.locator('.score-value')).toHaveText('N/A');
+    await expect(page.locator('#sec-overview')).toContainText('REPOSITORY ROI');
+    await expect(page.locator('#sec-overview')).toContainText('Not applicable');
   });
 
   test('All Agents model view renders exact Claude and Codex models together', async ({ page }) => {

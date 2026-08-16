@@ -84,10 +84,53 @@ test('non-repository sessions remain in totals but not project aggregation', () 
   assert.equal(m.summary.totalCost, 3);
   assert.equal(m.summary.valueLeak.cost, 0);
   assert.equal(m.summary.valueLeak.sessionCount, 0);
+  assert.equal(m.summary.avgCostPerCommit, null);
+  assert.equal(m.summary.overallGrade, 'N/A');
+  assert.equal(m.summary.efficiencyScore.score, null);
+  assert.equal(m.summary.efficiencyScore.letter, 'N/A');
   assert.deepEqual(m.projects, []);
   assert.equal(m.sessions[0].contextType, 'task');
   assert.equal(m.sessions[0].taskName, 'prompt-derived-task');
   assert.equal(m.sessions[0].grade, null);
+});
+
+test('repository efficiency excludes non-repository task cost', () => {
+  const now = new Date().toISOString();
+  const commit = {
+    hash: 'mixed-1', timestamp: now, timestampMs: Date.now(), subject: 'ship repository work', onMain: true,
+    files: [{ path: 'src/foo.js', added: 10, deleted: 0 }], totalAdded: 10, totalDeleted: 0,
+  };
+  const repository = mkCorrelated({
+    sessionId: 'repository', startTime: now, endTime: now,
+    commits: [commit], commitCount: 1, commitsOnMain: 1, linesAdded: 10,
+    cost: { totalCost: 6, inputCost: 3, outputCost: 3, cacheReadCost: 0, cacheCreationCost: 0 },
+    modelBreakdown: { 'claude-sonnet-4-6': { tokens: 1800, cost: 6 } },
+  });
+  const task = mkCorrelated({
+    sessionId: 'task', repoPath: '/workspace/write-an-email', projectName: null,
+    startTime: now, endTime: now,
+    cost: { totalCost: 3, inputCost: 2, outputCost: 1, cacheReadCost: 0, cacheCreationCost: 0 },
+  });
+
+  const m = computeMetrics(
+    [repository, task],
+    [],
+    { '/repo': { commits: [commit], defaultBranch: 'main' } },
+    30,
+  );
+
+  assert.equal(m.summary.totalCost, 9, 'task cost remains in total spend');
+  assert.equal(m.summary.avgCostPerCommit, 6);
+  assert.equal(m.summary.avgCostPerLine, 0.6);
+  assert.match(m.summary.efficiencyScore.explanation, /^\$6\.00\/commit/);
+  assert.equal(m.modelBreakdown.sonnet.avgCostPerCommit, 6);
+  assert.equal(m.sessionBuckets['1-50'].cost, 6);
+  assert.equal(m.weeklyNarrative.thisWeek.cost, 9, 'weekly spend remains all usage');
+  assert.equal(m.weeklyNarrative.thisWeek.costPerCommit, 6);
+  assert.equal(m.weeklyNarrative.metrics.find(x => x.label === 'Repo Cost/Commit').value, '$6.00');
+
+  const taskOnly = computeMetrics([task], [], {}, 30);
+  assert.match(taskOnly.weeklyNarrative.headline, /repository ROI does not apply/);
 });
 
 test('computeMetrics on empty input returns a well-formed payload', () => {

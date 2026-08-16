@@ -104,7 +104,7 @@ This parses your `~/.claude/projects/`, `~/.codex/sessions/`, and `~/.copilot/se
 | --------------------- | --------------------------------------------------------------- |
 | **Cost per Commit**   | How much each AI-assisted commit costs in tokens                |
 | **AI Code Share**     | % of all merged lines this window written by AI — measured from git, not surveys |
-| **Value Leak**        | $ and % of spend from sessions that produced zero committed code |
+| **Value Leak**        | $ and % of repository spend from repository sessions that produced zero committed code |
 | **Line Survival Rate**| % of AI-written lines that survive 24h without being rewritten  |
 | **Orphaned Sessions** | Sessions with 10+ messages that produced zero commits           |
 | **ROI Grade (A-F)**   | Composite score based on tokens-per-commit and survival rate    |

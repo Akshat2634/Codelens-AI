@@ -44,7 +44,7 @@ function mkPayload(overrides = {}) {
       sonnet: { cost: 42.5, commits: 8, avgCostPerCommit: 5.31, sessions: 4 },
     },
     insights: overrides.insights || [
-      { type: 'success', text: 'Only 13% of spend didn\'t reach a commit — very little value leak.' },
+      { type: 'success', text: 'Only 13% of repository spend didn\'t reach a commit — very little value leak.' },
     ],
   };
 }
@@ -88,7 +88,7 @@ test('markdown report renders tables with the key figures', () => {
   assert.ok(md.startsWith('# AI coding ROI report'));
   assert.ok(md.includes('| Spend (API-equivalent) | $142.50 |'));
   assert.ok(md.includes('| AI code share | 62% of merged lines |'));
-  assert.ok(md.includes('| Value leak | $18.40 (13%) spend with no committed code |'));
+  assert.ok(md.includes('| Value leak | $18.40 (13%) repository spend with no committed code |'));
   assert.ok(md.includes('Co-authored-by'));
 });
 
