@@ -1,4 +1,4 @@
-// 5-hour billing blocks + burn rate — `codelens-ai blocks`.
+// Configurable usage windows + burn rate — `codelens-ai blocks`.
 //
 // Claude bills usage in rolling 5-hour windows: the window opens with your first
 // message and lasts exactly 5 hours. This groups every session's per-event usage
@@ -53,7 +53,7 @@ function projectBlock(block, nowMs) {
   };
 }
 
-// Group every session's usageEvents into 5-hour billing blocks.
+// Group every session's usageEvents into configurable usage windows.
 //   sessions:     correlated/parsed sessions (each with .usageEvents)
 //   sessionHours: window length (default 5; --session-length overrides)
 //   nowMs:        clock for active-block detection (injectable for tests)
@@ -223,7 +223,7 @@ export function renderBlocksText(result, { active = false, color = true } = {}) 
   const k = color ? c : new Proxy({}, { get: () => '' });
 
   if (active) {
-    if (!result.activeBlock) return `\n  ${k.dim}No active 5-hour block — no usage in the current window.${k.reset}\n`;
+    if (!result.activeBlock) return `\n  ${k.dim}No active 5-hour window — no recent usage.${k.reset}\n`;
     return '\n' + renderActiveBlock(result.activeBlock, k) + '\n';
   }
 
