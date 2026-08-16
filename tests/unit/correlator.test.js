@@ -134,6 +134,19 @@ test('orphaned: >10 msgs and 0 matched commits', () => {
   assert.equal(correlatedSessions[0].commitCount, 0);
 });
 
+test('non-repository tasks are not classified as orphaned coding sessions', () => {
+  const session = mkSession({
+    repoPath: '/workspace/draft-an-administrative-reply',
+    projectName: null,
+    userMessageCount: 10,
+    assistantMessageCount: 30,
+  });
+  const { correlatedSessions } = correlateSessions([session], {});
+
+  assert.equal(correlatedSessions[0].commitCount, 0);
+  assert.equal(correlatedSessions[0].isOrphaned, false);
+});
+
 test('file-overlap match wins over time-only match', () => {
   // Two sessions both in the commit's time window; only session B has the file
   const sessionA = mkSession({

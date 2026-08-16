@@ -125,19 +125,19 @@ export function renderReportText(model) {
   L.push(`  ${label('Sessions')}${fmtInt(model.sessions)}`);
   L.push(`  ${label('Commits shipped')}${fmtInt(model.commits)}${model.commits > 0 ? ` ${c.dim}(${model.mainBranchPct}% on default branch)${c.reset}` : ''}`);
   L.push(`  ${label('Lines added')}${fmtInt(model.linesAdded)} ${c.dim}(net ${fmtInt(model.netLines)})${c.reset}`);
-  L.push(`  ${label('Cost per commit')}${fmtMoney(model.costPerCommit)}${model.plan?.effectiveCostPerCommit != null ? ` ${c.dim}(effective ${fmtMoney(model.plan.effectiveCostPerCommit)} on plan)${c.reset}` : ''}`);
+  L.push(`  ${label('Repository $/commit')}${fmtMoney(model.costPerCommit)}${model.plan?.effectiveCostPerCommit != null ? ` ${c.dim}(effective ${fmtMoney(model.plan.effectiveCostPerCommit)} on plan)${c.reset}` : ''}`);
   if (model.survivalRate !== null) L.push(`  ${label('Line survival (24h)')}${model.survivalRate}%`);
   if (model.aiCodeSharePct !== null) L.push(`  ${label('AI code share')}${model.aiCodeSharePct}% ${c.dim}of merged lines this window${c.reset}`);
   if (model.valueLeak) {
     const vlc = model.valueLeak.pct >= 40 ? c.red : model.valueLeak.pct >= 15 ? c.yellow : c.green;
-    L.push(`  ${label('Value leak')}${vlc}${fmtMoney(model.valueLeak.cost)} (${model.valueLeak.pct}%)${c.reset} ${c.dim}spend with no committed code${c.reset}`);
+    L.push(`  ${label('Value leak')}${vlc}${fmtMoney(model.valueLeak.cost)} (${model.valueLeak.pct}%)${c.reset} ${c.dim}repository spend with no committed code${c.reset}`);
   }
 
   if (model.agents.length > 0) {
     L.push(`  ${rule}`);
     L.push(`  ${c.bold}Agents${c.reset}`);
     for (const a of model.agents) {
-      L.push(`  ${label(a.label)}${fmtMoney(a.cost)} ${c.dim}·${c.reset} ${fmtInt(a.commits)} commits ${c.dim}·${c.reset} ${fmtMoney(a.costPerCommit)}/commit ${GRADE_COLOR[a.grade] || ''}${a.grade}${c.reset}`);
+      L.push(`  ${label(a.label)}${fmtMoney(a.cost)} ${c.dim}·${c.reset} ${fmtInt(a.commits)} commits ${c.dim}·${c.reset} ${fmtMoney(a.costPerCommit)}/repo commit ${GRADE_COLOR[a.grade] || ''}${a.grade}${c.reset}`);
     }
   }
 
@@ -145,7 +145,7 @@ export function renderReportText(model) {
     L.push(`  ${rule}`);
     L.push(`  ${c.bold}Models${c.reset}`);
     for (const m of model.models) {
-      L.push(`  ${label(m.family)}${fmtMoney(m.cost)}${m.costPerCommit != null ? ` ${c.dim}·${c.reset} ${fmtMoney(m.costPerCommit)}/commit (${m.commits})` : ''}`);
+      L.push(`  ${label(m.family)}${fmtMoney(m.cost)}${m.costPerCommit != null ? ` ${c.dim}·${c.reset} ${fmtMoney(m.costPerCommit)}/repo commit (${m.commits})` : ''}`);
     }
   }
 
@@ -198,16 +198,16 @@ export function renderReportMarkdown(model) {
   L.push(`| Sessions | ${fmtInt(model.sessions)} |`);
   L.push(`| Commits shipped | ${fmtInt(model.commits)}${model.commits > 0 ? ` (${model.mainBranchPct}% on default branch)` : ''} |`);
   L.push(`| Lines added | ${fmtInt(model.linesAdded)} (net ${fmtInt(model.netLines)}) |`);
-  L.push(`| Cost per commit | ${fmtMoney(model.costPerCommit)}${model.plan?.effectiveCostPerCommit != null ? ` (effective ${fmtMoney(model.plan.effectiveCostPerCommit)} on plan)` : ''} |`);
+  L.push(`| Repository cost per commit | ${fmtMoney(model.costPerCommit)}${model.plan?.effectiveCostPerCommit != null ? ` (effective ${fmtMoney(model.plan.effectiveCostPerCommit)} on plan)` : ''} |`);
   if (model.survivalRate !== null) L.push(`| Line survival (24h) | ${model.survivalRate}% |`);
   if (model.aiCodeSharePct !== null) L.push(`| AI code share | ${model.aiCodeSharePct}% of merged lines |`);
-  if (model.valueLeak) L.push(`| Value leak | ${fmtMoney(model.valueLeak.cost)} (${model.valueLeak.pct}%) spend with no committed code |`);
+  if (model.valueLeak) L.push(`| Value leak | ${fmtMoney(model.valueLeak.cost)} (${model.valueLeak.pct}%) repository spend with no committed code |`);
   L.push('');
 
   if (model.agents.length > 0) {
     L.push('## Agents');
     L.push('');
-    L.push('| Agent | Spend | Commits | $/commit | Grade |');
+    L.push('| Agent | Spend | Commits | Repository $/commit | Grade |');
     L.push('| --- | --- | --- | --- | --- |');
     for (const a of model.agents) {
       L.push(`| ${a.label} | ${fmtMoney(a.cost)} | ${fmtInt(a.commits)} | ${fmtMoney(a.costPerCommit)} | ${a.grade} |`);
@@ -218,7 +218,7 @@ export function renderReportMarkdown(model) {
   if (model.models.length > 0) {
     L.push('## Models');
     L.push('');
-    L.push('| Model family | Spend | $/commit | Commits |');
+    L.push('| Model family | Spend | Repository $/commit | Commits |');
     L.push('| --- | --- | --- | --- |');
     for (const m of model.models) {
       L.push(`| ${m.family} | ${fmtMoney(m.cost)} | ${m.costPerCommit != null ? fmtMoney(m.costPerCommit) : 'n/a'} | ${fmtInt(m.commits)} |`);
@@ -274,10 +274,10 @@ export function renderReportHtml(model) {
   rows.push(row('Sessions', fmtInt(model.sessions)));
   rows.push(row('Commits shipped', `<strong>${fmtInt(model.commits)}</strong>${model.commits > 0 ? ` <span class="dim">(${model.mainBranchPct}% on default branch)</span>` : ''}`));
   rows.push(row('Lines added', `${fmtInt(model.linesAdded)} <span class="dim">(net ${fmtInt(model.netLines)})</span>`));
-  rows.push(row('Cost per commit', `<strong>${fmtMoney(model.costPerCommit)}</strong>${model.plan?.effectiveCostPerCommit != null ? ` <span class="dim">(effective ${fmtMoney(model.plan.effectiveCostPerCommit)} on plan)</span>` : ''}`));
+  rows.push(row('Repository cost per commit', `<strong>${fmtMoney(model.costPerCommit)}</strong>${model.plan?.effectiveCostPerCommit != null ? ` <span class="dim">(effective ${fmtMoney(model.plan.effectiveCostPerCommit)} on plan)</span>` : ''}`));
   if (model.survivalRate !== null) rows.push(row('Line survival (24h)', `${model.survivalRate}%`));
   if (model.aiCodeSharePct !== null) rows.push(row('AI code share', `<strong>${model.aiCodeSharePct}%</strong> <span class="dim">of merged lines this window</span>`));
-  if (model.valueLeak) rows.push(row('Value leak', `${fmtMoney(model.valueLeak.cost)} (${model.valueLeak.pct}%) <span class="dim">spend with no committed code</span>`));
+  if (model.valueLeak) rows.push(row('Value leak', `${fmtMoney(model.valueLeak.cost)} (${model.valueLeak.pct}%) <span class="dim">repository spend with no committed code</span>`));
 
   const agentRows = model.agents.map(a =>
     `<tr><td>${escapeHtml(a.label)}</td><td>${fmtMoney(a.cost)}</td><td>${fmtInt(a.commits)}</td><td>${fmtMoney(a.costPerCommit)}</td><td><span class="grade" style="background:${gradeColors[a.grade] || '#334155'}">${escapeHtml(a.grade)}</span></td></tr>`

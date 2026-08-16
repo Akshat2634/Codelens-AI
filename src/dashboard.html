@@ -545,7 +545,7 @@
           },
           options: {
             responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false }, tooltip: { callbacks: { title: (items) => items[0].label.split(',')[0], label: (ctx) => ` Avg $/commit: $${ctx.parsed.y.toFixed(2)}` } } },
+            plugins: { legend: { display: false }, tooltip: { callbacks: { title: (items) => items[0].label.split(',')[0], label: (ctx) => ` Repo avg $/commit: $${ctx.parsed.y.toFixed(2)}` } } },
             scales: {
               x: { grid: { display: false }, border: { color: T.grid }, ticks: { font: Object.assign({}, monoFont, { size: 10 }) } },
               y: { grid: { color: T.grid }, border: { display: false }, ticks: { font: monoFont, maxTicksLimit: 5, callback: (val) => '$' + Number(val).toFixed(1) } },
@@ -693,14 +693,15 @@
 
     y += 20;
     const es = s.efficiencyScore || { letter: 'F', score: 0 };
+    const scoreApplicable = es.score != null;
     const gc = gradeHex[es.letter] || th.ink3;
     ctx.beginPath(); ctx.arc(80, y + 52, 42, 0, Math.PI * 2); ctx.strokeStyle = th.track; ctx.lineWidth = 5; ctx.stroke();
-    ctx.beginPath(); ctx.arc(80, y + 52, 42, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * es.score / 100);
+    ctx.beginPath(); ctx.arc(80, y + 52, 42, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (es.score || 0) / 100);
     ctx.strokeStyle = gc; ctx.lineCap = 'round'; ctx.stroke(); ctx.lineCap = 'butt';
     ctx.font = "800 40px 'Bricolage Grotesque', sans-serif"; ctx.fillStyle = gc; ctx.textAlign = 'center';
     ctx.fillText(es.letter, 80, y + 66);
     ctx.font = mono(600); ctx.fillStyle = th.ink3;
-    ctx.fillText(es.score + '/100', 80, y + 110);
+    ctx.fillText(scoreApplicable ? es.score + '/100' : 'NOT GRADED', 80, y + 110);
     ctx.textAlign = 'left';
     const box = (x, by, val, label, col) => {
       rr(x, by, 152, 52, 9); ctx.fillStyle = th.box; ctx.fill(); ctx.strokeStyle = th.sep; ctx.lineWidth = 1; ctx.stroke();
@@ -709,7 +710,7 @@
     };
     box(160, y, fmtMoney(s.totalCost), 'Total Spend', cOrange);
     box(324, y, String(s.totalCommits), 'Commits Shipped', cGreen);
-    box(160, y + 64, s.avgCostPerCommit != null ? fmtMoney(s.avgCostPerCommit) : 'N/A', 'Avg $/Commit', cBlue);
+    box(160, y + 64, s.avgCostPerCommit != null ? fmtMoney(s.avgCostPerCommit) : 'N/A', 'Repo $/Commit', cBlue);
     box(324, y + 64, String(s.totalSessions), 'Sessions', cPurple);
 
     const section = (text, ly) => {
@@ -1124,9 +1125,10 @@
 
     // Score card
     const es = sum.efficiencyScore || { score: 0, letter: 'F', tier: '—', explanation: '', tip: '' };
+    const scoreApplicable = es.score != null;
     const scoreColor = scoreColorOf(es.score);
     const C = 452.4;
-    const scoreOffset = (C - C * es.score / 100).toFixed(1);
+    const scoreOffset = (C - C * (es.score || 0) / 100).toFixed(1);
     const scoreGlow = `color-mix(in srgb, ${scoreColor} 22%, transparent)`;
     const scoreCard = `<div style="flex:1 1 300px;border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:26px 24px;display:flex;flex-direction:column;align-items:center;text-align:center;box-shadow:var(--shadow);animation:rise .6s .06s cubic-bezier(0.22,1,0.36,1) both;position:relative;overflow:hidden;">
       <div style="position:absolute;inset:-40% -40% auto;height:70%;background:radial-gradient(ellipse at 50% 0%, ${scoreGlow}, transparent 65%);pointer-events:none;"></div>
@@ -1137,8 +1139,8 @@
           <circle cx="84" cy="84" r="72" fill="none" stroke="${scoreColor}" stroke-width="10" stroke-linecap="round" stroke-dasharray="452.4" stroke-dashoffset="${scoreOffset}" style="--c:452.4;--o:${scoreOffset};animation:ringIn 1.3s .3s cubic-bezier(0.22,1,0.36,1) both;filter:drop-shadow(0 0 10px ${scoreGlow});"></circle>
         </svg>
         <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;">
-          <span class="score-value" style="font-family:'IBM Plex Mono',monospace;font-size:46px;font-weight:700;line-height:1;color:${scoreColor};">${es.score}</span>
-          <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.18em;color:var(--ink3);">/ 100 · GRADE ${esc(es.letter)}</span>
+          <span class="score-value" style="font-family:'IBM Plex Mono',monospace;font-size:${scoreApplicable ? '46px' : '30px'};font-weight:700;line-height:1;color:${scoreColor};">${scoreApplicable ? es.score : 'N/A'}</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.18em;color:var(--ink3);">${scoreApplicable ? `/ 100 · GRADE ${esc(es.letter)}` : 'REPOSITORY ROI'}</span>
         </div>
       </div>
       <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;color:${scoreColor};margin-top:16px;">${esc(es.tier)}</div>
@@ -1155,9 +1157,9 @@
     const tiles = [
       { cls: 'cost-card', label: 'Agent Spend', value: fmtMoney(sum.totalCost), tick: ['money', (sum.totalCost || 0).toFixed(2)], unit: 'API-equiv', sub: `${sum.totalSessions} sessions this window`, color: 'var(--amber-hi)', hoverLine: 'color-mix(in srgb, var(--amber) 45%, transparent)', spark: costSpark, sparkFill: 'color-mix(in srgb, var(--amber) 12%, transparent)', delay: '0.1s' },
       { label: 'Commits Shipped', value: String(sum.totalCommits), tick: ['int', sum.totalCommits], unit: 'commits', sub: `${sum.totalLinesAdded.toLocaleString()} lines added`, color: 'var(--green)', hoverLine: 'color-mix(in srgb, var(--green) 45%, transparent)', spark: lineSpark, sparkFill: 'color-mix(in srgb, var(--green) 12%, transparent)', delay: '0.16s' },
-      { label: 'Cost per Commit', value: fmtMoney(sum.avgCostPerCommit), tick: ['money', (sum.avgCostPerCommit || 0).toFixed(2)], unit: 'avg', sub: `${sum.totalFilesChanged} files changed`, color: 'var(--blue)', hoverLine: 'color-mix(in srgb, var(--blue) 45%, transparent)', bar: Math.min(100, (sum.avgCostPerCommit || 0) / 5 * 100).toFixed(0) + '%', barLo: '$0', barHi: '$5+', delay: '0.22s' },
+      { label: 'Repository Cost / Commit', value: fmtMoney(sum.avgCostPerCommit), tick: ['money', (sum.avgCostPerCommit || 0).toFixed(2)], unit: 'avg', sub: `${sum.totalFilesChanged} files changed`, color: 'var(--blue)', hoverLine: 'color-mix(in srgb, var(--blue) 45%, transparent)', bar: Math.min(100, (sum.avgCostPerCommit || 0) / 5 * 100).toFixed(0) + '%', barLo: '$0', barHi: '$5+', delay: '0.22s' },
       { label: 'AI Code Share', value: (sum.aiCodeSharePct ?? '—') + '%', unit: 'of merged lines', sub: 'measured from git history', color: 'var(--purple)', hoverLine: 'color-mix(in srgb, var(--purple) 45%, transparent)', bar: (sum.aiCodeSharePct || 0) + '%', barLo: '0%', barHi: '100%', delay: '0.28s' },
-      { label: 'Value Leak', value: fmtMoney(leak.cost), tick: ['money', (leak.cost || 0).toFixed(2)], unit: leak.pct + '% of spend', sub: `${leak.sessionCount} sessions shipped nothing`, color: leakColor, hoverLine: `color-mix(in srgb, ${leakColor} 45%, transparent)`, bar: leak.pct + '%', barLo: '0%', barHi: '100%', delay: '0.34s' },
+      { label: 'Value Leak', value: fmtMoney(leak.cost), tick: ['money', (leak.cost || 0).toFixed(2)], unit: leak.pct + '% of repository spend', sub: `${leak.sessionCount} sessions shipped nothing`, color: leakColor, hoverLine: `color-mix(in srgb, ${leakColor} 45%, transparent)`, bar: leak.pct + '%', barLo: '0%', barHi: '100%', delay: '0.34s' },
       { label: 'Token Efficiency', value: tk.tokenEfficiencyRate + '%', unit: 'shipped code', sub: `${fmtTokens(tk.totalAllTokens)} tokens burned`, color: 'var(--cyan)', hoverLine: 'color-mix(in srgb, var(--cyan) 45%, transparent)', bar: tk.tokenEfficiencyRate + '%', barLo: '0%', barHi: '100%', delay: '0.4s' },
     ];
     const statTiles = tiles.map((st) => {
@@ -1394,7 +1396,7 @@
         { label: 'Spend', get: (p) => p.summary.totalCost, fmt: fmtMoney, lowerBetter: true },
         { label: 'Sessions', get: (p) => p.summary.totalSessions, fmt: (x) => String(x), lowerBetter: false },
         { label: 'Commits', get: (p) => p.summary.totalCommits, fmt: (x) => String(x), lowerBetter: false },
-        { label: '$ / Commit', get: (p) => p.summary.avgCostPerCommit, fmt: fmtMoney, lowerBetter: true },
+        { label: 'Repo $ / Commit', get: (p) => p.summary.avgCostPerCommit, fmt: fmtMoney, lowerBetter: true },
         { label: 'Line Survival', get: (p) => p.lineSurvival.survivalRate, fmt: pct, lowerBetter: false, max: 100 },
       ];
       const cardOpen = `<div class="faceoff-section faceoff-card" style="border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:22px 26px;box-shadow:var(--shadow);margin-bottom:14px;position:relative;overflow:hidden;">`;
@@ -1800,12 +1802,15 @@
   function sessionList() {
     const v = view();
     let list = v.sessions;
+    if (state.filter === 'repositories') list = list.filter((x) => x.contextType === 'repository');
+    if (state.filter === 'tasks') list = list.filter((x) => x.contextType === 'task');
     if (state.filter === 'shipped') list = list.filter((x) => x.commitCount > 0);
-    if (state.filter === 'leaked') list = list.filter((x) => x.commitCount === 0);
+    if (state.filter === 'leaked') list = list.filter((x) => x.contextType === 'repository' && x.commitCount === 0);
     if (state.q.trim()) {
       const q = state.q.trim().toLowerCase();
       list = list.filter((x) =>
         (x.projectName || '').toLowerCase().includes(q) ||
+        (x.taskName || '').toLowerCase().includes(q) ||
         fmtModel(x.model).toLowerCase().includes(q) ||
         x.commits.some((cm) => cm.subject.toLowerCase().includes(q) || (cm.branch || '').toLowerCase().includes(q)));
     }
@@ -1814,6 +1819,7 @@
       if (col === 'cost') return x.cost.totalCost;
       if (col === 'msgs') return x.userMessageCount + x.assistantMessageCount;
       if (col === 'model') return fmtModel(x.model);
+      if (col === 'projectName') return x.projectName || x.taskName || '';
       if (col === 'startTime') return new Date(x.startTime).getTime();
       return x[col] ?? 0;
     };
@@ -1833,7 +1839,7 @@
     const pageRows = list.slice((page - 1) * pageSize, page * pageSize);
 
     const headerDefs = [
-      ['startTime', 'Date', 'left'], ['projectName', 'Project', 'left'], ['model', 'Model', 'left'],
+      ['startTime', 'Date', 'left'], ['projectName', 'Context', 'left'], ['model', 'Model', 'left'],
       ['msgs', 'Msgs', 'right'], ['autopilotRatio', 'Auto', 'right'], ['cost', 'Cost', 'right'],
       ['commitCount', 'Commits', 'right'], ['linesAdded', 'Lines', 'right'], [null, 'Grade', 'center'],
     ];
@@ -1847,6 +1853,7 @@
     const rows = pageRows.map((x) => {
       const expanded = state.expanded === x.sessionId;
       const badge = srcBadge(x.source);
+      const isRepository = x.contextType === 'repository';
       const srcColor = badge.color;
       const srcLabel = badge.label;
       const date = new Date(x.startTime).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -1870,16 +1877,36 @@
             <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink3);white-space:nowrap;">+${(cm.totalAdded || 0).toLocaleString()}/−${(cm.totalDeleted || 0).toLocaleString()}</span>
           </div>`;
         }).join('');
-        const noCommits = x.commits.length === 0 ? `<div style="padding:8px 0;font-size:12px;color:var(--ink3);">No matched commits — this session's spend is part of the value leak.</div>` : '';
-        expandBlock = `<div class="expand-row" style="padding:6px 18px 14px 44px;border-bottom:1px solid var(--line2);background:var(--bg2);animation:riseSm .25s ease both;">${commitRows}${noCommits}</div>`;
+        const noCommits = isRepository && x.commits.length === 0 ? `<div style="padding:8px 0;font-size:12px;color:var(--ink3);">No matched commits — this session's spend is part of the value leak.</div>` : '';
+        const taskNote = !isRepository ? `<div style="padding:8px 0;font-size:12px;color:var(--ink3);">Repository metrics do not apply to this task. Usage and cost remain included in totals.</div>` : '';
+        expandBlock = `<div class="expand-row" style="padding:6px 18px 14px 44px;border-bottom:1px solid var(--line2);background:var(--bg2);animation:riseSm .25s ease both;">${commitRows}${noCommits}${taskNote}</div>`;
       }
+      const contextCell = isRepository
+        ? `<span title="${esc(x.repoPath || '')}" style="font-size:13.5px;font-weight:500;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(x.projectName)}</span>`
+        : `<div style="display:flex;align-items:center;gap:7px;min-width:0;">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:0.04em;padding:3px 7px;border-radius:5px;color:var(--ink2);background:var(--hover);white-space:nowrap;">Other task</span>
+            <span title="${esc(x.repoPath || '')}" style="font-size:12.5px;color:var(--ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(x.taskName || 'Unnamed task')}</span>
+          </div>`;
+      const commitsCell = isRepository
+        ? `<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;padding-right:14px;">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;">${x.commitCount}</span>
+            <span style="width:7px;height:7px;border-radius:50%;background:${confColor};" title="${esc(confLabel)}"></span>
+          </div>`
+        : '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:12.5px;color:var(--ink3);text-align:right;padding-right:14px;">—</span>';
+      const linesCell = isRepository
+        ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:right;padding-right:14px;"><span style="color:var(--green);">+${x.linesAdded.toLocaleString()}</span> <span style="color:var(--ink3);">/</span> <span style="color:var(--red);">−${x.linesDeleted.toLocaleString()}</span></span>`
+        : '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:12.5px;color:var(--ink3);text-align:right;padding-right:14px;">—</span>';
+      const gradeLabel = isRepository ? (x.grade || '—') : 'N/A';
+      const gradeTitle = isRepository
+        ? (x.grade ? '' : 'Cost booked to a sibling sub-repo session — not independently graded')
+        : 'Commit ROI does not apply outside a Git repository';
       return `<div>
         <div class="session-row${expanded ? ' expanded' : ''}" data-act="rowToggle" data-arg="${esc(x.sessionId)}" style="display:grid;grid-template-columns:${gridCols};align-items:center;padding:11px 18px;border-bottom:1px solid var(--line2);cursor:pointer;${expanded ? 'background:var(--bg2);' : ''}opacity:${x.isOrphaned ? 0.62 : 1};">
           <div style="display:flex;align-items:center;gap:8px;">
             <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--ink3);transform:rotate(${expanded ? '90deg' : '0deg'});transition:transform .2s;display:inline-block;">▶</span>
             <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--ink2);">${esc(date)}</span>
           </div>
-          <span title="${x.projectName ? '' : 'This session was not attached to a Git repository'}" style="font-size:13.5px;font-weight:500;color:${x.projectName ? 'var(--ink)' : 'var(--ink3)'};">${esc(x.projectName || 'No repository')}</span>
+          <div class="session-context" style="min-width:0;">${contextCell}</div>
           <div style="display:flex;align-items:center;gap:7px;">
             <span title="${esc(srcLabel)}" style="display:inline-flex;flex-shrink:0;">${logoSvg(badge.logo, 12, srcColor, 'style="display:block"')}</span>
             <span style="font-size:13px;color:var(--ink2);">${esc(fmtModel(x.model))}</span>
@@ -1887,19 +1914,16 @@
           <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--ink2);text-align:right;padding-right:14px;">${x.userMessageCount + x.assistantMessageCount}</span>
           <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:var(--cyan);text-align:right;padding-right:14px;">${x.autopilotRatio > 0 ? x.autopilotRatio + '×' : '—'}</span>
           <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;text-align:right;padding-right:14px;">${esc(fmtMoney(x.cost.totalCost))}</span>
-          <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;padding-right:14px;">
-            <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;">${x.commitCount}</span>
-            <span style="width:7px;height:7px;border-radius:50%;background:${confColor};" title="${esc(confLabel)}"></span>
-          </div>
-          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:right;padding-right:14px;"><span style="color:var(--green);">+${x.linesAdded.toLocaleString()}</span> <span style="color:var(--ink3);">/</span> <span style="color:var(--red);">−${x.linesDeleted.toLocaleString()}</span></span>
-          <span style="display:inline-flex;justify-content:center;"><span title="${x.grade ? '' : 'Cost booked to a sibling sub-repo session — not independently graded'}" style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;color:${gradeColor(x.grade)};background:${gradeBg(x.grade)};">${esc(x.grade || '—')}</span></span>
+          <div class="session-commits" style="text-align:right;">${commitsCell}</div>
+          <div class="session-lines" style="text-align:right;">${linesCell}</div>
+          <span style="display:inline-flex;justify-content:center;"><span class="session-grade" title="${esc(gradeTitle)}" style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;color:${gradeColor(x.grade)};background:${gradeBg(x.grade)};">${esc(gradeLabel)}</span></span>
         </div>
         ${expandBlock}
       </div>`;
     }).join('');
 
-    const filterChips = [['all', 'All'], ['shipped', 'Shipped'], ['leaked', 'No commits']].map(([key, label]) =>
-      `<button data-act="filter" data-arg="${key}" style="border:0;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;letter-spacing:0.05em;padding:5px 12px;border-radius:7px;color:${state.filter === key ? 'var(--ink)' : 'var(--ink3)'};background:${state.filter === key ? 'var(--hover)' : 'transparent'};transition:color .15s,background .15s;">${esc(label)}</button>`).join('');
+    const filterChips = [['all', 'All'], ['repositories', 'Repository work'], ['tasks', 'Other tasks'], ['shipped', 'Shipped'], ['leaked', 'No commits']].map(([key, label]) =>
+      `<button data-act="filter" data-arg="${key}" aria-pressed="${state.filter === key}" style="border:0;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;letter-spacing:0.05em;padding:5px 12px;border-radius:7px;color:${state.filter === key ? 'var(--ink)' : 'var(--ink3)'};background:${state.filter === key ? 'var(--hover)' : 'transparent'};transition:color .15s,background .15s;">${esc(label)}</button>`).join('');
 
     $('sec-sessions').innerHTML = `
       <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:16px;flex-wrap:wrap;">
@@ -1912,7 +1936,7 @@
         <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line2);flex-wrap:wrap;">
           <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:220px;border:1px solid var(--line2);background:var(--bg2);border-radius:9px;padding:7px 12px;">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="var(--ink3)" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg>
-            <input id="session-search" value="${esc(state.q)}" placeholder="Search repository, model, commit…" style="flex:1;border:0;outline:none;background:transparent;color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:12px;">
+            <input id="session-search" value="${esc(state.q)}" placeholder="Search context, model, commit…" style="flex:1;border:0;outline:none;background:transparent;color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:12px;">
           </div>
           <div style="display:flex;gap:4px;border:1px solid var(--line2);border-radius:9px;padding:3px;background:var(--bg2);">${filterChips}</div>
         </div>
@@ -1967,7 +1991,7 @@
       ...[7, 14, 30].map((rr) => ({ icon: '▤', iconColor: 'var(--blue)', label: `Chart range: last ${rr} days`, hint: 'Range', runNow: () => { state.range = rr; state.cmdOpen = false; renderFlow(); renderCmd(); scheduleCharts(['timeline', 'burn']); } })),
       ...v.sessions.slice(0, 40).map((x) => ({
         icon: '⌁', iconColor: srcBadge(x.source).color,
-        label: `${x.projectName || 'No repository'} · ${fmtModel(x.model)} · ${fmtMoney(x.cost.totalCost)}`,
+        label: `${x.projectName || x.taskName || 'Other task'} · ${fmtModel(x.model)} · ${fmtMoney(x.cost.totalCost)}`,
         hint: 'Session', searchOnly: true,
         runNow: () => {
           state.cmdOpen = false; state.q = ''; state.filter = 'all'; state.expanded = x.sessionId;

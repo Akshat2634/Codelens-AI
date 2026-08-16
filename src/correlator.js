@@ -173,7 +173,7 @@ export function correlateSessions(sessions, commitsByRepo, cutoffMs = 0) {
     const commitsOnMain = matched.filter(c => c.onMain).length;
 
     const messageCount = session.userMessageCount + session.assistantMessageCount;
-    const isOrphaned = messageCount > 10 && matched.length === 0;
+    const isOrphaned = Boolean(session.projectName) && messageCount > 10 && matched.length === 0;
 
     // Attribution confidence: how sure are we these commits are THIS session's
     // work? Three signals, all already computed during matching:

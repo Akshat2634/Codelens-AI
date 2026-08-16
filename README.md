@@ -104,7 +104,7 @@ This parses your `~/.claude/projects/`, `~/.codex/sessions/`, and `~/.copilot/se
 | --------------------- | --------------------------------------------------------------- |
 | **Cost per Commit**   | How much each AI-assisted commit costs in tokens                |
 | **AI Code Share**     | % of all merged lines this window written by AI — measured from git, not surveys |
-| **Value Leak**        | $ and % of spend from sessions that produced zero committed code |
+| **Value Leak**        | $ and % of repository spend from repository sessions that produced zero committed code |
 | **Line Survival Rate**| % of AI-written lines that survive 24h without being rewritten  |
 | **Orphaned Sessions** | Sessions with 10+ messages that produced zero commits           |
 | **ROI Grade (A-F)**   | Composite score based on tokens-per-commit and survival rate    |
@@ -256,7 +256,7 @@ The dashboard includes:
 - **Productivity heatmap** — GitHub-style grid showing when you're most productive
 - **Agent Autonomy** — autonomy score badge, autopilot ratio, self-heal score, commit velocity, and top verification commands
 - **Projects** — per-repository ROI: which repo your spend goes to, ranked by cost, with its share of spend, commits, $/commit, lines, and % on the default branch. Repos are identified by their git `origin` remote, so a clone, worktree, or moved checkout of the same repo counts as one project (not a duplicate card)
-- **Sessions table** — sortable, expandable table with per-session metrics, matched commits (including their containing branch when available), and autopilot ratio. Codex sessions that were not attached to a Git repository remain in usage totals and appear as **No repository** instead of turning their prompt-derived task folder into a project name.
+- **Sessions table** — sortable, expandable table with per-session metrics, matched commits (including their containing branch when available), and autopilot ratio. Repository sessions show their repository name and commit ROI; Codex sessions outside Git retain their task label and usage under **Other task**, with repository-only metrics marked **N/A**. Filters separate repository work from other tasks.
 
 ## How It Works
 
