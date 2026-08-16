@@ -19,6 +19,7 @@ const repoRoot = path.join(__dirname, '..');
 const fixtures = path.join(repoRoot, 'tests', 'fixtures', 'claude-projects');
 const codexFixtures = path.join(repoRoot, 'tests', 'fixtures', 'codex-sessions');
 const copilotFixtures = path.join(repoRoot, 'tests', 'fixtures', 'copilot-sessions');
+const copilotVsCodeFixtures = path.join(repoRoot, 'tests', 'fixtures', 'copilot-vscode');
 const PORT = 39217;
 
 const run = (cmd, args, opts = {}) =>
@@ -58,7 +59,7 @@ try {
   //    actually starts.
   server = spawn(
     'node',
-    [path.join(installed, 'src', 'index.js'), '--no-open', '--port', String(PORT), '--days', '3650', '--claude-dir', fixtures, '--codex-dir', codexFixtures, '--copilot-dir', copilotFixtures],
+    [path.join(installed, 'src', 'index.js'), '--no-open', '--port', String(PORT), '--days', '3650', '--claude-dir', fixtures, '--codex-dir', codexFixtures, '--copilot-dir', copilotFixtures, '--copilot-vscode-dir', copilotVsCodeFixtures],
     { stdio: ['ignore', 'pipe', 'pipe'] }
   );
   let serverLog = '';
@@ -93,6 +94,9 @@ try {
   if (!(sources.claude > 0)) fail('packed CLI parsed no Claude fixture sessions');
   if (!(sources.codex > 0)) fail('packed CLI parsed no Codex fixture sessions');
   if (!(sources.copilot > 0)) fail('packed CLI parsed no GitHub Copilot fixture sessions');
+  const copilotEntrypoints = new Set(payload.sessions.filter(s => s.source === 'copilot').map(s => s.entrypoint));
+  if (!copilotEntrypoints.has('copilot-cli')) fail('packed CLI parsed no standalone Copilot CLI fixture session');
+  if (!copilotEntrypoints.has('copilot-vscode')) fail('packed CLI parsed no VS Code Copilot fixture session');
   console.log(`  • packed parsers loaded ${sources.claude} claude + ${sources.codex} codex + ${sources.copilot} copilot fixture sessions`);
 
   const chart = await fetch(`${base}/vendor/chart.umd.min.js`);
