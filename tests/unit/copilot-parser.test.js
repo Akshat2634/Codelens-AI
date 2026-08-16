@@ -101,11 +101,30 @@ test('getCopilotPricing uses the external overlay only for unknown future models
   assert.equal(p.input, 1.25);
   assert.equal(p.output, 10);
   assert.equal(p.cachedInput, 0.31);
-  assert.equal(p.estimate, false, 'overlay rates are real, not estimated');
+  assert.equal(p.estimate, true, 'provider pricing may differ from GitHub AI Credit pricing');
   __resetOverlayForTest();
 });
 
-test('getCopilotPricing keeps GitHub pricing available offline for Gemini and Copilot-only models', () => {
+test('getCopilotPricing covers GitHub current models without fallback estimates', () => {
+  __resetOverlayForTest();
+  const cases = [
+    ['gemini-3.6-flash', { input: 0.75, cachedInput: 0.075, output: 3.75, cacheWrite: 0, estimate: false }],
+    ['gemini-3.7-flash', { input: 0.75, cachedInput: 0.075, output: 3.75, cacheWrite: 0, estimate: false }],
+    ['mai-code-1.1-flash', { input: 0.2, cachedInput: 0.02, output: 1.2, cacheWrite: 0, estimate: false }],
+    ['claude-opus-5', { input: 5, cachedInput: 0.5, output: 25, cacheWrite: 6.25, estimate: false }],
+    ['grok-4.6', { input: 2, cachedInput: 0.5, output: 6, cacheWrite: 0, estimate: false }],
+    ['kimi-k3', { input: 3, cachedInput: 0.3, output: 15, cacheWrite: 0, estimate: false }],
+  ];
+  for (const [model, expected] of cases) {
+    assert.deepEqual(getCopilotPricing(model, Date.now(), 0, 'default'), expected, model);
+  }
+  assert.deepEqual(
+    getCopilotPricing('grok-4.5', Date.now(), 0, 'long'),
+    { input: 4, cachedInput: 1, output: 12, cacheWrite: 0, estimate: false },
+  );
+});
+
+test('getCopilotPricing keeps GitHub pricing available offline for Copilot-supplied models', () => {
   __resetOverlayForTest();
   const gemini = getCopilotPricing('gemini-2.5-pro');
   const raptor = getCopilotPricing('raptor-mini');
@@ -241,7 +260,7 @@ test('parseCopilotSessions keeps the latest cumulative shutdown snapshot after r
     assert.equal(s.totalInputTokens, 2500);
     assert.equal(s.totalOutputTokens, 400);
     assert.equal(s.assistantMessageCount, 3);
-    assert.equal(s.usageEvents.length, 1, 'billing windows receive only the final accumulated snapshot');
+    assert.equal(s.usageEvents.length, 1, 'usage windows receive only the final accumulated snapshot');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -296,6 +315,53 @@ test('parseCopilotSessions uses session.context_changed when there is no YAML or
     assert.equal(sessions[0].repoPath, CWD);
     assert.equal(sessions[0].projectName, 'copilot-fixture-repo');
     assert.equal(sessions[0].gitBranch, 'feature/context');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('parseCopilotSessions does not attribute a multi-repository session to its final repository', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'copilot-'));
+  const repoA = path.join(os.tmpdir(), 'copilot-repo-a');
+  const repoB = path.join(os.tmpdir(), 'copilot-repo-b');
+  try {
+    writeSession(root, 'sess-multi-repo', [
+      { type: 'session.start', timestamp: iso(3), data: { sessionId: 'sess-multi-repo', gitRoot: repoA, branch: 'main' } },
+      { type: 'tool.execution_start', timestamp: iso(3), data: { tool: 'create_file', arguments: { file_path: path.join(repoA, 'a.js') } } },
+      { type: 'session.context_changed', timestamp: iso(2), data: { gitRoot: repoB, branch: 'feature/b' } },
+      { type: 'tool.execution_start', timestamp: iso(2), data: { tool: 'create_file', arguments: { file_path: path.join(repoB, 'b.js') } } },
+      { type: 'session.shutdown', timestamp: iso(1), data: { modelMetrics: { 'gpt-5': { usage: { inputTokens: 1000, outputTokens: 100 }, requests: { count: 2 } } } } },
+    ]);
+    const { sessions } = await parseCopilotSessions(root, 30, null);
+    assert.equal(sessions.length, 1);
+    const s = sessions[0];
+    assert.equal(s.multiRepoContext, true);
+    assert.equal(s.repoPath, null, 'the final repository must not claim cumulative session spend');
+    assert.equal(s.projectName, null);
+    assert.deepEqual(s.filesWritten, [], 'cross-repository files cannot be normalized to one repo');
+    assert.equal(s.totalInputTokens, 1000, 'aggregate spend remains visible');
+    const filtered = await parseCopilotSessions(root, 30, 'repo-b');
+    assert.equal(filtered.sessions.length, 0, 'a multi-repository session does not masquerade as the final project');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('parseCopilotSessions retains unmatched tool completions in mixed logs', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'copilot-'));
+  try {
+    writeSession(root, 'sess-mixed-tools', basicSession('sess-mixed-tools', 'gpt-5', iso(2),
+      { inputTokens: 100, outputTokens: 20 },
+      [
+        { type: 'tool.execution_start', timestamp: iso(2), data: { tool: 'bash', arguments: { command: 'npm test' } } },
+        { type: 'tool.execution_complete', timestamp: iso(2), data: { tool: 'bash' } },
+        { type: 'tool.execution_complete', timestamp: iso(2), data: { tool: 'create_file', arguments: { file_path: CWD + '/src/only-completion.js' } } },
+      ]));
+    const { sessions } = await parseCopilotSessions(root, 30, null);
+    const s = sessions[0];
+    assert.equal(s.toolCalls.bash, 1, 'a start/completion pair counts once');
+    assert.equal(s.toolCalls.create_file, 1, 'an unmatched completion is retained');
+    assert.deepEqual(s.filesWritten, ['src/only-completion.js']);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

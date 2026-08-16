@@ -49,8 +49,8 @@ export const MCP_TOOLS = [
   },
   {
     name: 'blocks',
-    title: 'Billing Blocks',
-    description: "Usage grouped into Claude's rolling 5-hour billing windows: per-block tokens and cost, burn rate (tokens/min, $/hr), and a projection for the currently open block.",
+    title: 'Usage Windows',
+    description: "Usage grouped into configurable 5-hour analytical windows: per-window tokens and cost, burn rate (tokens/min, $/hr), and a projection for the currently open window. This mirrors Claude's billing window; other sources are analytical only.",
     inputSchema: {
       type: 'object',
       properties: {

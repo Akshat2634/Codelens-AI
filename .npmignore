@@ -4,6 +4,7 @@
 node_modules/
 tests/
 test-results/
+playwright-report/
 playwright.config.js
 *.tgz
 CONTRIBUTING.md

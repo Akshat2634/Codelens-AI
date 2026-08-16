@@ -77,7 +77,9 @@ function cacheFileFor(options = {}) {
 //     21 may hold double-counted tokens/cost, so it must be re-parsed.
 // 23: Copilot shutdown modelMetrics now use only the final cumulative snapshot,
 //     and GPT-5.6 Copilot rates include GitHub's current cache-write pricing.
-const CACHE_VERSION = 23;
+// 24: Current GitHub AI Credit pricing, conservative multi-repository Copilot
+//     correlation, and mixed-log tool-call deduplication require a re-parse.
+const CACHE_VERSION = 24;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);

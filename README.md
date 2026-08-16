@@ -152,7 +152,7 @@ codelens-ai monthly                # ...by month
 codelens-ai daily --breakdown      # nest per-model rows under each period
 codelens-ai daily --json           # structured export (pipe to jq)
 
-codelens-ai blocks                 # group usage into Claude's 5-hour billing windows
+codelens-ai blocks                 # group usage into configurable 5-hour usage windows
 codelens-ai blocks --active        # just the open block: burn rate, time left, projection
 codelens-ai blocks --recent        # only the last 3 days of blocks
 codelens-ai blocks -t max          # warn against a token limit (a number, or "max")
@@ -167,15 +167,15 @@ Cache Read / Total / Cost per period — plus the two ROI columns a pure usage t
 **Commits** and **$/Commit**. All the shared analysis flags (`--days`, `--source`, `--project`,
 `--claude-dir`, `--codex-dir`, `--copilot-dir`) apply.
 
-### Billing blocks (`codelens-ai blocks`)
+### Usage windows (`codelens-ai blocks`)
 
-Claude bills usage in rolling **5-hour windows** (the window opens with your first message and lasts
-exactly 5 hours). `blocks` groups every session's usage into those windows and shows per-block
+`blocks` groups every session's usage into configurable **5-hour windows** and shows per-window
 tokens and cost, your **burn rate** (tokens/min and $/hr), and — for the block that's still open — a
 linear **projection** of where it lands plus an optional quota gauge (`-t <n>` or `-t max`). Add
 `--active` for just the current window, `--recent` for the last 3 days, `--session-length <hours>` to
 change the window size, or `--json` for a structured export. Costs use Codelens's version-aware
-per-token pricing, so the numbers match the rest of the tool.
+per-token pricing, so the numbers match the rest of the tool. For Claude this mirrors its rolling
+5-hour window; for Codex and Copilot it is an analytical grouping, not a provider billing quota.
 
 ### MCP server (`codelens-ai mcp`)
 
@@ -188,7 +188,7 @@ claude mcp add codelens -- npx -y codelens-ai mcp
 ```
 
 Exposed tools: **`roi_summary`** (grade, spend, $/commit, survival, value leak — the scorecard),
-**`usage`** (daily/weekly/monthly token & cost table), **`blocks`** (5-hour billing windows + burn
+**`usage`** (daily/weekly/monthly token & cost table), **`blocks`** (5-hour usage windows + burn
 rate), **`sessions`**, **`projects`** (per-repo ROI), and **`refresh`** (force a re-parse). Most
 tools take an optional `source` (`all | claude | codex | copilot`), and all the shared analysis flags
 (`--days`, `--project`, `--claude-dir`, ...) apply to the server itself. Analysis runs once at
@@ -235,10 +235,12 @@ Then run `npx codelens-ai` (or `codelens-ai report`) whenever you want the "toda
 
 ### Effective cost (subscription mode)
 
-By default costs are **API-equivalent** — what your usage *would* cost at pay-as-you-go token rates. If you're on a flat-rate plan, those dollars aren't what you actually pay. Pass `--plan` (`pro` = $20/mo, `max5` = $100/mo, `max20` = $200/mo) / `--plan-cost <usd>` for Claude, `--codex-plan` (`free` = $0/mo, `go` = $8/mo, `plus` = $20/mo, `pro100` = $100/mo, `pro` = $200/mo, `business` = $25/seat/mo monthly, `business-annual` = $20/seat/mo annually) / `--codex-plan-cost <usd>` for ChatGPT/Codex, or `--copilot-plan` (`free` = $0/mo, `pro` = $10/mo, `pro-plus` = $39/mo, `max` = $100/mo, `business` = $19/seat/mo, `enterprise` = $39/seat/mo) / `--copilot-plan-cost <usd>` for GitHub Copilot, to add an **Effective Cost** panel that prorates your subscription to the analyzed window and shows:
+By default costs are **API-equivalent** — what your usage costs at the provider's published token rates. Pass `--plan` (`pro` = $20/mo, `max5` = $100/mo, `max20` = $200/mo) / `--plan-cost <usd>` for Claude, `--codex-plan` (`free` = $0/mo, `go` = $8/mo, `plus` = $20/mo, `pro100` = $100/mo, `pro` = $200/mo, `business` = $25/seat/mo monthly, `business-annual` = $20/seat/mo annually) / `--codex-plan-cost <usd>` for ChatGPT/Codex, or `--copilot-plan` (`free` = $0/mo, `pro` = $10/mo, `pro-plus` = $39/mo, `max` = $100/mo, `business` = $19/seat/mo, `enterprise` = $39/seat/mo) / `--copilot-plan-cost <usd>` for GitHub Copilot, to add an **Effective Cost** panel:
 
-- **Effective $/commit** and **$/surviving line** — your prorated fee ÷ output, the cost figures that actually reflect your bill.
+- **Effective $/commit** and **$/surviving line** — estimated plan cost for the window ÷ output.
 - **Plan utilization** — API-equivalent value ÷ prorated fee (e.g. `3.2×` means you extracted ~3.2× your subscription in pay-as-you-go value). This is an estimate of value extracted, **not** realized savings.
+
+For Copilot, the estimate includes the base plan, its published monthly AI Credit allowance (Pro $15, Pro+ $70, Max $200), and parsed CLI usage beyond that allowance at GitHub's token rates. Other Copilot surfaces draw from the same allowance but are not visible to Codelens. Business and Enterprise use the published per-seat allowance as a proxy, but their credits are pooled organization-wide, so only GitHub's billing dashboard can provide the exact bill. Custom `--copilot-plan-cost` values do not infer an allowance. In mixed-agent reports, these plan economics stay on the Copilot tab instead of incorrectly offsetting another agent's spend.
 
 ## Dashboard
 
@@ -332,14 +334,16 @@ Codex sessions are costed from the `token_count` events in each rollout file. In
 
 #### GitHub Copilot models
 
-The standalone **GitHub Copilot CLI** (`@github/copilot`) records per-session token usage in `~/.copilot/session-state/<id>/events.jsonl`. Codelens prices its currently selectable models from a local copy of **GitHub's published Copilot per-token table**, so reports remain correct with `--offline` or when the pricing refresh is unavailable:
+The standalone **GitHub Copilot CLI** (`@github/copilot`) records per-session token usage in `~/.copilot/session-state/<id>/events.jsonl`. Codelens keeps current and historical models in a local copy of **GitHub's published Copilot per-token table**, so known-model reports remain correct with `--offline` or when the pricing refresh is unavailable:
 
-- The table covers Claude, GPT, Gemini, and Copilot-only models such as Raptor mini, MAI-Code-1-Flash, and Kimi K2.7 Code. Unknown future model ids use the LiteLLM overlay (see _Auto-pricing new models_ above), then a flagged estimate if still unknown.
+- The table covers models from Anthropic, OpenAI, Google, GitHub, Microsoft, xAI, and Moonshot AI. Unknown future model ids use the LiteLLM overlay (see _Auto-pricing new models_ above) as a visibly flagged estimate, because provider API rates can differ from GitHub AI Credit rates.
 - Some GitHub models have a higher long-context rate. Copilot's shutdown totals do not say which requests crossed that threshold, so Codelens labels a session's cost as estimated unless the recorded event includes its context tier; a recorded long tier is priced at the published long-context rate.
 
-> **Note — usage record:** Copilot persists accumulated session token totals in the `session.shutdown` event's `modelMetrics`; when a resumed session appends another shutdown snapshot, Codelens uses the final snapshot rather than adding the cumulative totals twice. Its `session.context_changed` event provides the current workspace and branch for commit correlation. Sessions that ended without a usage record (crashed / force-killed — roughly 1 in 8) are still shown so their commits correlate, but their cost is left unknown (not a fabricated $0) and they are excluded from grading.
+> **Note — usage record:** Copilot persists accumulated session token totals in the `session.shutdown` event's `modelMetrics`; when a resumed session appends another shutdown snapshot, Codelens uses the final snapshot rather than adding the cumulative totals twice. Its `session.context_changed` event provides workspace and branch metadata for commit correlation. Because cumulative totals cannot be split reliably, a session observed in multiple repositories keeps its aggregate spend but does not claim one repository's commits. Sessions without a shutdown usage record are still shown for correlation, but their cost is left unknown (not a fabricated $0) and they are excluded from grading.
 >
-> **Note — subscriptions:** Copilot is billed as a flat plan (Free/Pro/Pro+/Max/Business/Enterprise) plus metered "premium requests", so the dollar figures are **API-equivalent value**, not what you were billed — pass `--copilot-plan` to see effective cost against your flat fee.
+> **Note — subscriptions:** Copilot uses GitHub AI Credits: 1 credit is $0.01, plans include a monthly allowance, and permitted usage beyond the allowance is metered at the published per-token rates. Existing annual Pro/Pro+ subscribers may still use the legacy request-based model. Pass `--copilot-plan` for an estimated base-plan-plus-overage cost.
+>
+> **Note — compatibility:** GitHub documents the session-store location but not the complete `events.jsonl` event schema. Parsing is defensive and best-effort; use Copilot CLI 1.0.48 or newer for current AI Credit terminology and pricing, and report captures that stop parsing after a CLI update.
 >
 > **Note — surfaces:** Only the standalone Copilot CLI writes a parseable local session store. The retired `gh copilot` extension and IDE Copilot completions are not analyzed (no durable local token counts).
 

@@ -386,6 +386,10 @@ async function buildPayload(claudeDir, codexDir, copilotDir, days, project, forc
     ? planConfigs[sourceFilter] || null
     : activePlans.length === 0 || activePlans.some(p => !p) ? null
     : activePlans.length === 1 ? activePlans[0]
+    // Copilot's allowance only offsets Copilot spend. Combining it with a
+    // Claude/Codex fee would apply the allowance to the wrong agent's usage,
+    // so plan economics remain on the per-agent tabs for mixed-plan runs.
+    : activePlans.some(p => Object.hasOwn(p, 'includedCreditDollars')) ? null
     : { name: 'combined', monthlyCost: activePlans.reduce((s, p) => s + p.monthlyCost, 0) };
 
   const payloads = { all: mkView(correlatedSessions, combinedPlan, sourceFilter || 'all', organicCommits) };
@@ -453,7 +457,10 @@ async function runAnalysis(opts) {
     if (!planOpt) return null;
     const key = String(planOpt).toLowerCase();
     if (Object.hasOwn(tiers, key)) {
-      return { name: namePrefix + key, monthlyCost: tiers[key] };
+      const tier = tiers[key];
+      return typeof tier === 'number'
+        ? { name: namePrefix + key, monthlyCost: tier }
+        : { name: namePrefix + key, ...tier };
     }
     console.error(`  ${icon.err} ${c.red}Unknown ${flagName} "${planOpt}".${c.reset} Use ${Object.keys(tiers).join(', ')}, or ${flagName}-cost <amount>.`);
     process.exit(1);
@@ -462,12 +469,21 @@ async function runAnalysis(opts) {
   // Pro starts at $100 (5x) with a $200 20x tier, and Business is $20/seat/mo
   // annually or $25/seat/mo monthly. `team` is what real rollouts report in
   // rate_limits.plan_type for business seats — priced as the monthly tier.
-  // GitHub Copilot tiers (per user/month): Free $0, Pro $10, Pro+ $39, Max
-  // $100, Business $19, Enterprise $39.
+  // GitHub Copilot tiers (per user/month) include AI Credit allowances. The
+  // Business/Enterprise launch promotion runs through August 31, 2026; after
+  // that their included credits return to $19/$39 of usage per seat.
+  const copilotOrgPromo = Date.now() < Date.UTC(2026, 8, 1);
   const planConfigs = {
     claude: parsePlan(opts.plan, opts.planCost, { pro: 20, max5: 100, max20: 200 }, '--plan', ''),
     codex: parsePlan(opts.codexPlan, opts.codexPlanCost, { free: 0, go: 8, plus: 20, pro100: 100, pro: 200, team: 25, business: 25, 'business-annual': 20 }, '--codex-plan', 'codex-'),
-    copilot: parsePlan(opts.copilotPlan, opts.copilotPlanCost, { free: 0, pro: 10, 'pro-plus': 39, max: 100, business: 19, enterprise: 39 }, '--copilot-plan', 'copilot-'),
+    copilot: parsePlan(opts.copilotPlan, opts.copilotPlanCost, {
+      free: { monthlyCost: 0, includedCreditDollars: null, overageEnabled: false },
+      pro: { monthlyCost: 10, includedCreditDollars: 15, overageEnabled: true },
+      'pro-plus': { monthlyCost: 39, includedCreditDollars: 70, overageEnabled: true },
+      max: { monthlyCost: 100, includedCreditDollars: 200, overageEnabled: true },
+      business: { monthlyCost: 19, includedCreditDollars: copilotOrgPromo ? 30 : 19, overageEnabled: true, pooledCredits: true },
+      enterprise: { monthlyCost: 39, includedCreditDollars: copilotOrgPromo ? 70 : 39, overageEnabled: true, pooledCredits: true },
+    }, '--copilot-plan', 'copilot-'),
   };
 
   // `all` is the no-filter default — the name every API route and doc uses.
@@ -704,8 +720,8 @@ async function runTable(period, opts) {
   process.stdout.write(`${title}\n${renderPeriodTableText(table, { breakdown: opts.breakdown })}\n\n`, () => process.exit(0));
 }
 
-// `codelens-ai blocks` — group usage into Claude's rolling 5-hour billing
-// windows, with burn rate and a projection for the open block.
+// `codelens-ai blocks` — group usage into configurable usage windows, with
+// burn rate and a projection for the open window.
 async function runBlocks(opts) {
   progress = console.error;
   printBanner(' blocks');
@@ -746,8 +762,8 @@ async function runBlocks(opts) {
     return;
   }
   const src = payload.meta.source !== 'all' ? `, ${payload.meta.source} only` : '';
-  const scope = opts.active ? 'active 5-hour block' : opts.recent ? '5-hour blocks · last 3 days' : `5-hour blocks · last ${days} days`;
-  const title = `\n  ${c.bold}${c.cyan}Billing blocks${c.reset} ${c.dim}· ${scope}${src}${c.reset}\n`;
+  const scope = opts.active ? 'active 5-hour window' : opts.recent ? '5-hour windows · last 3 days' : `5-hour windows · last ${days} days`;
+  const title = `\n  ${c.bold}${c.cyan}Usage windows${c.reset} ${c.dim}· ${scope}${src}${c.reset}\n`;
   process.stdout.write(`${title}${renderBlocksText(result, { active: opts.active })}\n\n`, () => process.exit(0));
 }
 
@@ -860,13 +876,13 @@ async function main() {
     cmd.action(async (opts) => runTable(name, opts));
   }
 
-  // `codelens-ai blocks` — Claude's rolling 5-hour billing windows + burn rate.
+  // `codelens-ai blocks` — configurable usage windows + burn rate.
   const blocksCmd = program
     .command('blocks')
-    .description("group usage into Claude's 5-hour billing windows with burn rate & projection")
+    .description('group usage into configurable 5-hour windows with burn rate & projection')
     .option('-a, --active', 'show only the current (open) block, in detail')
     .option('-r, --recent', 'show only blocks from the last 3 days')
-    .option('--session-length <hours>', 'billing window length in hours', '5')
+    .option('--session-length <hours>', 'usage window length in hours', '5')
     .option('-t, --token-limit <n>', 'quota ceiling for the active block: a number, or "max"')
     .option('-j, --json', 'output JSON to stdout instead of a table');
   addAnalysisOptions(blocksCmd);

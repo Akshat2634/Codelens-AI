@@ -59,7 +59,7 @@ import { lookupExternalRate } from './pricing.js';
 //                         reasoningOutputTokens is informational only)
 //
 // Pricing: GitHub bills Copilot usage in AI credits using its own published
-// per-token table. Keep the currently selectable Copilot models here so
+// per-token table. Keep current and historical Copilot models here so
 // --offline (and a failed pricing refresh) remains accurate; LiteLLM is only a
 // fallback for future, unrecognized model ids.
 
@@ -94,15 +94,21 @@ const COPILOT_PRICING = [
   ['claude-sonnet-5', { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 }],
   ['claude-sonnet-4', { input: 3, cachedInput: 0.3, cacheWrite: 3.75, output: 15 }],
   ['claude-opus-4-8-fast', { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 }],
+  ['claude-opus-5', { input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 25 }],
   ['claude-opus-4', { input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 25 }],
   ['claude-fable-5', { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 }],
-  ['gemini-3-6-flash', { input: 1.5, cachedInput: 0.15, output: 7.5 }],
+  ['gemini-3-7-flash', { input: 0.75, cachedInput: 0.075, output: 3.75 }],
+  ['gemini-3-6-flash', { input: 0.75, cachedInput: 0.075, output: 3.75 }],
   ['gemini-3-5-flash', { input: 1.5, cachedInput: 0.15, output: 9 }],
   ['gemini-3-1-pro', { input: 2, cachedInput: 0.2, output: 12, longContext: { input: 4, cachedInput: 0.4, output: 18 }, longContextThreshold: 200_000 }],
   ['gemini-3-flash', { input: 0.5, cachedInput: 0.05, output: 3 }],
   ['gemini-2-5-pro', { input: 1.25, cachedInput: 0.125, output: 10 }],
   ['raptor-mini', { input: 0.25, cachedInput: 0.025, output: 2 }],
+  ['mai-code-1-1-flash', { input: 0.2, cachedInput: 0.02, output: 1.2 }],
   ['mai-code-1-flash', { input: 0.75, cachedInput: 0.075, output: 4.5 }],
+  ['grok-4-5', { input: 2, cachedInput: 0.5, output: 6, longContext: { input: 4, cachedInput: 1, output: 12 }, longContextThreshold: 200_000 }],
+  ['grok-4-6', { input: 2, cachedInput: 0.5, output: 6, longContext: { input: 4, cachedInput: 1, output: 12 }, longContextThreshold: 200_000 }],
+  ['kimi-k3', { input: 3, cachedInput: 0.3, output: 15 }],
   ['kimi-k2-7-code', { input: 0.95, cachedInput: 0.19, output: 4 }],
 ];
 
@@ -173,7 +179,10 @@ export function getCopilotPricing(modelName, usageDateMs = Date.now(), requestIn
     };
   }
   const ext = lookupExternalRate(modelName);
-  if (ext) return { input: ext.input, cachedInput: ext.cacheRead, output: ext.output, cacheWrite: ext.cacheWrite ?? 0, estimate: false };
+  // Provider-list prices are a useful fallback, but GitHub's AI Credit rates
+  // can differ from the upstream provider's API price. Keep them visibly
+  // estimated until the model is added to GitHub's published table above.
+  if (ext) return { input: ext.input, cachedInput: ext.cacheRead, output: ext.output, cacheWrite: ext.cacheWrite ?? 0, estimate: true };
   return COPILOT_FALLBACK;
 }
 
@@ -259,6 +268,7 @@ function createEmptyCopilotSession(sessionId) {
     readOnlyBashCalls: 0,
     estimatedCost: 0,
     cacheSavingsDollars: 0,
+    multiRepoContext: false,
   };
 }
 
@@ -328,12 +338,28 @@ function parseArgs(raw) {
 async function parseCopilotEvents(filePath, cutoffMs = 0) {
   const sessionDir = path.dirname(filePath);
   const session = createEmptyCopilotSession(path.basename(sessionDir));
+  const contextRoots = new Set();
+  let currentContextPath = null;
+  const recordRepoContext = (cwd) => {
+    if (!cwd) return;
+    const resolved = path.resolve(cwd);
+    currentContextPath = resolved;
+    contextRoots.add(findGitRoot(resolved) || resolved);
+    if (contextRoots.size === 1) session.repoPath = [...contextRoots][0];
+    else {
+      // Shutdown usage is cumulative for the whole session, so there is no
+      // defensible way to split spend across repositories. Keep the spend in
+      // the aggregate view, but prevent the final repository from claiming it.
+      session.multiRepoContext = true;
+      session.repoPath = null;
+    }
+  };
 
   // Sidecar metadata: cwd / git branch. Read first so an events.jsonl that
   // never carries them still resolves a repoPath for correlation.
   try {
     const yaml = readFileSync(path.join(sessionDir, 'workspace.yaml'), 'utf-8');
-    session.repoPath = readYamlValue(yaml, ['cwd', 'workingDirectory', 'working_directory', 'directory', 'root']) || session.repoPath;
+    recordRepoContext(readYamlValue(yaml, ['cwd', 'workingDirectory', 'working_directory', 'directory', 'root']));
     session.gitBranch = readYamlValue(yaml, ['branch', 'gitBranch', 'git_branch']) || session.gitBranch;
   } catch {
     // No sidecar (older CLI, or a session that never wrote one) — fall back to
@@ -348,9 +374,9 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
   let requestCount = 0; // summed modelMetrics.requests.count — the model-request analog
   let sawShutdownUsage = false;
   let latestShutdownUsage = null;
-  let sawToolStart = false;
   let sessionContextTier = null;
-  const completeOnlyTools = []; // completions held back until we know no starts were logged
+  const startedToolIds = new Set();
+  const anonymousStarts = new Map();
 
   const trackToolCall = (name) => {
     if (!name) return;
@@ -428,7 +454,7 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
     if (type === 'session.start' || type === 'session.started' || type === 'session_start' || type === 'session.created') {
       session.sessionId = data.sessionId || data.session_id || data.id || session.sessionId;
       const cwd = data.gitRoot || data.git_root || data.cwd || data.workingDirectory || data.working_directory || data.workspace?.path || data.workspacePath;
-      if (cwd && !session.repoPath) session.repoPath = cwd;
+      recordRepoContext(cwd);
       const branch = data.gitBranch || data.git?.branch || data.branch;
       if (branch && !session.gitBranch) session.gitBranch = branch;
       sessionContextTier = normalizeContextTier(data.contextTier || data.context_tier || data.context?.tier) || sessionContextTier;
@@ -444,7 +470,7 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
     // for correlation metadata in long-lived sessions.
     if (type === 'session.context_changed' || type === 'session.contextchanged' || type === 'session_context_changed') {
       const cwd = data.gitRoot || data.git_root || data.cwd || data.workingDirectory || data.working_directory || data.workspace?.path || data.workspacePath;
-      if (cwd) session.repoPath = cwd;
+      recordRepoContext(cwd);
       const branch = data.gitBranch || data.git?.branch || data.branch;
       if (branch) session.gitBranch = branch;
       sessionContextTier = normalizeContextTier(data.contextTier || data.context_tier || data.context?.tier) || sessionContextTier;
@@ -502,15 +528,26 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
       const isComplete = type.includes('complete') || type.includes('end');
       const isStart = !isComplete; // execution_start / tool.call / tool_call are invocations
       const args = parseArgs(data.arguments ?? data.args ?? data.input ?? data.parameters);
-      // Count each call once — on the invocation. Completions are held back and
-      // only counted if the session never logged a start (older/partial logs),
-      // so a start+complete pair never double-counts.
+      const callId = data.toolCallId || data.tool_call_id || data.callId || data.call_id || data.executionId || data.execution_id || data.id;
+      // Count starts immediately. A completion is counted only when it cannot
+      // be paired with a prior start, preserving completion-only calls in mixed
+      // and partially persisted logs without double-counting normal pairs.
       if (isStart) {
-        sawToolStart = true;
         trackToolCall(name);
         if (SHELL_TOOL_NAMES.test(name)) trackShellCommand(session, commandFromToolArgs(args));
+        if (callId) startedToolIds.add(String(callId));
+        else anonymousStarts.set(name, (anonymousStarts.get(name) || 0) + 1);
       } else {
-        completeOnlyTools.push({ name, args });
+        let paired = callId ? startedToolIds.has(String(callId)) : false;
+        if (!callId) {
+          const open = anonymousStarts.get(name) || 0;
+          paired = open > 0;
+          if (paired) anonymousStarts.set(name, open - 1);
+        }
+        if (!paired) {
+          trackToolCall(name);
+          if (SHELL_TOOL_NAMES.test(name)) trackShellCommand(session, commandFromToolArgs(args));
+        }
       }
       // File paths dedupe via the Set, so reading them from either event is safe.
       if (EDIT_TOOL_NAMES.test(name)) {
@@ -538,15 +575,6 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
     for (const { model, usage, contextTier, requestCount: modelRequests } of latestShutdownUsage.models) {
       if (!accumulateModelUsage(model, usage, latestShutdownUsage.shutdownMs, contextTier)) continue;
       requestCount += modelRequests;
-    }
-  }
-
-  // Sessions that only logged tool completions (never starts) still need their
-  // tools + shell commands counted — replay the held-back completions.
-  if (!sawToolStart) {
-    for (const { name, args } of completeOnlyTools) {
-      trackToolCall(name);
-      if (SHELL_TOOL_NAMES.test(name)) trackShellCommand(session, commandFromToolArgs(args));
     }
   }
 
@@ -668,10 +696,10 @@ async function parseCopilotEvents(filePath, cutoffMs = 0) {
   let gitRoot = session.repoPath;
   if (gitRoot) gitRoot = findGitRoot(gitRoot) || gitRoot;
   const resolved = [...rawFiles].map(f =>
-    path.isAbsolute(f) ? f : path.join(session.repoPath || '/', f)
+    path.isAbsolute(f) ? f : path.join(currentContextPath || session.repoPath || '/', f)
   );
   session.filesWrittenAbsolute = [...new Set(resolved)];
-  session.filesWritten = [...new Set(
+  session.filesWritten = session.multiRepoContext ? [] : [...new Set(
     resolved.map(f => toRelativePath(f, gitRoot)).filter(Boolean)
   )];
   if (gitRoot) session.repoPath = gitRoot;
@@ -716,8 +744,8 @@ export async function parseCopilotSessions(copilotDir, days, projectFilter) {
       // Keep sessions with any activity inside the window.
       if (new Date(session.endTime || session.startTime).getTime() < cutoffMs) continue;
 
-      session.projectName = session.repoPath ? path.basename(session.repoPath) : 'copilot';
-      if (projectFilter && !session.projectName.toLowerCase().includes(projectFilter.toLowerCase())) {
+      session.projectName = session.multiRepoContext ? null : (session.repoPath ? path.basename(session.repoPath) : 'copilot');
+      if (projectFilter && !session.projectName?.toLowerCase().includes(projectFilter.toLowerCase())) {
         continue;
       }
       sessions.push(session);
