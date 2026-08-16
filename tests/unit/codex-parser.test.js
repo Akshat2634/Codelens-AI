@@ -423,6 +423,38 @@ test('parses a modern envelope rollout: tokens, cost, files, commands, plan type
   }
 });
 
+test('only Git-backed Codex sessions receive project names', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codex-project-name-'));
+  try {
+    const repo = path.join(root, 'real-repo');
+    const taskWorkspace = path.join(root, 'prompt-derived-task');
+    mkdirSync(path.join(repo, '.git'), { recursive: true });
+    mkdirSync(taskWorkspace, { recursive: true });
+
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T10-00-00-repo.jsonl', [
+      meta('repo-session', iso(2), { cwd: repo }),
+      turnContext(iso(2), 'gpt-5.5'),
+      { timestamp: iso(2), type: 'event_msg', payload: { type: 'user_message', message: 'edit code', kind: 'plain' } },
+      tokenCount(iso(1.9), usage(1000, 0, 100), usage(1000, 0, 100)),
+    ]);
+    writeRollout(root, '2026/07/01', 'rollout-2026-07-01T11-00-00-task.jsonl', [
+      meta('task-session', iso(1), { cwd: taskWorkspace }),
+      turnContext(iso(1), 'gpt-5.5'),
+      { timestamp: iso(1), type: 'event_msg', payload: { type: 'user_message', message: 'draft a reply', kind: 'plain' } },
+      tokenCount(iso(0.9), usage(1000, 0, 100), usage(1000, 0, 100)),
+    ]);
+
+    const { sessions } = await parseCodexSessions(root, 30);
+    const repoSession = sessions.find(s => s.sessionId === 'repo-session');
+    const taskSession = sessions.find(s => s.sessionId === 'task-session');
+    assert.equal(repoSession.projectName, 'real-repo');
+    assert.equal(taskSession.projectName, null);
+    assert.equal(taskSession.repoPath, taskWorkspace, 'workspace context remains available');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('filesWritten normalize to repo-relative paths when the recorded cwd is a stale alias', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'codex-alias-'));
   try {

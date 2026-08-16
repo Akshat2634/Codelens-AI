@@ -60,7 +60,9 @@ function cacheFileFor(options = {}) {
 // 19: filesWrittenAbsolute added to sessions for --depth's workspace-parent
 //     explosion — cached sessions from 18 lack it, so --depth would silently
 //     no-op against a warm cache until something else invalidated it.
-const CACHE_VERSION = 19;
+// 20: Codex task folders without a Git repository no longer masquerade as
+//     projects; cached projectName values must be recomputed.
+const CACHE_VERSION = 20;
 
 export function loadCache(options = {}) {
   const cacheFile = cacheFileFor(options);

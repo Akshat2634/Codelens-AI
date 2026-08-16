@@ -1104,6 +1104,9 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   // folder name twice). Repos with no remote fall back to their path.
   const projectMap = new Map();
   for (const session of correlatedSessions) {
+    // Non-Git Codex workspaces still contribute to usage/session totals, but
+    // they are not repositories and must not become project cards.
+    if (!session.projectName) continue;
     const analysis = commitsByRepo?.[session.repoPath];
     const remoteId = analysis?.remote || null;
     const key = remoteId || session.repoPath || 'unknown';

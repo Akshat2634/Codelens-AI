@@ -1795,7 +1795,7 @@
             <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--ink3);transform:rotate(${expanded ? '90deg' : '0deg'});transition:transform .2s;display:inline-block;">▶</span>
             <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--ink2);">${esc(date)}</span>
           </div>
-          <span style="font-size:13.5px;font-weight:500;">${esc(x.projectName || '—')}</span>
+          <span title="${x.projectName ? '' : 'This session was not attached to a Git repository'}" style="font-size:13.5px;font-weight:500;color:${x.projectName ? 'var(--ink)' : 'var(--ink3)'};">${esc(x.projectName || 'No repository')}</span>
           <div style="display:flex;align-items:center;gap:7px;">
             <span title="${esc(srcLabel)}" style="display:inline-flex;flex-shrink:0;">${logoSvg(isCodex ? 'codex' : 'claude', 12, srcColor, 'style="display:block"')}</span>
             <span style="font-size:13px;color:var(--ink2);">${esc(fmtModel(x.model))}</span>
@@ -1828,7 +1828,7 @@
         <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line2);flex-wrap:wrap;">
           <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:220px;border:1px solid var(--line2);background:var(--bg2);border-radius:9px;padding:7px 12px;">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="var(--ink3)" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg>
-            <input id="session-search" value="${esc(state.q)}" placeholder="Search project, model, commit…" style="flex:1;border:0;outline:none;background:transparent;color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:12px;">
+            <input id="session-search" value="${esc(state.q)}" placeholder="Search repository, model, commit…" style="flex:1;border:0;outline:none;background:transparent;color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:12px;">
           </div>
           <div style="display:flex;gap:4px;border:1px solid var(--line2);border-radius:9px;padding:3px;background:var(--bg2);">${filterChips}</div>
         </div>
@@ -1884,7 +1884,7 @@
       ...[7, 14, 30].map((rr) => ({ icon: '▤', iconColor: 'var(--blue)', label: `Chart range: last ${rr} days`, hint: 'Range', runNow: () => { state.range = rr; state.cmdOpen = false; renderFlow(); renderCmd(); scheduleCharts(['timeline', 'burn']); } })),
       ...v.sessions.slice(0, 40).map((x) => ({
         icon: '⌁', iconColor: x.source === 'codex' ? srcColors.codex : srcColors.claude,
-        label: `${x.projectName} · ${fmtModel(x.model)} · ${fmtMoney(x.cost.totalCost)}`,
+        label: `${x.projectName || 'No repository'} · ${fmtModel(x.model)} · ${fmtMoney(x.cost.totalCost)}`,
         hint: 'Session', searchOnly: true,
         runNow: () => {
           state.cmdOpen = false; state.q = ''; state.filter = 'all'; state.expanded = x.sessionId;

@@ -876,8 +876,15 @@ export async function parseCodexSessions(codexDir, days, projectFilter) {
       // to the window during parsing, same rule as claude-parser)
       if (new Date(session.endTime || session.startTime).getTime() < cutoffMs) continue;
 
-      session.projectName = session.repoPath ? path.basename(session.repoPath) : 'codex';
-      if (projectFilter && !session.projectName.toLowerCase().includes(projectFilter.toLowerCase())) {
+      // A Codex Desktop task cwd is not necessarily a software project: the
+      // app also creates prompt-derived folders for document/admin chats. Only
+      // expose a project name when the resolved cwd is an actual Git repo.
+      // Keep repoPath for nested-repo discovery and historical session context.
+      const workspaceName = session.repoPath ? path.basename(session.repoPath) : 'codex';
+      session.projectName = session.repoPath && existsSync(path.join(session.repoPath, '.git'))
+        ? workspaceName
+        : null;
+      if (projectFilter && !workspaceName.toLowerCase().includes(projectFilter.toLowerCase())) {
         continue;
       }
       sessions.push(session);

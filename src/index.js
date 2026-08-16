@@ -256,6 +256,14 @@ async function buildPayload(claudeDir, codexDir, days, project, forceRefresh = f
   // (parsed in the same run) usually still has the current, correct path.
   const allRepoPaths = new Set(allParsed.map(s => s.repoPath).filter(Boolean));
   const { aliasMap, unresolved } = resolveMovedRepoPaths([...allRepoPaths], allParsed);
+  // A Codex session whose recorded repo moved is parsed without a project
+  // name because its stale cwd no longer contains .git. Once path resolution
+  // finds the live repository, restore the real repository name for display
+  // and project aggregation.
+  for (const session of allParsed) {
+    const resolvedPath = aliasMap.get(session.repoPath);
+    if (resolvedPath && !session.projectName) session.projectName = path.basename(resolvedPath);
+  }
   const analysisCache = {};
   const commitsByRepo = {};
   for (const repoPath of repoPathsSet) {

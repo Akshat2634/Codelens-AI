@@ -135,6 +135,18 @@ test.describe('Dashboard smoke (fixtures)', () => {
     }
   });
 
+  test('non-Git Codex tasks keep usage without becoming projects', async ({ page, request }) => {
+    const codex = await (await request.get('/api/all?source=codex')).json();
+    const nonRepo = codex.sessions.find(s => s.sessionId === '11111111-aaaa-bbbb-cccc-000000000004');
+    expect(nonRepo).toBeTruthy();
+    expect(nonRepo.projectName).toBeNull();
+    expect(codex.projects.some(p => p.repoName === 'codelens-fixture-chat-task')).toBe(false);
+
+    await page.goto('/');
+    await expect(page.locator('.sessions-section')).toContainText('No repository');
+    await expect(page.locator('#sec-projects')).not.toContainText('codelens-fixture-chat-task');
+  });
+
   test('All Agents model view renders exact Claude and Codex models together', async ({ page }) => {
     const errors = [];
     page.on('pageerror', (err) => errors.push(err.message));
