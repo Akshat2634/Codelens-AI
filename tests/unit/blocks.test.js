@@ -191,5 +191,5 @@ test('renderBlocksText --active with no open block is a friendly message', () =>
   const s = sess([ev(base, { input: 100, cost: 1 })]);
   const result = buildBlocks([s], { nowMs: base + 8 * H });
   const out = renderBlocksText(result, { active: true, color: false });
-  assert.match(out, /No active 5-hour block/);
+  assert.match(out, /No active 5-hour window/);
 });

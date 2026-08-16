@@ -1,11 +1,15 @@
 import { getModelFamily as getClaudeModelFamily } from './claude-parser.js';
 import { getCodexModelFamily } from './codex-parser.js';
+import { getCopilotModelFamily } from './copilot-parser.js';
 import { commitLinesForSession } from './correlator.js';
 
 // Family resolution across agent sources: Claude names first (opus/sonnet/
-// haiku/fable), then OpenAI Codex names (gpt-5-codex/gpt-5/o-series/...).
+// haiku/fable), then OpenAI Codex names (gpt-5-codex/gpt-5/o-series/...), then
+// Additional model families exposed through Copilot (Gemini, Raptor, etc.).
+// Copilot's Claude and GPT models are
+// already claimed by the first two, so only the extras (Gemini) fall through.
 function getModelFamily(modelName) {
-  return getClaudeModelFamily(modelName) || getCodexModelFamily(modelName);
+  return getClaudeModelFamily(modelName) || getCodexModelFamily(modelName) || getCopilotModelFamily(modelName);
 }
 
 const CHURN_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -802,7 +806,7 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
 function capitalise(s) {
   // Display form of a model family. Codex families need casing that naive
   // capitalization can't produce ('gpt' → 'GPT', 'o-series' → 'o-series').
-  const special = { gpt: 'GPT', codex: 'Codex', 'o-series': 'o-series' };
+  const special = { gpt: 'GPT', codex: 'Codex', 'o-series': 'o-series', gemini: 'Gemini' };
   return special[s] || s.charAt(0).toUpperCase() + s.slice(1);
 }
 
@@ -1256,20 +1260,29 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     sessionCount: zeroCommitSessions.length,
   };
 
-  // Subscription "effective cost" mode (only when a plan is supplied). Reframes
-  // API-equivalent spend against the flat fee actually paid, prorated to the
-  // analyzed window. utilizationRatio = API-equivalent value / fee — an estimate
-  // of value extracted, NOT realized savings (subscription users pay the flat fee
-  // regardless of usage).
+  // Subscription "effective cost" mode (only when a plan is supplied). Most
+  // plans are flat fees. Copilot plans additionally carry included AI Credits,
+  // so their estimated bill adds usage beyond the prorated allowance.
   const plan = planConfig ? (() => {
-    const windowCost = planConfig.monthlyCost * (days / 30);
+    const basePlanCost = planConfig.monthlyCost * (days / 30);
+    const includedCreditDollars = Number.isFinite(planConfig.includedCreditDollars)
+      ? planConfig.includedCreditDollars * (days / 30)
+      : null;
+    const estimatedOverage = includedCreditDollars !== null && planConfig.overageEnabled !== false
+      ? Math.max(0, totalCost - includedCreditDollars)
+      : 0;
+    const windowCost = basePlanCost + estimatedOverage;
     return {
       name: planConfig.name,
       monthlyCost: planConfig.monthlyCost,
       windowDays: days,
+      basePlanCost: Math.round(basePlanCost * 100) / 100,
+      includedCreditDollars: includedCreditDollars === null ? null : Math.round(includedCreditDollars * 100) / 100,
+      estimatedOverage: Math.round(estimatedOverage * 100) / 100,
+      pooledCredits: !!planConfig.pooledCredits,
       windowCost: Math.round(windowCost * 100) / 100,
       apiEquivalentCost: Math.round(totalCost * 100) / 100,
-      utilizationRatio: windowCost > 0 ? Math.round((totalCost / windowCost) * 100) / 100 : null,
+      utilizationRatio: basePlanCost > 0 ? Math.round((totalCost / basePlanCost) * 100) / 100 : null,
       effectiveCostPerCommit: totalCommits > 0 ? Math.round((windowCost / totalCommits) * 100) / 100 : null,
       effectiveCostPerSurvivingLine: lineSurvival.surviving > 0 ? Math.round((windowCost / lineSurvival.surviving) * 10000) / 10000 : null,
     };

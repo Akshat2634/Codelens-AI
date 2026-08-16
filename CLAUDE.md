@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Codelens AI** (`codelens-ai` on npm) is a CLI tool that measures ROI from AI coding agents by correlating token usage with git commit output. It parses **Claude Code** session files (`~/.claude/projects/`) and **OpenAI Codex CLI** rollout files (`~/.codex/sessions/`), analyzes git history, and serves an interactive dashboard at `http://localhost:3457` with per-agent source tabs (All Agents / Claude Code / OpenAI Codex).
+**Codelens AI** (`codelens-ai` on npm) is a CLI tool that measures ROI from AI coding agents by correlating token usage with git commit output. It parses **Claude Code** session files (`~/.claude/projects/`), **OpenAI Codex CLI** rollout files (`~/.codex/sessions/`), and **GitHub Copilot CLI** session files (`~/.copilot/session-state/`), analyzes git history, and serves an interactive dashboard at `http://localhost:3457` with per-agent source tabs (All Agents / Claude Code / OpenAI Codex / GitHub Copilot).
 
 **Version:** 0.9.0
 **License:** MIT
@@ -26,12 +26,13 @@ src/
 ├── banner.js          # Pixel-block "CODELENS AI" startup splash (interactive TTY dashboard runs only)
 ├── claude-parser.js   # Parses JSONL session files from ~/.claude/projects/
 ├── codex-parser.js    # Parses OpenAI Codex rollout files from ~/.codex/sessions/
+├── copilot-parser.js  # Parses GitHub Copilot CLI events.jsonl from ~/.copilot/session-state/ (GitHub pricing table + LiteLLM fallback)
 ├── git-analyzer.js    # Git log analysis, branch detection, diff stats
 ├── correlator.js      # Matches sessions to commits via file overlap + time window + Co-authored-by trailers
 ├── metrics.js         # ROI calculations, grades, insights, heatmap, survival rate, AI code share, value leak
 ├── report.js          # `codelens-ai report` — terminal / Markdown / HTML ROI scorecard
 ├── tables.js          # `codelens-ai daily|weekly|monthly` — usage/cost tables + ROI columns
-├── blocks.js          # `codelens-ai blocks` — 5-hour billing windows, burn rate, projection
+├── blocks.js          # `codelens-ai blocks` — configurable usage windows, burn rate, projection
 ├── statusline.js      # `codelens-ai statusline` — Claude Code statusline (stdin JSON + quickstats: ROI, burn rate)
 ├── mcp.js             # `codelens-ai mcp` — MCP server over stdio (roi_summary, usage, blocks, sessions, projects, refresh tools)
 ├── server.js          # Express REST API routes (?source= selects per-agent views)
@@ -46,7 +47,7 @@ tests/
 └── local/             # full dashboard suite for local runs
 
 .github/workflows/
-├── ci.yml             # CI: syntax check, unit tests, CLI smoke (both agents), Node 22/24 matrix
+├── ci.yml             # CI: syntax check, unit tests, CLI smoke (all agents), Node 22/24 matrix
 ├── codeql.yml         # CodeQL code scanning (javascript-typescript + actions), weekly + per-PR
 └── release.yml        # npm publish on version tag push
 ```
@@ -54,17 +55,18 @@ tests/
 ## Data Flow
 
 ```
-Claude Sessions (JSONL)  → claude-parser.js ┐
-Codex Rollouts (JSONL)   → codex-parser.js  ┴→ [Cache] → git-analyzer.js
+Claude Sessions (JSONL)  → claude-parser.js  ┐
+Codex Rollouts (JSONL)   → codex-parser.js   ┼→ [Cache] → git-analyzer.js
+Copilot events (JSONL)   → copilot-parser.js ┘
 → correlator.js (all sources together) → metrics.js (per-source payloads)
 → server.js (REST API, ?source=) → dashboard.html (source tabs)
 ```
 
-Every session object carries `source: 'claude' | 'codex'` and an identical shape (codex-parser mirrors claude-parser's output). Correlation runs over ALL sessions together so a commit is claimed by at most one session across agents; per-source payloads filter the correlated set.
+Every session object carries `source: 'claude' | 'codex' | 'copilot'` and an identical shape (codex-parser and copilot-parser mirror claude-parser's output). Correlation runs over ALL sessions together so a commit is claimed by at most one session across agents; per-source payloads filter the correlated set.
 
 ## Key API Routes (server.js)
 
-All GET routes accept `?source=all|claude|codex` (default `all`; per-agent views exist only when both agents have sessions — unknown source falls back to `all`).
+All GET routes accept `?source=all|claude|codex|copilot` (default `all`; per-agent views exist only when more than one agent has sessions — unknown source falls back to `all`).
 
 - `GET /` — dashboard HTML
 - `GET /api/all` — full payload
@@ -94,16 +96,17 @@ npx codelens-ai --no-open       # don't auto-open browser
 npx codelens-ai --json          # dump raw JSON to stdout
 npx codelens-ai --project X     # filter by project name
 npx codelens-ai --refresh       # force full re-parse
-npx codelens-ai --source codex  # analyze a single agent: claude | codex
+npx codelens-ai --source copilot # analyze a single agent: claude | codex | copilot
 npx codelens-ai --offline       # skip network pricing refresh (cached/hardcoded rates only)
 npx codelens-ai --claude-dir X  # override ~/.claude/projects (testing/CI)
 npx codelens-ai --codex-dir X   # override ~/.codex/sessions (testing/CI)
-npx codelens-ai --plan max20 --codex-plan plus   # per-agent subscription mode
+npx codelens-ai --copilot-dir X # override ~/.copilot/session-state (testing/CI)
+npx codelens-ai --plan max20 --codex-plan plus --copilot-plan pro  # per-agent subscription mode
 npx codelens-ai --host 0.0.0.0  # expose dashboard beyond localhost (default 127.0.0.1)
 npx codelens-ai report          # terminal ROI scorecard (--md / --html to export)
 npx codelens-ai daily           # usage/cost table by day (+ commits, $/commit); -b per-model, --json
 npx codelens-ai weekly          # ...by week (--start-of-week monday|sunday); `monthly` = by month
-npx codelens-ai blocks          # Claude's 5-hour billing windows + burn rate (--active, --recent, -t max)
+npx codelens-ai blocks          # configurable 5-hour usage windows + burn rate (--active, --recent, -t max)
 npx codelens-ai mcp             # MCP server over stdio (claude mcp add codelens -- npx -y codelens-ai mcp)
 npx codelens-ai statusline      # Claude Code statusline (--install to configure)
 npx claude-roi                  # backward-compatible alias
@@ -121,13 +124,14 @@ node --check src/*.js           # syntax validation
 ## Key Design Decisions
 
 - **Single-file dashboard** — no build step, served directly by Express
-- **Zero-config** — auto-discovers `~/.claude/projects/` and `~/.codex/sessions/` (`$CODEX_HOME` honored)
+- **Zero-config** — auto-discovers `~/.claude/projects/`, `~/.codex/sessions/` (`$CODEX_HOME` honored), and `~/.copilot/session-state/` (`$COPILOT_HOME` honored)
 - **Smart caching** — incremental parsing with per-source staleness, so a new Codex rollout doesn't force a Claude re-parse (`~/.cache/agent-analytics/`)
 - **File-first correlation** — sessions matched to commits by file overlap, 2-hour temporal buffer; all agent sources correlate together so a commit is attributed to at most one session. `Co-authored-by` agent trailers (parsed from git log) route trailer-stamped commits to the matching agent and upgrade attribution confidence to high
-- **Uniform session shape** — codex-parser produces the exact claude-parser session shape (`cacheReadTokens` = OpenAI `cached_input_tokens`, `cacheCreationTokens` = 0) so correlator/metrics/server are source-agnostic
+- **Uniform session shape** — codex-parser and copilot-parser produce the exact claude-parser session shape so correlator/metrics/server are source-agnostic (codex: `cacheReadTokens` = OpenAI `cached_input_tokens`, `cacheCreationTokens` = 0; copilot: `cacheReadTokens` = `usage.cacheReadTokens`, `cacheCreationTokens` = `usage.cacheWriteTokens`)
+- **Copilot pricing and context** — `copilot-parser.js` carries GitHub's published per-token rates for current and historical Copilot models; LiteLLM is a flagged estimate for unknown future ids because provider prices can differ from GitHub AI Credit rates. Copilot usage comes from the final `session.shutdown` event's accumulated `modelMetrics` snapshot, while `session.context_changed` provides workspace and branch metadata. Multi-repository sessions retain aggregate spend but do not claim one repository's commits. A long-context model without a recorded tier is estimated, and sessions missing a shutdown usage record are marked `costZeroed` so unknown cost cannot grade as a fabricated 'A'
 - **Privacy-first** — all data stays local, no telemetry; the dashboard binds 127.0.0.1 by default (`--host` to override)
 - **Version-aware pricing** — token costs reflect each provider's pricing tiers per model (Anthropic per-version tiers; OpenAI per-model-id, with o3's Jun 2025 price cut date-tiered)
-- **Auto-pricing fallback** — models the hardcoded tables don't match are priced from LiteLLM's public map (`src/pricing.js`): fetched on demand, disk-cached ~24h (`pricing.json`), refreshed on `--refresh`, skipped with `--offline`, and graceful on failure (cache → hardcoded Sonnet/`CODEX_FALLBACK` estimate). **Hardcoded tables win** when both have a model; overlay-priced models are real rates, so NOT flagged estimated. The overlay must be loaded (`loadPricingOverlay`, awaited in `buildPayload`) before any costing; `lookupExternalRate` is a no-op until then
+- **Auto-pricing fallback** — models the hardcoded tables don't match are priced from LiteLLM's public map (`src/pricing.js`): fetched on demand, disk-cached ~24h (`pricing.json`), refreshed on `--refresh`, skipped with `--offline`, and graceful on failure (cache → hardcoded Sonnet/`CODEX_FALLBACK` estimate). **Hardcoded tables win** when both have a model. Provider overlay rates are exact for direct Claude/Codex pricing but remain flagged estimates for Copilot, whose GitHub AI Credit rates can differ. The overlay must be loaded (`loadPricingOverlay`, awaited in `buildPayload`) before any costing; `lookupExternalRate` is a no-op until then
 - **Update nudge** (`src/update-check.js`) — every run checks npm's registry for a newer published version and prints an upgrade hint if behind; disk-cached ~24h (`version-check.json`), capped at 400ms so a slow network never delays a real command, skipped with `--offline`, silent on any failure. Exists because `npx codelens-ai` (no version pin) can silently run a stale global install or npx-cached copy — old enough to predate whole subcommands — producing a confusing Commander parse error instead of a hint to upgrade (see README Troubleshooting)
 - **Nested-repo discovery** — when a session's cwd is a workspace parent with no `.git` of its own, `git-analyzer.js#findNestedGitRepos` walks up to `NESTED_REPO_DEPTH` (3) levels to find sub-repos, and `index.js#explodeWorkspaceSessions` splits the session into one virtual clone per touched sub-repo so their commits correlate. Always on, zero-config, no flag — the gate (`session.repoPath` has no `.git`) never fires for an ordinary single-repo session, so it's a no-op for the common case. Only the sub-repo with the most touched files keeps the session's real cost/tokens (`costZeroed: true` on the rest) — total spend is conserved, but a zeroed clone must never be graded (`computeSessionGrade` returns `null` for it) since a real commit landing on a `$0` clone would otherwise look like a fabricated 'A'
 - **Repository-only project names** — Codex Desktop may record prompt-derived task folders as a session cwd even when no Git repository is involved. Those sessions keep their usage and cost but carry `projectName: null`, render as **No repository**, and are excluded from per-project aggregation. Nested workspaces and resolved moved repositories regain the actual repository name later in the pipeline.
@@ -155,8 +159,9 @@ Use these skills when working on this project:
 
 - The dashboard is a single 4000+ line HTML file — changes should maintain the inline architecture
 - Cache is stored at `~/.cache/agent-analytics/parsed-sessions.json` (plus `quickstats.json`, a tiny summary the statusline reads); runs with custom `--claude-dir`/`--codex-dir` write to a separate `parsed-sessions-<hash>.json` so tests/CI never evict the real cache
-- Claude session JSONL files are at `~/.claude/projects/`; Codex rollouts at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (zstd-compressed `.jsonl.zst` after ~7 days — readable on Node >= 22.15)
-- Token pricing is hardcoded in `claude-parser.js` (Anthropic) and `codex-parser.js` (OpenAI) — update when providers change pricing
+- Claude session JSONL files are at `~/.claude/projects/`; Codex rollouts at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (zstd-compressed `.jsonl.zst` after ~7 days — readable on Node >= 22.15); GitHub Copilot CLI sessions at `~/.copilot/session-state/<session-id>/events.jsonl` (+ a `workspace.yaml` sidecar for cwd/branch)
+- Token pricing is hardcoded in `claude-parser.js` (Anthropic) and `codex-parser.js` (OpenAI) — update when providers change pricing. `copilot-parser.js` reuses both plus the overlay, so it needs no separate pricing table
+- Copilot gotchas handled in `copilot-parser.js`: the `events.jsonl` envelope is undocumented/reverse-engineered (all fields read defensively with aliases); the U+2028/U+2029 raw-char corruption bug is skipped by the per-line `try/catch` JSON.parse (same as Codex); `session.shutdown.modelMetrics` is the authoritative session-total usage record (per-turn `assistant.usage` is ephemeral and NOT summed, to avoid double-counting); `inputTokens` is treated as FRESH input (cacheReadTokens is a separate field — not subtracted); tool start/complete pairs are counted once; files touched are scraped from edit-tool args
 - Codex gotchas already handled in `codex-parser.js`: `token_count` totals are cumulative (use `last_token_usage` deltas), duplicate re-logged usage events (deduped only when the cumulative total is unchanged), `cached_input_tokens ⊂ input_tokens`, `reasoning_output_tokens ⊂ output_tokens`, subagent `thread_spawn` rollouts replay parent history (skipped), legacy pre-envelope 2025 format, long-context pricing only above 272K input tokens per request
 - Playwright tests require session fixtures to run (regenerated by `tests/fixtures/build-fixtures.js`)
-- CI runs syntax checks, unit tests, and a fixture-backed CLI smoke run for both agents; Playwright E2E tests are local-only
+- CI runs syntax checks, unit tests, and a fixture-backed CLI smoke run for all agents; Playwright E2E tests are local-only

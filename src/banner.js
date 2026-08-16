@@ -92,7 +92,7 @@ export function renderBanner(version, { color = true, truecolor = supportsTrueco
     '',
     '  Measure the ROI of your AI coding agents. From the terminal.',
     '',
-    `  ${color ? `${fg([95, 255, 135])}●\x1b[0m` : '●'} ${bold(`codelens-ai v${version}`)} ${dim('· Claude Code + OpenAI Codex · all data stays local')}`,
+    `  ${color ? `${fg([95, 255, 135])}●\x1b[0m` : '●'} ${bold(`codelens-ai v${version}`)} ${dim('· Claude Code + OpenAI Codex + GitHub Copilot · all data stays local')}`,
     '',
     `  ${dim('Run codelens-ai --help to see every command.')}`,
     '',

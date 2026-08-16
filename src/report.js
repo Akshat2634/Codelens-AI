@@ -31,19 +31,19 @@ export function reportModel(payload, payloads = null) {
   const surv = payload.lineSurvival;
 
   const agents = [];
-  // Per-agent one-liners when the run computed per-agent views.
-  if (payloads?.claude && payloads.codex) {
-    for (const [key, label] of [['claude', 'Claude Code'], ['codex', 'OpenAI Codex']]) {
-      const p = payloads[key];
-      agents.push({
-        label,
-        cost: p.summary.totalCost,
-        commits: p.summary.totalCommits,
-        costPerCommit: p.summary.avgCostPerCommit,
-        survivalRate: p.lineSurvival.survivalRate,
-        grade: p.summary.overallGrade,
-      });
-    }
+  // Per-agent one-liners when the run computed per-agent views (more than one
+  // agent had sessions). Each agent that has a view contributes a row.
+  for (const [key, label] of [['claude', 'Claude Code'], ['codex', 'OpenAI Codex'], ['copilot', 'GitHub Copilot']]) {
+    const p = payloads?.[key];
+    if (!p) continue;
+    agents.push({
+      label,
+      cost: p.summary.totalCost,
+      commits: p.summary.totalCommits,
+      costPerCommit: p.summary.avgCostPerCommit,
+      survivalRate: p.lineSurvival.survivalRate,
+      grade: p.summary.overallGrade,
+    });
   }
 
   // Top model families by cost that shipped commits — the "which model is
@@ -108,11 +108,18 @@ export function renderReportText(model) {
   L.push(`  ${rule}`);
   L.push(`  ${label('Spend (API-equiv)')}${c.orange}${fmtMoney(model.totalCost)}${c.reset}${model.pricingEstimatedPct > 0 ? ` ${c.dim}(~${model.pricingEstimatedPct}% estimated)${c.reset}` : ''}`);
   if (model.plan) {
-    L.push(`  ${label(`Plan (${model.plan.name})`)}${fmtMoney(model.plan.windowCost)} ${c.dim}for this window${c.reset}`);
+    if (Number.isFinite(model.plan.includedCreditDollars)) {
+      L.push(`  ${label(`Plan (${model.plan.name})`)}${fmtMoney(model.plan.basePlanCost)} ${c.dim}base fee for this window${c.reset}`);
+      L.push(`  ${label('Included AI Credits')}${fmtMoney(model.plan.includedCreditDollars)} ${c.dim}usage allowance${model.plan.pooledCredits ? ' (pooled)' : ''}${c.reset}`);
+      L.push(`  ${label('Estimated overage')}${fmtMoney(model.plan.estimatedOverage)}`);
+      L.push(`  ${label('Estimated bill')}${fmtMoney(model.plan.windowCost)}`);
+    } else {
+      L.push(`  ${label(`Plan (${model.plan.name})`)}${fmtMoney(model.plan.windowCost)} ${c.dim}for this window${c.reset}`);
+    }
     if (model.plan.utilizationRatio !== null) {
       const ur = model.plan.utilizationRatio;
       const urc = ur >= 1 ? c.green : c.yellow;
-      L.push(`  ${label('Plan utilization')}${urc}${ur}x${c.reset} ${c.dim}API-equivalent value vs flat fee${c.reset}`);
+      L.push(`  ${label('Plan utilization')}${urc}${ur}x${c.reset} ${c.dim}API-equivalent value vs base fee${c.reset}`);
     }
   }
   L.push(`  ${label('Sessions')}${fmtInt(model.sessions)}`);
@@ -178,8 +185,15 @@ export function renderReportMarkdown(model) {
   L.push('| --- | --- |');
   L.push(`| Spend (API-equivalent) | ${fmtMoney(model.totalCost)}${model.pricingEstimatedPct > 0 ? ` (~${model.pricingEstimatedPct}% estimated)` : ''} |`);
   if (model.plan) {
-    L.push(`| Plan (${model.plan.name}) | ${fmtMoney(model.plan.windowCost)} for this window |`);
-    if (model.plan.utilizationRatio !== null) L.push(`| Plan utilization | ${model.plan.utilizationRatio}x API-equivalent value vs flat fee |`);
+    if (Number.isFinite(model.plan.includedCreditDollars)) {
+      L.push(`| Plan (${model.plan.name}) | ${fmtMoney(model.plan.basePlanCost)} base fee for this window |`);
+      L.push(`| Included AI Credits | ${fmtMoney(model.plan.includedCreditDollars)} usage allowance${model.plan.pooledCredits ? ' (pooled)' : ''} |`);
+      L.push(`| Estimated overage | ${fmtMoney(model.plan.estimatedOverage)} |`);
+      L.push(`| Estimated bill | ${fmtMoney(model.plan.windowCost)} |`);
+    } else {
+      L.push(`| Plan (${model.plan.name}) | ${fmtMoney(model.plan.windowCost)} for this window |`);
+    }
+    if (model.plan.utilizationRatio !== null) L.push(`| Plan utilization | ${model.plan.utilizationRatio}x API-equivalent value vs base fee |`);
   }
   L.push(`| Sessions | ${fmtInt(model.sessions)} |`);
   L.push(`| Commits shipped | ${fmtInt(model.commits)}${model.commits > 0 ? ` (${model.mainBranchPct}% on default branch)` : ''} |`);
@@ -247,8 +261,15 @@ export function renderReportHtml(model) {
   const rows = [];
   rows.push(row('Spend (API-equivalent)', `<strong>${fmtMoney(model.totalCost)}</strong>${model.pricingEstimatedPct > 0 ? ` <span class="dim">(~${model.pricingEstimatedPct}% estimated)</span>` : ''}`));
   if (model.plan) {
-    rows.push(row(`Plan (${escapeHtml(model.plan.name)})`, `${fmtMoney(model.plan.windowCost)} <span class="dim">for this window</span>`));
-    if (model.plan.utilizationRatio !== null) rows.push(row('Plan utilization', `<strong>${model.plan.utilizationRatio}x</strong> <span class="dim">API-equivalent value vs flat fee</span>`));
+    if (Number.isFinite(model.plan.includedCreditDollars)) {
+      rows.push(row(`Plan (${escapeHtml(model.plan.name)})`, `${fmtMoney(model.plan.basePlanCost)} <span class="dim">base fee for this window</span>`));
+      rows.push(row('Included AI Credits', `${fmtMoney(model.plan.includedCreditDollars)} <span class="dim">usage allowance${model.plan.pooledCredits ? ' (pooled)' : ''}</span>`));
+      rows.push(row('Estimated overage', fmtMoney(model.plan.estimatedOverage)));
+      rows.push(row('Estimated bill', `<strong>${fmtMoney(model.plan.windowCost)}</strong>`));
+    } else {
+      rows.push(row(`Plan (${escapeHtml(model.plan.name)})`, `${fmtMoney(model.plan.windowCost)} <span class="dim">for this window</span>`));
+    }
+    if (model.plan.utilizationRatio !== null) rows.push(row('Plan utilization', `<strong>${model.plan.utilizationRatio}x</strong> <span class="dim">API-equivalent value vs base fee</span>`));
   }
   rows.push(row('Sessions', fmtInt(model.sessions)));
   rows.push(row('Commits shipped', `<strong>${fmtInt(model.commits)}</strong>${model.commits > 0 ? ` <span class="dim">(${model.mainBranchPct}% on default branch)</span>` : ''}`));

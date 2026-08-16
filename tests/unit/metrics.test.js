@@ -318,6 +318,17 @@ test('subscription plan mode computes effective cost + utilization', () => {
   assert.equal(p.utilizationRatio, 0.5);          // 50 API-equiv / 100 fee
   assert.equal(p.effectiveCostPerCommit, 100);     // 100 fee / 1 commit
   assert.equal(p.effectiveCostPerSurvivingLine, 1); // 100 fee / 100 surviving lines
+
+  // Copilot Pro = $10 base plan + $15 included AI Credit usage. With $50 of
+  // token usage, the estimated overage is $35 and the estimated bill is $45.
+  const copilot = computeMetrics([session], [], cbr, 30, {
+    name: 'copilot-pro', monthlyCost: 10, includedCreditDollars: 15, overageEnabled: true,
+  }).summary.plan;
+  assert.equal(copilot.basePlanCost, 10);
+  assert.equal(copilot.includedCreditDollars, 15);
+  assert.equal(copilot.estimatedOverage, 35);
+  assert.equal(copilot.windowCost, 45);
+  assert.equal(copilot.effectiveCostPerCommit, 45);
 });
 
 test('weeklyNarrative populated when this-week sessions exist', () => {

@@ -108,6 +108,25 @@ test('plan figures appear when a subscription plan is configured', () => {
   assert.ok(md.includes('(effective $5.26 on plan)'));
 });
 
+test('Copilot plan report shows included AI Credits and estimated overage', () => {
+  const payload = mkPayload({
+    summary: {
+      plan: {
+        name: 'copilot-pro', monthlyCost: 10, windowDays: 30,
+        basePlanCost: 10, includedCreditDollars: 15, estimatedOverage: 35,
+        pooledCredits: false, windowCost: 45, apiEquivalentCost: 50,
+        utilizationRatio: 5, effectiveCostPerCommit: 1.18,
+        effectiveCostPerSurvivingLine: 0.0045,
+      },
+    },
+  });
+  const md = renderReportMarkdown(reportModel(payload));
+  assert.ok(md.includes('| Plan (copilot-pro) | $10.00 base fee for this window |'));
+  assert.ok(md.includes('| Included AI Credits | $15.00 usage allowance |'));
+  assert.ok(md.includes('| Estimated overage | $35.00 |'));
+  assert.ok(md.includes('| Estimated bill | $45.00 |'));
+});
+
 test('html report is self-contained and escapes data-derived strings', () => {
   const payload = mkPayload({
     insights: [{ type: 'info', text: '<script>alert(1)</script> risky insight' }],
