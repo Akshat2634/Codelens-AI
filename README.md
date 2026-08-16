@@ -250,7 +250,7 @@ The dashboard includes:
 - **Productivity heatmap** — GitHub-style grid showing when you're most productive
 - **Agent Autonomy** — autonomy score badge, autopilot ratio, self-heal score, commit velocity, and top verification commands
 - **Projects** — per-repository ROI: which repo your spend goes to, ranked by cost, with its share of spend, commits, $/commit, lines, and % on the default branch. Repos are identified by their git `origin` remote, so a clone, worktree, or moved checkout of the same repo counts as one project (not a duplicate card)
-- **Sessions table** — sortable, expandable table with per-session metrics, matched commits (including their containing branch when available), and autopilot ratio
+- **Sessions table** — sortable, expandable table with per-session metrics, matched commits (including their containing branch when available), and autopilot ratio. Codex sessions that were not attached to a Git repository remain in usage totals and appear as **No repository** instead of turning their prompt-derived task folder into a project name.
 
 ## How It Works
 

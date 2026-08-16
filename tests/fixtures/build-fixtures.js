@@ -7,6 +7,7 @@
 // data for both agent sources (which also makes the source tabs appear).
 
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -17,6 +18,10 @@ mkdirSync(OUT_DIR, { recursive: true });
 rmSync(CODEX_DIR, { recursive: true, force: true });
 
 const FAKE_REPO = '/tmp/codelens-fixture-repo';
+const NON_REPO_WORKSPACE = '/tmp/codelens-fixture-chat-task';
+mkdirSync(FAKE_REPO, { recursive: true });
+mkdirSync(NON_REPO_WORKSPACE, { recursive: true });
+execFileSync('git', ['init', '-q'], { cwd: FAKE_REPO });
 
 function iso(minutesAgo) {
   return new Date(Date.now() - minutesAgo * 60_000).toISOString();
@@ -201,5 +206,16 @@ codexSession(cx3, [
   { timestamp: iso(5 * 60 - 2), type: 'event_msg', payload: { type: 'agent_message', message: 'The auth flow uses middleware chaining…' } },
 ]);
 
+// ── Codex Session 4: Non-Git task workspace. Usage remains visible, but
+// its prompt-derived folder must not become a project name or project card.
+const cx4 = '11111111-aaaa-bbbb-cccc-000000000004';
+codexSession(cx4, [
+  { timestamp: iso(2 * 60), type: 'session_meta', payload: { session_id: cx4, id: cx4, timestamp: iso(2 * 60), cwd: NON_REPO_WORKSPACE, originator: 'Codex Desktop', cli_version: '0.142.5', source: 'cli' } },
+  { timestamp: iso(2 * 60), type: 'turn_context', payload: { cwd: NON_REPO_WORKSPACE, approval_policy: 'on-request', sandbox_policy: { mode: 'workspace-write' }, model: 'gpt-5.5', effort: 'medium', summary: 'auto' } },
+  { timestamp: iso(2 * 60), type: 'event_msg', payload: { type: 'user_message', message: 'Draft a short administrative reply.', kind: 'plain' } },
+  { timestamp: iso(2 * 60 - 1), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 6000, cached_input_tokens: 5000, output_tokens: 400, reasoning_output_tokens: 100, total_tokens: 6400 }, last_token_usage: { input_tokens: 6000, cached_input_tokens: 5000, output_tokens: 400, reasoning_output_tokens: 100, total_tokens: 6400 } } } },
+  { timestamp: iso(2 * 60 - 2), type: 'event_msg', payload: { type: 'agent_message', message: 'Draft completed.' } },
+]);
+
 console.log('Wrote 5 synthetic Claude sessions to ' + OUT_DIR);
-console.log('Wrote 3 synthetic Codex sessions to ' + CODEX_DIR);
+console.log('Wrote 4 synthetic Codex sessions to ' + CODEX_DIR);

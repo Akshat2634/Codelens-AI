@@ -75,6 +75,16 @@ test('projects with no remote fall back to path keying (unchanged behavior)', ()
   assert.equal(m.projects[0].repoName, 'repo');
 });
 
+test('non-repository sessions remain in totals but not project aggregation', () => {
+  const m = computeMetrics([
+    mkCorrelated({ repoPath: '/workspace/prompt-derived-task', projectName: null }),
+  ], [], {}, 30);
+
+  assert.equal(m.summary.totalSessions, 1);
+  assert.equal(m.summary.totalCost, 3);
+  assert.deepEqual(m.projects, []);
+});
+
 test('computeMetrics on empty input returns a well-formed payload', () => {
   const m = computeMetrics([], [], {}, 30);
   assert.equal(m.summary.totalCost, 0);
