@@ -135,16 +135,33 @@ test.describe('Dashboard smoke (fixtures)', () => {
     }
   });
 
-  test('non-Git Codex tasks keep usage without becoming projects', async ({ page, request }) => {
+  test('non-Git Codex tasks keep usage without repository-only metrics', async ({ page, request }) => {
     const codex = await (await request.get('/api/all?source=codex')).json();
     const nonRepo = codex.sessions.find(s => s.sessionId === '11111111-aaaa-bbbb-cccc-000000000004');
     expect(nonRepo).toBeTruthy();
     expect(nonRepo.projectName).toBeNull();
+    expect(nonRepo.contextType).toBe('task');
+    expect(nonRepo.taskName).toBe('codelens-fixture-chat-task');
+    expect(nonRepo.grade).toBeNull();
+    expect(nonRepo.isOrphaned).toBe(false);
     expect(codex.projects.some(p => p.repoName === 'codelens-fixture-chat-task')).toBe(false);
 
     await page.goto('/');
-    await expect(page.locator('.sessions-section')).toContainText('No repository');
+    const row = page.locator(`.session-row[data-arg="${nonRepo.sessionId}"]`);
+    await expect(page.locator('.sessions-section')).toContainText('Context');
+    await expect(row.locator('.session-context')).toContainText('Other task');
+    await expect(row.locator('.session-context')).toContainText('codelens-fixture-chat-task');
+    await expect(row.locator('.session-commits')).toHaveText('—');
+    await expect(row.locator('.session-lines')).toHaveText('—');
+    await expect(row.locator('.session-grade')).toHaveText('N/A');
     await expect(page.locator('#sec-projects')).not.toContainText('codelens-fixture-chat-task');
+
+    await page.getByRole('button', { name: 'Other tasks' }).click();
+    await expect(page.locator('.session-row')).toHaveCount(1);
+    await expect(page.locator('.session-row')).toContainText('codelens-fixture-chat-task');
+
+    await page.getByRole('button', { name: 'Repository work' }).click();
+    await expect(page.locator('.session-row').filter({ hasText: 'codelens-fixture-chat-task' })).toHaveCount(0);
   });
 
   test('All Agents model view renders exact Claude and Codex models together', async ({ page }) => {

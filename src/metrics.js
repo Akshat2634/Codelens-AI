@@ -587,6 +587,10 @@ function computeEfficiencyScore(costPerCommit, survivalRate, orphanedRate, total
 }
 
 function computeSessionGrade(session) {
+  // A task outside a Git repository has no commit outcome to grade. Its usage
+  // and cost still belong in totals, but an F would falsely imply failed code
+  // delivery when repository ROI simply does not apply.
+  if (!session.projectName) return null;
   // --depth's workspace-explosion zeroes cost on every clone but the one
   // carrying the sub-repo with the most files (index.js), so a real commit
   // landing on a zeroed clone would otherwise grade as a fabricated 'A'
@@ -641,20 +645,21 @@ function generateInsights(summary, correlatedSessions, modelBreakdown, sessionBu
   }
 
   // 1. Orphaned session rate — critical if high
-  const orphanedCount = correlatedSessions.filter(s => s.isOrphaned).length;
-  if (orphanedCount > 0 && correlatedSessions.length > 0) {
-    const pct = Math.round((orphanedCount / correlatedSessions.length) * 100);
+  const repositorySessions = correlatedSessions.filter(s => s.projectName);
+  const orphanedCount = repositorySessions.filter(s => s.isOrphaned).length;
+  if (orphanedCount > 0 && repositorySessions.length > 0) {
+    const pct = Math.round((orphanedCount / repositorySessions.length) * 100);
     if (pct >= 30) {
       candidates.push({
         priority: 1,
         type: 'warning',
-        text: `${pct}% of sessions (${orphanedCount}/${correlatedSessions.length}) ran more than 10 messages without producing a commit — likely wasted effort.`,
+        text: `${pct}% of repository sessions (${orphanedCount}/${repositorySessions.length}) ran more than 10 messages without producing a commit — likely wasted effort.`,
       });
     } else if (pct > 0) {
       candidates.push({
         priority: 3,
         type: 'info',
-        text: `${pct}% of sessions (${orphanedCount}/${correlatedSessions.length}) ran more than 10 messages without producing a commit.`,
+        text: `${pct}% of repository sessions (${orphanedCount}/${repositorySessions.length}) ran more than 10 messages without producing a commit.`,
       });
     }
   }
@@ -816,6 +821,8 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
 
   // ---- Summary ----
   const totalCost = correlatedSessions.reduce((s, c) => s + c.cost.totalCost, 0);
+  const repositorySessions = correlatedSessions.filter(s => s.projectName);
+  const repositoryCost = repositorySessions.reduce((s, c) => s + c.cost.totalCost, 0);
   const totalSessions = correlatedSessions.length;
   const totalCommits = correlatedSessions.reduce((s, c) => s + c.commitCount, 0);
   const totalLinesAdded = correlatedSessions.reduce((s, c) => s + c.linesAdded, 0);
@@ -835,13 +842,13 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   ).size;
   const totalInputTokens = correlatedSessions.reduce((s, c) => s + c.totalInputTokens, 0);
   const totalOutputTokens = correlatedSessions.reduce((s, c) => s + c.totalOutputTokens, 0);
-  const orphanedCount = correlatedSessions.filter(s => s.isOrphaned).length;
+  const orphanedCount = repositorySessions.filter(s => s.isOrphaned).length;
   const totalCommitsOnMain = correlatedSessions.reduce((s, c) => s + c.commitsOnMain, 0);
 
   const lineSurvival = computeLineSurvival(correlatedSessions);
 
-  const avgCost = totalCommits > 0 ? totalCost / totalCommits : 0;
-  const orphanedSessionRate = totalSessions > 0 ? Math.round((orphanedCount / totalSessions) * 100) : 0;
+  const avgCost = totalCommits > 0 ? repositoryCost / totalCommits : 0;
+  const orphanedSessionRate = repositorySessions.length > 0 ? Math.round((orphanedCount / repositorySessions.length) * 100) : 0;
   const overallGrade = totalCommits > 0
     ? computeEfficiencyGrade(avgCost, lineSurvival.survivalRate)
     : 'F';
@@ -1244,15 +1251,15 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     ? Math.round((totalLinesAdded / windowLinesTotal) * 100)
     : null;
 
-  // Value leak — spend that produced no committed code. The cost of every
-  // session that claimed zero commits, as dollars and as a share of total
-  // spend. Some exploration is healthy; a high leak is the single clearest
+  // Value leak — repository spend that produced no committed code. The cost of
+  // every repository session that claimed zero commits, as dollars and as a
+  // share of repository spend. Some exploration is healthy; a high leak is the
   // "where did the money go" signal a spend-only tracker cannot compute.
-  const zeroCommitSessions = correlatedSessions.filter(s => s.commitCount === 0);
+  const zeroCommitSessions = repositorySessions.filter(s => s.commitCount === 0);
   const leakCost = zeroCommitSessions.reduce((a, s) => a + s.cost.totalCost, 0);
   const valueLeak = {
     cost: Math.round(leakCost * 100) / 100,
-    pct: totalCost > 0 ? Math.round((leakCost / totalCost) * 100) : 0,
+    pct: repositoryCost > 0 ? Math.round((leakCost / repositoryCost) * 100) : 0,
     sessionCount: zeroCommitSessions.length,
   };
 
@@ -1314,8 +1321,14 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
   const autonomyBySession = new Map(autonomyMetrics.perSession.map(a => [a.sessionId, a]));
   const sessionsWithGrades = correlatedSessions.map(s => {
     const a = autonomyBySession.get(s.sessionId);
+    const contextType = s.projectName ? 'repository' : 'task';
+    const taskName = contextType === 'task'
+      ? (s.repoPath || '').split(/[\\/]/).filter(Boolean).pop() || null
+      : null;
     return {
       ...s,
+      contextType,
+      taskName,
       grade: computeSessionGrade(s),
       autopilotRatio: a?.autopilotRatio ?? 0,
       selfHealScore: a?.selfHealScore ?? 0,

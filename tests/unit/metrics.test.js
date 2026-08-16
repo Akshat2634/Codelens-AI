@@ -82,7 +82,12 @@ test('non-repository sessions remain in totals but not project aggregation', () 
 
   assert.equal(m.summary.totalSessions, 1);
   assert.equal(m.summary.totalCost, 3);
+  assert.equal(m.summary.valueLeak.cost, 0);
+  assert.equal(m.summary.valueLeak.sessionCount, 0);
   assert.deepEqual(m.projects, []);
+  assert.equal(m.sessions[0].contextType, 'task');
+  assert.equal(m.sessions[0].taskName, 'prompt-derived-task');
+  assert.equal(m.sessions[0].grade, null);
 });
 
 test('computeMetrics on empty input returns a well-formed payload', () => {
