@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.3](https://github.com/Akshat2634/Codelens-AI/compare/v0.10.2...v0.10.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* target repository for release CI dispatch ([#115](https://github.com/Akshat2634/Codelens-AI/issues/115)) ([00422aa](https://github.com/Akshat2634/Codelens-AI/commit/00422aa745290ae02cd8457b386d300d17c02b7e))
+
 ## [Unreleased]
 
 ### Added
