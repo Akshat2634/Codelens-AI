@@ -182,14 +182,28 @@ function calculateCostBreakdown(inputTokens, outputTokens, cacheReadTokens, cach
 
 function toRelativePath(absolutePath, repoPath) {
   if (!absolutePath) return null;
+  // Session logs can outlive the machine that produced them, so paths may use
+  // either separator regardless of the host currently parsing them. Keep the
+  // stored repo-relative form Git-compatible (forward slashes) on every OS.
+  const normalizedAbsolute = String(absolutePath).replace(/\\/g, '/');
+  const normalizedRepo = repoPath
+    ? String(repoPath).replace(/\\/g, '/').replace(/\/+$/, '')
+    : null;
   // Handle worktree paths: .claude/worktrees/<name>/src/file.js → src/file.js
-  const wtMatch = absolutePath.match(/\.claude\/worktrees\/[^/]+\/(.+)/);
+  const wtMatch = normalizedAbsolute.match(/\.claude\/worktrees\/[^/]+\/(.+)/);
   if (wtMatch) return wtMatch[1];
   // Normal: strip repo root prefix
-  if (repoPath && absolutePath.startsWith(repoPath)) {
-    let rel = absolutePath.slice(repoPath.length);
-    if (rel.startsWith('/')) rel = rel.slice(1);
-    return rel;
+  if (normalizedRepo) {
+    const caseInsensitive = /^[A-Za-z]:\//.test(normalizedAbsolute)
+      || /^[A-Za-z]:\//.test(normalizedRepo)
+      || normalizedAbsolute.startsWith('//')
+      || normalizedRepo.startsWith('//');
+    const comparableAbsolute = caseInsensitive ? normalizedAbsolute.toLowerCase() : normalizedAbsolute;
+    const comparableRepo = caseInsensitive ? normalizedRepo.toLowerCase() : normalizedRepo;
+    if (comparableAbsolute === comparableRepo) return '';
+    if (comparableAbsolute.startsWith(`${comparableRepo}/`)) {
+      return normalizedAbsolute.slice(normalizedRepo.length + 1);
+    }
   }
   // Stale-alias cwd: the recorded repoPath can be a dead alias of the live
   // root (e.g. cwd logged as .../GitHub/repo while files landed under
@@ -197,13 +211,14 @@ function toRelativePath(absolutePath, repoPath) {
   // is inside the same-named repo folder. Suffix-match on the folder name
   // before collapsing to a bare basename — lastIndexOf picks the innermost
   // match, i.e. the shortest relative path.
-  if (repoPath) {
-    const marker = path.sep + path.basename(repoPath) + path.sep;
-    const idx = absolutePath.lastIndexOf(marker);
-    if (idx !== -1) return absolutePath.slice(idx + marker.length);
+  if (normalizedRepo) {
+    const repoName = normalizedRepo.split('/').filter(Boolean).pop();
+    const marker = `/${repoName}/`;
+    const idx = normalizedAbsolute.lastIndexOf(marker);
+    if (idx !== -1) return normalizedAbsolute.slice(idx + marker.length);
   }
   // Fallback: return just the filename
-  return absolutePath.split('/').pop();
+  return normalizedAbsolute.split('/').pop();
 }
 
 // Commands that are clearly NOT verification even if they contain matching keywords

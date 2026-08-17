@@ -125,7 +125,7 @@ test('VS Code Copilot parser replays incremental usage into the shared copilot s
     assert.deepEqual(session.toolCalls, { create_file: 1, run_in_terminal: 1 });
     assert.equal(session.totalBashCalls, 1);
     assert.equal(session.verificationBashCalls, 1);
-    assert.deepEqual(session.filesWritten, [path.join('src', 'app.js')]);
+    assert.deepEqual(session.filesWritten, ['src/app.js']);
     assert.equal(session.userMessageCount, 2);
     assert.equal(session.assistantMessageCount, 2);
     assert.equal(session.usageEvents.length, 2);
@@ -164,7 +164,7 @@ test('VS Code parser keeps an active Copilot session without usage for correlati
     assert.equal(sessions[0].costZeroed, true);
     assert.equal(sessions[0].cost.totalCost, 0);
     assert.equal(sessions[0].toolCalls.run_in_terminal, 1);
-    assert.deepEqual(sessions[0].filesWritten, [path.join('src', 'draft.js')]);
+    assert.deepEqual(sessions[0].filesWritten, ['src/draft.js']);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
