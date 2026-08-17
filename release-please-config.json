@@ -4,6 +4,7 @@
     ".": {
       "release-type": "node",
       "package-name": "codelens-ai",
+      "include-component-in-tag": false,
       "include-v-in-tag": true,
       "changelog-path": "CHANGELOG.md"
     }
