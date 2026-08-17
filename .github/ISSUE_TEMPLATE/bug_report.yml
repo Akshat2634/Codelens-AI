@@ -1,0 +1,97 @@
+name: Bug report
+description: Report a reproducible problem with Codelens AI
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Codelens AI.
+
+        **Protect your data:** do not upload raw session files, prompts, responses, private paths, repository content, tokens, or credentials. Redact logs and screenshots before attaching them.
+
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Affected agent
+      description: Which local session source is involved?
+      options:
+        - Claude Code
+        - OpenAI Codex CLI
+        - GitHub Copilot CLI
+        - GitHub Copilot in VS Code
+        - Multiple agents
+        - Unsure
+    validations:
+      required: true
+
+  - type: input
+    id: codelens-version
+    attributes:
+      label: Codelens AI version
+      description: Run `codelens-ai --version`.
+      placeholder: 0.10.2
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      description: Run `node --version`.
+      placeholder: v22.15.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: What happened, and what impact did it have?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `codelens-ai ...`
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs or screenshots
+      description: Optional. Remove prompts, responses, private paths, repository content, tokens, and credentials.
+      render: shell
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I have not included raw session files, prompts, responses, private paths, repository content, tokens, or credentials.
+          required: true
