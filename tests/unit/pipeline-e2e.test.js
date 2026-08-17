@@ -198,6 +198,11 @@ test('nested workspace-parent sessions automatically explode into per-sub-repo c
     const projectNames = new Set(result.sessions.map(s => s.projectName));
     assert.ok(projectNames.has('repo-a'));
     assert.ok(projectNames.has('repo-b'));
+    assert.deepEqual(
+      [...new Set(result.sessions.flatMap(s => s.filesWritten))].sort(),
+      ['src/a.js', 'src/b.js'],
+      'clone paths stay in Git-compatible form on every platform'
+    );
 
     // Cost is CONSERVED: only one clone keeps it, the other reads $0.
     const costs = result.sessions.map(s => s.cost.totalCost).sort((a, b) => a - b);

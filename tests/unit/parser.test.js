@@ -268,6 +268,11 @@ test('toRelativePath strips repo prefix and handles worktrees', () => {
   assert.equal(toRelativePath('/other/path/file.js', '/not-a-match'), 'file.js');
   // No absolute path
   assert.equal(toRelativePath(null, '/repo'), null);
+  // Recorded Windows paths remain comparable with Git's forward-slash paths.
+  assert.equal(
+    toRelativePath('C:\\Users\\me\\proj\\src\\file.js', 'C:\\Users\\me\\proj'),
+    'src/file.js'
+  );
 });
 
 test('toRelativePath suffix-matches the repo folder when the recorded cwd is a stale alias', () => {

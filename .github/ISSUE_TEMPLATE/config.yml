@@ -1,5 +1,8 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
   - name: Documentation
     url: https://github.com/Akshat2634/Codelens-AI#readme
     about: Check the README for usage instructions and FAQ
+  - name: Report a security vulnerability
+    url: https://github.com/Akshat2634/Codelens-AI/security/advisories/new
+    about: Report vulnerabilities privately instead of opening a public issue

@@ -1,129 +1,68 @@
-name: Release
+name: Release Please
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  push:
     branches: [main]
   workflow_dispatch:
 
 permissions: {}
 
 concurrency:
-  group: npm-release-main
+  group: release-please-main
   cancel-in-progress: false
 
 jobs:
-  ci:
-    if: github.event_name == 'workflow_dispatch'
-    permissions:
-      contents: read
-    uses: ./.github/workflows/ci.yml
-
   release:
-    needs: ci
-    if: >-
-      always() &&
-      ((github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
-      (github.event_name == 'workflow_dispatch' && needs.ci.result == 'success'))
+    name: Prepare release
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      release_tag: ${{ steps.release.outputs.tag_name }}
+
+    steps:
+      - name: Create or update release PR
+        id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+
+      - name: Run CI for the release PR
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+        run: gh workflow run ci.yml --ref "$(jq -r '.headBranchName' <<< "$RELEASE_PR")"
+
+  publish:
+    name: Publish to npm
+    needs: release
+    if: needs.release.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
       id-token: write
 
     steps:
-      - name: Check out the tested commit
-        uses: actions/checkout@v7
+      - name: Check out the released tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-          fetch-depth: 0
-
-      - name: Confirm the tested commit is current main
-        id: current
-        shell: bash
-        run: |
-          git fetch origin main
-          TESTED_SHA=$(git rev-parse HEAD)
-          CURRENT_MAIN_SHA=$(git rev-parse FETCH_HEAD)
-          if [ "$TESTED_SHA" = "$CURRENT_MAIN_SHA" ]; then
-            echo "release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::Skipping stale release for $TESTED_SHA; main is now $CURRENT_MAIN_SHA."
-            echo "release=false" >> "$GITHUB_OUTPUT"
-          fi
+          ref: ${{ needs.release.outputs.release_tag }}
 
       - name: Use Node.js 24
-        if: steps.current.outputs.release == 'true'
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+          registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
       - name: Install dependencies
-        if: steps.current.outputs.release == 'true'
         run: npm ci
 
-      - name: Install latest npm
-        if: steps.current.outputs.release == 'true'
-        run: npm install -g npm@latest
+      - name: Install OIDC-capable npm
+        run: npm install --global npm@11.6.2
 
-      - name: Select release version
-        if: steps.current.outputs.release == 'true'
-        id: version
-        shell: bash
-        run: |
-          RELEASE_SHA=$(git rev-parse HEAD)
-          EXISTING_TAG=$(git tag --points-at "$RELEASE_SHA" --list "v[0-9]*" --sort=-version:refname | head -n 1)
-
-          if [ -n "$EXISTING_TAG" ]; then
-            VERSION="${EXISTING_TAG#v}"
-          else
-            PUBLISHED_VERSION=$(npm view codelens-ai version)
-            SOURCE_VERSION=$(node -p "require('./package.json').version")
-            LATEST_TAG=$(git tag --list "v[0-9]*" --sort=-version:refname | head -n 1)
-            TAG_VERSION="${LATEST_TAG#v}"
-            VERSION=$(node -e '
-              const parse = (value) => {
-                const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value);
-                if (!match) throw new Error(`Expected a stable semver version, received ${value}`);
-                return match.slice(1).map(Number);
-              };
-              const compare = (left, right) => {
-                const difference = left.findIndex((part, index) => part !== right[index]);
-                return difference === -1 ? 0 : left[difference] - right[difference];
-              };
-              const source = parse(process.argv[1]);
-              const published = parse(process.argv[2]);
-              const tagged = parse(process.argv[3]);
-              const baseline = compare(tagged, published) > 0 ? tagged : published;
-              console.log(compare(source, baseline) > 0
-                ? source.join(".")
-                : `${baseline[0]}.${baseline[1]}.${baseline[2] + 1}`);
-            ' "$SOURCE_VERSION" "$PUBLISHED_VERSION" "$TAG_VERSION")
-
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "v$VERSION" -m "v$VERSION" "$RELEASE_SHA"
-            git push origin "v$VERSION"
-          fi
-
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Publish codelens-ai to npm
-        if: steps.current.outputs.release == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          npm version "$VERSION" --no-git-tag-version --allow-same-version
-          if npm view "codelens-ai@$VERSION" version >/dev/null 2>&1; then
-            echo "Version $VERSION is already published; skipping npm publish."
-          else
-            npm publish --access public
-          fi
-
-      - name: Create GitHub Release
-        if: steps.current.outputs.release == 'true'
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          generate_release_notes: true
+      - name: Publish codelens-ai with provenance
+        run: npm publish --access public

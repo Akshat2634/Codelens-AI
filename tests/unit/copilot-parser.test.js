@@ -295,7 +295,7 @@ test('parseCopilotSessions reads cwd/branch from workspace.yaml when events omit
     ], `cwd: ${CWD}\nbranch: feature/z\n`);
     const { sessions } = await parseCopilotSessions(root, 30, null);
     const s = sessions[0];
-    assert.equal(s.repoPath, CWD);
+    assert.equal(s.repoPath, path.resolve(CWD));
     assert.equal(s.gitBranch, 'feature/z');
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -312,7 +312,7 @@ test('parseCopilotSessions uses session.context_changed when there is no YAML or
     ]);
     const { sessions } = await parseCopilotSessions(root, 30, null);
     assert.equal(sessions.length, 1);
-    assert.equal(sessions[0].repoPath, CWD);
+    assert.equal(sessions[0].repoPath, path.resolve(CWD));
     assert.equal(sessions[0].projectName, 'copilot-fixture-repo');
     assert.equal(sessions[0].gitBranch, 'feature/context');
   } finally {

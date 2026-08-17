@@ -1,5 +1,12 @@
 # Codelens AI
 
+[![CI](https://github.com/Akshat2634/Codelens-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/Akshat2634/Codelens-AI/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Akshat2634/Codelens-AI/actions/workflows/codeql.yml/badge.svg)](https://github.com/Akshat2634/Codelens-AI/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Akshat2634/Codelens-AI/badge)](https://scorecard.dev/viewer/?uri=github.com/Akshat2634/Codelens-AI)
+[![npm](https://img.shields.io/npm/v/codelens-ai)](https://www.npmjs.com/package/codelens-ai)
+[![npm downloads](https://img.shields.io/npm/dm/codelens-ai)](https://www.npmjs.com/package/codelens-ai)
+[![License: MIT](https://img.shields.io/github/license/Akshat2634/Codelens-AI)](LICENSE)
+
 **[codelensai-dev.vercel.app](https://codelensai-dev.vercel.app/)**
 
 **Agent Productivity-to-Cost Correlator** — Is your AI coding agent actually shipping code?

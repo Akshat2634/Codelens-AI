@@ -1,0 +1,39 @@
+parser:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/*-parser.js"
+          - "tests/unit/*parser.test.js"
+          - "tests/fixtures/**"
+
+dashboard:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/dashboard.html"
+          - "src/server.js"
+          - "tests/e2e/**"
+          - "tests/local/**"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "package.json"
+          - "package-lock.json"
+          - ".github/dependabot.yml"
+
+security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "SECURITY.md"
+          - ".github/workflows/codeql.yml"
+          - ".github/workflows/scorecard.yml"
+          - ".github/dependabot.yml"
+
+github-actions:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"

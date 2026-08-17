@@ -2,6 +2,8 @@
 
 Brief description of the changes and the motivation behind them.
 
+Closes #___
+
 ## Type of Change
 
 - [ ] Bug fix (non-breaking change that fixes an issue)

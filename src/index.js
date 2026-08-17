@@ -56,7 +56,12 @@ function bucketFilesBySubRepo(filesAbs, subRepos) {
         if (!best || sub.length > best.length) best = sub;
       }
     }
-    if (best) buckets.get(best).push(abs.slice(best.length + 1));
+    if (best) {
+      // Git numstat paths always use forward slashes. Preserve that canonical
+      // form when splitting Windows workspace paths into per-repo clones so
+      // file-overlap correlation remains platform-independent.
+      buckets.get(best).push(abs.slice(best.length + 1).replace(/\\/g, '/'));
+    }
   }
   return buckets;
 }

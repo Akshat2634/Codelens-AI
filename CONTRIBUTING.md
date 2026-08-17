@@ -1,120 +1,92 @@
-# Contributing to codelens-ai
+# Contributing to Codelens AI
 
-Thank you for your interest in contributing to codelens-ai! This guide will help you get started.
+Thank you for helping improve Codelens AI. Keep pull requests focused and avoid including private agent-session data in issues, fixtures, logs, or screenshots.
 
-## How to Contribute
+## Reporting Bugs
 
-### Reporting Bugs
+Use the [structured bug report](https://github.com/Akshat2634/Codelens-AI/issues/new?template=bug_report.yml) and include reproducible steps, your Codelens AI and Node.js versions, operating system, and affected agent.
 
-If you find a bug, please [open an issue](https://github.com/Akshat2634/Codelens-AI/issues/new?template=bug_report.md) with:
+Do not upload raw session files, prompts, responses, private paths, repository content, tokens, or credentials. Redact logs and screenshots before attaching them. Report security problems through [private vulnerability reporting](https://github.com/Akshat2634/Codelens-AI/security/advisories/new), not a public issue.
 
-- A clear description of the problem
-- Steps to reproduce
-- Expected vs actual behavior
-- Your Node.js version and OS
+## Suggesting Features
 
-### Suggesting Features
+Open a [feature request](https://github.com/Akshat2634/Codelens-AI/issues/new?template=feature_request.md) describing the problem, proposed solution, and alternatives considered.
 
-Feature requests are welcome! Please [open a feature request](https://github.com/Akshat2634/Codelens-AI/issues/new?template=feature_request.md) describing:
+## Submitting Pull Requests
 
-- The problem you're trying to solve
-- Your proposed solution
-- Any alternatives you've considered
+1. Fork the repository.
+2. Create a focused branch.
+3. Make the smallest change that solves the issue.
+4. Add or update tests when behavior changes.
+5. Run the validation commands below.
+6. Use a [Conventional Commit](https://www.conventionalcommits.org/) subject such as `fix: handle missing session metadata` or `feat: add agent filter`.
+7. Open a pull request and use `Closes #123` when it resolves an issue.
 
-### Submitting Pull Requests
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Make your changes
-4. Run the tests (see below)
-5. Commit your changes with a descriptive message
-6. Push to your fork and open a pull request
+Conventional Commit prefixes drive Release Please: `fix:` creates a patch release, `feat:` creates a minor release, and a breaking-change marker creates a major release. Documentation and maintenance-only changes do not publish a new package by default.
 
 ## Development Setup
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) >= 22.12.0
+- [Node.js](https://nodejs.org/) 22.12.0 or newer
 - [Git](https://git-scm.com/)
-- [Claude Code](https://claude.ai/code) (for generating session data to test against)
+- Optional local data from Claude Code, OpenAI Codex CLI, GitHub Copilot CLI, or GitHub Copilot in VS Code when manually testing a parser
 
 ### Getting Started
 
 ```bash
-# Clone your fork
 git clone https://github.com/<your-username>/Codelens-AI.git
 cd Codelens-AI
+npm ci
 
-# Install dependencies
-npm install
-
-# Run the tool (opens dashboard in browser)
-node src/index.js
-
-# Run without opening browser (useful during development)
 node src/index.js --no-open
-
-# Output JSON data for debugging
-node src/index.js --json | head -30
+node src/index.js --json
 ```
+
+Use the committed fixtures for automated tests. Never commit personal session files.
 
 ## Running Tests
 
 ```bash
-# Run the full Playwright test suite
-npm test
-
-# Run a specific test file
-npx playwright test tests/dashboard.spec.js
-
-# Run tests with UI mode
-npx playwright test --ui
+npm run lint
+npm run test:unit
+npm run test:package
+CI=1 npm run test:e2e
 ```
 
-Note: Tests require the dashboard server to be running with valid Claude Code session data. The test suite validates dashboard rendering, metrics display, and UI interactions.
+The package smoke test packs and installs the production tarball. The fixture-backed E2E suite installs and runs Chromium through Playwright. CI also runs unit and CLI smoke tests on macOS and Windows.
 
 ## Project Structure
 
-```
+```text
 src/
-  index.js          # CLI entry point and orchestration
-  claude-parser.js  # Parses Claude Code JSONL session files
-  git-analyzer.js   # Analyzes git history with branch awareness
-  correlator.js     # Matches sessions to commits by file overlap / time
-  metrics.js        # Computes ROI metrics, grades, and insights
-  cache.js          # Incremental caching layer
-  server.js         # Express API server
-  dashboard.html    # Interactive single-page dashboard
+  index.js                   CLI entry point and orchestration
+  claude-parser.js           Claude Code session parser
+  codex-parser.js            OpenAI Codex CLI session parser
+  copilot-parser.js          GitHub Copilot CLI session parser
+  copilot-vscode-parser.js   GitHub Copilot VS Code session parser
+  git-analyzer.js            Git history and repository analysis
+  correlator.js              Session-to-commit correlation
+  metrics.js                 ROI metrics, grades, and insights
+  pricing.js                 Provider and model pricing
+  server.js                  Local Express API server
+  dashboard.html             Interactive dashboard
+  report.js                  Terminal, Markdown, and HTML reports
+  mcp.js                     MCP server
+  statusline.js              Claude Code statusline integration
+scripts/
+  smoke-package.mjs          Packed-package smoke test
+  vendor-chart.mjs           Chart.js vendoring script
 tests/
-  dashboard.spec.js # Playwright integration tests
+  unit/                      Node test-runner coverage
+  e2e/                       Fixture-backed Playwright smoke tests
+  local/                     Manual local-data Playwright tests
+  fixtures/                  Synthetic agent-session fixtures
 ```
 
 ## Code Style
 
-- Use ES modules (`import`/`export`)
-- Use `node:` prefix for built-in modules (e.g., `node:path`, `node:fs`)
-- Keep functions focused and single-purpose
-- Prefer descriptive variable names over comments
-
-## Pull Request Guidelines
-
-- Keep PRs focused on a single change
-- Include a clear description of what changed and why
-- Update the README if your change affects user-facing behavior
-- Add tests for new functionality when possible
-- Ensure existing tests still pass
-
-## Contribution Ideas
-
-Looking for something to work on? Here are some ideas:
-
-- Support for other AI coding agents beyond Claude Code
-- Export metrics to CSV/JSON
-- Historical trend tracking across multiple runs
-- Custom pricing overrides via config
-- Additional visualization types in the dashboard
-- Unit tests for core logic (parser, correlator, metrics)
-
-## Questions?
-
-If you have questions about contributing, feel free to [open a discussion](https://github.com/Akshat2634/Codelens-AI/issues) on GitHub.
+- Use ES modules and the `node:` prefix for built-in modules.
+- Match the existing style and keep functions focused.
+- Run Biome through `npm run lint` before opening a pull request.
+- Keep behavior changes covered by targeted tests.
