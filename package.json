@@ -1,7 +1,7 @@
 {
   "name": "codelens-ai",
   "version": "0.10.3",
-  "description": "Correlate AI coding agent token usage with git output to measure ROI",
+  "description": "Local-first evidence and ROI for AI coding agents",
   "type": "module",
   "bin": {
     "codelens-ai": "src/index.js",
@@ -29,6 +29,9 @@
     "github-copilot",
     "cursor",
     "ai",
+    "agent-observability",
+    "evaluation",
+    "evidence",
     "roi",
     "productivity",
     "tokens",

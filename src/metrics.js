@@ -2,6 +2,7 @@ import { getModelFamily as getClaudeModelFamily } from './claude-parser.js';
 import { getCodexModelFamily } from './codex-parser.js';
 import { getCopilotModelFamily } from './copilot-parser.js';
 import { commitLinesForSession } from './correlator.js';
+import { buildEvidence, selectEvidenceSession } from './evidence.js';
 
 // Family resolution across agent sources: Claude names first (opus/sonnet/
 // haiku/fable), then OpenAI Codex names (gpt-5-codex/gpt-5/o-series/...), then
@@ -1394,6 +1395,7 @@ export function computeMetrics(correlatedSessions, organicCommits, commitsByRepo
     daily,
     projects,
     sessions: sessionsWithGrades,
+    evidence: buildEvidence(selectEvidenceSession(sessionsWithGrades)),
     modelBreakdown,
     modelDetailBreakdown,
     toolBreakdown,

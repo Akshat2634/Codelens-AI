@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-**Codelens AI** (`codelens-ai` on npm) is a CLI tool that measures ROI from AI coding agents by correlating token usage with git commit output. It parses **Claude Code** session files (`~/.claude/projects/`), **OpenAI Codex CLI** rollout files (`~/.codex/sessions/`), and **GitHub Copilot** sessions from the standalone CLI (`~/.copilot/session-state/`) plus official VS Code Chat/agent mode (`workspaceStorage/*/chatSessions/`), analyzes git history, and serves an interactive dashboard at `http://localhost:3457` with per-agent source tabs (All Agents / Claude Code / OpenAI Codex / GitHub Copilot).
+**Codelens AI** (`codelens-ai` on npm) is a local-first evidence and ROI tool for AI coding agents. It parses **Claude Code** session files (`~/.claude/projects/`), **OpenAI Codex CLI** rollout files (`~/.codex/sessions/`), and **GitHub Copilot** sessions from the standalone CLI (`~/.copilot/session-state/`) plus official VS Code Chat/agent mode (`workspaceStorage/*/chatSessions/`), correlates sessions with Git, and serves an interactive evidence-first dashboard at `http://localhost:3457` with per-agent source tabs.
 
-**Version:** 0.9.0
+**Version:** 0.10.3
 **License:** MIT
 **npm package:** `codelens-ai` (alias: `claude-roi`)
 
@@ -30,12 +30,13 @@ src/
 ├── copilot-vscode-parser.js # Parses VS Code Copilot Chat/agent JSONL (recorded AI Credits + tool/file metadata)
 ├── git-analyzer.js    # Git log analysis, branch detection, diff stats
 ├── correlator.js      # Matches sessions to commits via file overlap + time window + Co-authored-by trailers
+├── evidence.js        # Provider-neutral session evidence contract + terminal/Markdown renderers
 ├── metrics.js         # ROI calculations, grades, insights, heatmap, survival rate, AI code share, value leak
 ├── report.js          # `codelens-ai report` — terminal / Markdown / HTML ROI scorecard
 ├── tables.js          # `codelens-ai daily|weekly|monthly` — usage/cost tables + ROI columns
 ├── blocks.js          # `codelens-ai blocks` — configurable usage windows, burn rate, projection
 ├── statusline.js      # `codelens-ai statusline` — Claude Code statusline (stdin JSON + quickstats: ROI, burn rate)
-├── mcp.js             # `codelens-ai mcp` — MCP server over stdio (roi_summary, usage, blocks, sessions, projects, refresh tools)
+├── mcp.js             # `codelens-ai mcp` — MCP server over stdio (evidence, roi_summary, usage, blocks, sessions, projects, refresh)
 ├── server.js          # Express REST API routes (?source= selects per-agent views)
 ├── cache.js           # Smart caching with per-source stale file detection + statusline quickstats
 ├── pricing.js         # External LiteLLM pricing overlay — auto-prices models the hardcoded tables don't know
@@ -72,6 +73,7 @@ All GET routes accept `?source=all|claude|codex|copilot` (default `all`; per-age
 
 - `GET /` — dashboard HTML
 - `GET /api/all` — full payload
+- `GET /api/evidence` — latest session evidence (`?session=<exact-id>` selects one session)
 - `GET /api/summary` — hero stats + insights
 - `GET /api/timeline` — daily cost/output chart data
 - `GET /api/sessions` — paginated sessions with sorting
@@ -107,6 +109,7 @@ npx codelens-ai --copilot-vscode-dir X # override VS Code workspaceStorage (test
 npx codelens-ai --plan max20 --codex-plan plus --copilot-plan pro  # per-agent subscription mode
 npx codelens-ai --host 0.0.0.0  # expose dashboard beyond localhost (default 127.0.0.1)
 npx codelens-ai report          # terminal ROI scorecard (--md / --html to export)
+npx codelens-ai evidence --last # auditable latest-session evidence (--md / --json to export)
 npx codelens-ai daily           # usage/cost table by day (+ commits, $/commit); -b per-model, --json
 npx codelens-ai weekly          # ...by week (--start-of-week monday|sunday); `monthly` = by month
 npx codelens-ai blocks          # configurable 5-hour usage windows + burn rate (--active, --recent, -t max)
@@ -131,6 +134,7 @@ node --check src/*.js           # syntax validation
 - **Smart caching** — incremental parsing with per-source staleness, so a new Codex rollout doesn't force a Claude re-parse (`~/.cache/agent-analytics/`)
 - **File-first correlation** — sessions matched to commits by file overlap, 2-hour temporal buffer; all agent sources correlate together so a commit is attributed to at most one session. `Co-authored-by` agent trailers (parsed from git log) route trailer-stamped commits to the matching agent and upgrade attribution confidence to high
 - **Uniform session shape** — codex-parser, copilot-parser, and copilot-vscode-parser produce the claude-parser session shape so correlator/metrics/server are source-agnostic (VS Code does not expose cache-token counts, but its recorded AI Credit total remains authoritative)
+- **Evidence is honest about unknowns** — `evidence.js` may report that a verification command was observed, but it must not claim the command passed until every source exposes a reliable result. Missing evidence is `not_observed`, not `failed`; repository outcome and attribution are `not_applicable` for non-Git tasks.
 - **Copilot pricing and context** — `copilot-parser.js` carries GitHub's published per-token rates for CLI sessions; LiteLLM is a flagged estimate for unknown future ids because provider prices can differ from GitHub AI Credit rates. CLI usage comes from the final `session.shutdown.modelMetrics` snapshot. `copilot-vscode-parser.js` replays VS Code's version-3 incremental records, uses recorded `copilotCredits` as authoritative total cost, and reads per-request tokens/resolved models/tools/edited-file URIs without caching prompt or response text. Both clients emit `source: 'copilot'`; `entrypoint` distinguishes `copilot-cli` from `copilot-vscode`. Multi-repository sessions retain aggregate spend but do not claim one repository's commits, and sessions with no durable usage are marked `costZeroed` so unknown cost cannot grade as a fabricated 'A'
 - **Privacy-first** — all data stays local, no telemetry; the dashboard binds 127.0.0.1 by default (`--host` to override)
 - **Version-aware pricing** — token costs reflect each provider's pricing tiers per model (Anthropic per-version tiers; OpenAI per-model-id, with o3's Jun 2025 price cut date-tiered)

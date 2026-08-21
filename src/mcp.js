@@ -1,4 +1,4 @@
-// `codelens-ai mcp` — expose the ROI reports as MCP tools over stdio, so MCP
+// `codelens-ai mcp` — expose evidence and ROI reports as MCP tools over stdio, so MCP
 // clients (Claude Code, Claude Desktop, ...) can query usage and ROI in-chat.
 //
 // The handlers are thin wrappers over the same computed payloads the dashboard
@@ -11,6 +11,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ErrorCode, ListToolsRequestSchema, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import { blocksJson, buildBlocks, filterRecentBlocks } from './blocks.js';
+import { buildEvidence, selectEvidenceSession } from './evidence.js';
 import { reportModel } from './report.js';
 import { buildPeriodTable, periodTableJson } from './tables.js';
 
@@ -25,6 +26,20 @@ const SOURCE_PROP = {
 };
 
 export const MCP_TOOLS = [
+  {
+    name: 'evidence',
+    title: 'Session Evidence',
+    description: 'Auditable evidence for the latest coding-agent session, or an exact session id: Git outcome, attribution confidence, observed verification commands, cost, and explicit unknowns. Workflow evidence, not a correctness guarantee.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'Exact session id (default: latest session)' },
+        ...SOURCE_PROP,
+      },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
   {
     name: 'roi_summary',
     title: 'ROI Summary',
@@ -145,6 +160,12 @@ export async function callMcpTool(name, args, ctx) {
   if (!view) return err(`No ${args.source} sessions in the analyzed window — that per-agent view was not computed. Use source "all".`);
 
   switch (name) {
+    case 'evidence': {
+      const selected = selectEvidenceSession(view.sessions, args.sessionId || null);
+      if (!selected) return err(`Session not found: ${args.sessionId}`);
+      return json(buildEvidence(selected));
+    }
+
     case 'roi_summary':
       return json(reportModel(view, args.source && args.source !== 'all' ? null : payloads));
 
