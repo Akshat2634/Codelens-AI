@@ -76,6 +76,18 @@ test('buildEvidence marks missing verification as not observed, not failed', () 
   assert.match(evidence.verification.note, /not evidence that checks failed/i);
 });
 
+test('buildEvidence ignores unmarked shell commands while preserving the verification count fallback', () => {
+  const evidence = buildEvidence(session({
+    totalBashCalls: 2,
+    verificationBashCalls: 1,
+    bashCommands: [{ command: 'npm install' }],
+  }));
+
+  assert.equal(evidence.verification.status, 'observed');
+  assert.equal(evidence.verification.commandCount, 1);
+  assert.deepEqual(evidence.verification.commands, []);
+});
+
 test('costZeroed remains unavailable instead of becoming a fabricated zero-dollar run', () => {
   const evidence = buildEvidence(session({ costZeroed: true, cost: { totalCost: 0 } }));
 

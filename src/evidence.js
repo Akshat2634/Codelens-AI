@@ -15,7 +15,7 @@ const money = (value) => value === null ? 'unknown' : `$${number(value).toFixed(
 
 function uniqueVerificationCommands(session) {
   const commands = (session.bashCommands || [])
-    .filter((item) => item?.isVerification !== false && item?.command)
+    .filter((item) => item?.isVerification === true && item.command)
     .map((item) => String(item.command).trim())
     .filter(Boolean);
   return [...new Set(commands)];
