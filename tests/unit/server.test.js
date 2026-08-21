@@ -152,6 +152,20 @@ test('per-source selection applies to sub-resource routes too', async () => {
   });
 });
 
+test('GET /api/evidence returns latest evidence and 404s for an unknown session', async () => {
+  await withSourceServer(async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/evidence?source=codex`);
+    assert.equal(res.status, 200);
+    const evidence = await res.json();
+    assert.equal(evidence.session.id, 'codex-session');
+    assert.equal(evidence.session.source, 'codex');
+    assert.equal(evidence.verification.result, 'unknown');
+
+    const missing = await fetch(`http://127.0.0.1:${port}/api/evidence?session=missing`);
+    assert.equal(missing.status, 404);
+  });
+});
+
 // Sorting by a string column with a null value present used to hit the
 // numeric branch (null → 0 via ?? 0, minus a string = NaN) — an arbitrary,
 // engine-dependent order. Nulls must coerce and group deterministically.

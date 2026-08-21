@@ -134,6 +134,28 @@ test('roi_summary returns the report model', async () => {
   assert.equal(doc.insights.length, 1);
 });
 
+test('evidence returns an auditable latest-session view without inventing results', async () => {
+  const payloads = {
+    all: fakeView('all', [fakeSession({
+      verificationBashCalls: 1,
+      bashCommands: [{ command: 'npm test', isVerification: true }],
+      attributionConfidence: 'high',
+      trailerConfirmedCommits: 1,
+    })]),
+  };
+  const doc = parse(await callMcpTool('evidence', {}, mkCtx(payloads)));
+  assert.equal(doc.session.id, 'sess-1');
+  assert.equal(doc.verification.status, 'observed');
+  assert.equal(doc.verification.result, 'unknown');
+  assert.equal(doc.attribution.confidence, 'high');
+});
+
+test('evidence reports an unknown exact session id', async () => {
+  const result = await callMcpTool('evidence', { sessionId: 'missing' }, mkCtx(PAYLOADS));
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Session not found/);
+});
+
 test('usage aggregates by period with model breakdown', async () => {
   const doc = parse(await callMcpTool('usage', { period: 'daily' }, mkCtx(PAYLOADS)));
   assert.equal(doc.report, 'daily');

@@ -9,14 +9,15 @@
 
 **[codelensai-dev.vercel.app](https://codelensai-dev.vercel.app/)**
 
-**Agent Productivity-to-Cost Correlator** — Is your AI coding agent actually shipping code?
+**Local-first evidence and ROI for coding agents** — Can you trust what your coding agent just did?
 
-Codelens AI ties AI coding agent token usage to actual git output. It reads your local **Claude Code**, **OpenAI Codex CLI**, and **GitHub Copilot** session files (standalone CLI plus VS Code Chat/agent mode), correlates them with git commits, and serves a dashboard answering: *"Am I getting ROI from my AI coding agents?"* When more than one agent has sessions, the dashboard adds **All Agents / Claude Code / OpenAI Codex / GitHub Copilot** tabs so you can compare them side by side.
+Codelens AI turns local **Claude Code**, **OpenAI Codex**, and **GitHub Copilot** session logs into auditable evidence: what changed, which commits can be attributed to the session, which verification commands were observed, what the work cost, and what the available logs cannot prove. Its existing cost, code-survival, and ROI analytics remain available as the longer-term view.
 
 - One command, zero config
 - All data stays local
 - Supports Claude Code, OpenAI Codex CLI, and GitHub Copilot CLI + VS Code in one dashboard
-- Works with any git repo where you've used any of these agents
+- Produces terminal, Markdown, JSON, REST, dashboard, and MCP evidence from one shared model
+- Never turns an observed test command into a fabricated “passed” result
 
 ## Installation
 
@@ -100,15 +101,43 @@ npm install -g codelens-ai@latest   # ...or just update it
 ## Quick Start
 
 ```bash
+npx codelens-ai evidence --last
 npx codelens-ai
 ```
 
-This parses your `~/.claude/projects/`, `~/.codex/sessions/`, `~/.copilot/session-state/`, and VS Code workspace-session data, analyzes your git repos, and opens a dashboard at `http://localhost:3457`.
+The first command prints an evidence artifact for your latest agent session. The second opens the full evidence and ROI dashboard at `http://localhost:3457`.
+
+## Session Evidence
+
+`codelens-ai evidence --last` answers the immediate post-session question: **“What can I actually verify about this agent run?”** It uses the same local parsing and Git correlation pipeline as the dashboard.
+
+The v1 evidence contract includes:
+
+- Session identity, source/client, model, time, context, and cost
+- Matched commits, default-branch state, files, and line changes
+- Attribution confidence from agent trailers, file overlap, and timing
+- Verification commands observed in the provider log, with repeated invocations counted
+- Explicit unknowns for command exit status and per-session code durability
+
+```text
+Session evidence · rich coverage
+
+Outcome       1 matched commit · 2 files · +42/-7
+Attribution   high confidence · 1 trailer-confirmed
+Verification  2 commands observed · result unknown
+              npm test
+
+Boundary      Verification commands were observed, but provider-neutral exit
+              status is unavailable; Codelens does not claim they passed.
+```
+
+This is **workflow evidence, not a correctness guarantee**. “Not observed” means the fact was absent from the available local record—not that it failed or never happened.
 
 ## What It Measures
 
 | Metric                | Description                                                     |
 | --------------------- | --------------------------------------------------------------- |
+| **Session Evidence**  | Auditable Git outcome, attribution, verification commands, cost, and explicit unknowns |
 | **Cost per Commit**   | How much each AI-assisted commit costs in tokens                |
 | **AI Code Share**     | % of all merged lines this window written by AI — measured from git, not surveys |
 | **Value Leak**        | $ and % of repository spend from repository sessions that produced zero committed code |
@@ -154,6 +183,11 @@ codelens-ai report --md            # export codelens-report.md (or --md <path>)
 codelens-ai report --html          # export a self-contained codelens-report.html
 codelens-ai statusline --install   # add the ROI statusline to Claude Code
 
+codelens-ai evidence --last        # latest session evidence in the terminal
+codelens-ai evidence --session ID  # evidence for one exact session id
+codelens-ai evidence --md          # write codelens-evidence.md (or --md <path>)
+codelens-ai evidence --json        # structured evidence for automation
+
 codelens-ai daily                  # token usage & cost table by day (+ commits, $/commit)
 codelens-ai weekly                 # ...by week (--start-of-week monday|sunday)
 codelens-ai monthly                # ...by month
@@ -165,7 +199,7 @@ codelens-ai blocks --active        # just the open block: burn rate, time left, 
 codelens-ai blocks --recent        # only the last 3 days of blocks
 codelens-ai blocks -t max          # warn against a token limit (a number, or "max")
 
-codelens-ai mcp                    # serve usage & ROI reports as MCP tools over stdio
+codelens-ai mcp                    # serve evidence & ROI reports as MCP tools over stdio
 ```
 
 ### Usage tables (`codelens-ai daily|weekly|monthly`)
@@ -195,7 +229,7 @@ $/commit?"). Add it to Claude Code with:
 claude mcp add codelens -- npx -y codelens-ai mcp
 ```
 
-Exposed tools: **`roi_summary`** (grade, spend, $/commit, survival, value leak — the scorecard),
+Exposed tools: **`evidence`** (latest or exact session evidence with explicit unknowns), **`roi_summary`** (grade, spend, $/commit, survival, value leak — the scorecard),
 **`usage`** (daily/weekly/monthly token & cost table), **`blocks`** (5-hour usage windows + burn
 rate), **`sessions`**, **`projects`** (per-repo ROI), and **`refresh`** (force a re-parse). Most
 tools take an optional `source` (`all | claude | codex | copilot`), and all the shared analysis flags

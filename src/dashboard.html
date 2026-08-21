@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Codelens AI — Mission Control</title>
+<title>Codelens AI — Agent Evidence</title>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='8' y='14' width='4' height='12' rx='1.5' fill='%23C4840B'/%3E%3Crect x='14' y='6' width='4' height='20' rx='1.5' fill='%232E9E4F'/%3E%3Crect x='20' y='10' width='4' height='16' rx='1.5' fill='%233987E5'/%3E%3C/svg%3E">
 <script src="/vendor/chart.umd.min.js"></script>
@@ -64,6 +64,7 @@
   a { color: inherit; }
   button { font-family: inherit; }
   input { font-family: inherit; }
+  :where(a, button, input, [tabindex]):focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
   ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; border: 2px solid var(--bg); }
@@ -137,11 +138,22 @@
   @media (max-width: 900px) {
     .app { flex-direction: column; }
     .sidebar {
-      position: static; width: auto; flex-direction: column;
+      position: static; width: 100%; min-width: 0; flex-direction: column; overflow-x: hidden;
       border-right: 0; border-bottom: 1px solid var(--line2);
       backdrop-filter: none; -webkit-backdrop-filter: none;
     }
     .sidebar .rail-spacer { display: none; }
+    .sidebar .brand-tagline { max-width: 62ch; margin-bottom: 2px !important; }
+    .sidebar .rail-label { padding-top: 7px !important; }
+    .sidebar .source-tabs,
+    .sidebar .console-nav { width: 100%; min-width: 0; flex-direction: row !important; overflow-x: auto; padding-bottom: 3px; scrollbar-width: none; }
+    .sidebar .source-tabs::-webkit-scrollbar,
+    .sidebar .console-nav::-webkit-scrollbar { display: none; }
+    .sidebar .source-tab { min-width: 152px; }
+    .sidebar .nav-item { min-width: max-content; }
+    .sidebar .rail-command,
+    .sidebar .rail-theme,
+    .sidebar #footer-agents { display: none !important; }
     .main { margin-left: 0; }
     .main-inner { padding: 20px 18px 64px; }
   }
@@ -156,7 +168,8 @@
   <main class="main">
     <div class="main-inner">
       <div id="topbar"></div>
-      <section id="sec-overview" class="stats-section" style="scroll-margin-top: 20px;"></section>
+      <section id="sec-evidence" class="stats-section" style="scroll-margin-top: 20px;"></section>
+      <section id="sec-overview" class="stats-section" style="scroll-margin-top: 20px; margin-top: 46px;"></section>
       <section id="sec-flow" style="scroll-margin-top: 20px; margin-top: 46px;"></section>
       <section id="sec-models" style="scroll-margin-top: 20px; margin-top: 46px;"></section>
       <section id="sec-agents" style="scroll-margin-top: 20px; margin-top: 46px;"></section>
@@ -230,7 +243,7 @@
     cmdOpen: false, cmdQuery: '', cmdIdx: 0,
     q: '', filter: 'all',
     sortCol: 'startTime', sortDir: -1, page: 1,
-    expanded: null, activeSection: 'sec-overview',
+    expanded: null, activeSection: 'sec-evidence',
     shareOpen: false, shareTheme: 'dark', cliOpen: false, toastMsg: '', refreshing: false,
   };
   const payloads = { all: null, claude: null, codex: null, copilot: null };
@@ -866,8 +879,14 @@
   // terminal. The achievable equivalent: copy the command to the clipboard
   // (works over http://localhost, a secure context) and the user pastes it.
   const CLI_GROUPS = [
+    { group: 'Session evidence', items: [
+      { cmd: 'npx codelens-ai evidence --last', desc: 'Show evidence for the latest agent session' },
+      { cmd: 'npx codelens-ai evidence --session ID', desc: 'Select one exact session id' },
+      { cmd: 'npx codelens-ai evidence --md', desc: 'Export a Markdown evidence artifact' },
+      { cmd: 'npx codelens-ai evidence --json', desc: 'Structured evidence for automation' },
+    ] },
     { group: 'Dashboard', items: [
-      { cmd: 'npx codelens-ai', desc: 'Launch the ROI dashboard (last 30 days, port 3457)' },
+      { cmd: 'npx codelens-ai', desc: 'Launch the evidence and ROI dashboard (last 30 days)' },
       { cmd: 'npx codelens-ai --days 90', desc: 'Analyze a custom lookback window' },
       { cmd: 'npx codelens-ai --source copilot', desc: 'Analyze a single agent — claude | codex | copilot' },
       { cmd: 'npx codelens-ai --project my-repo', desc: 'Filter to a single project' },
@@ -967,11 +986,11 @@
       </button>`;
     }).join('');
 
-    const navDefs = [['sec-overview', 'Overview'], ['sec-flow', 'Cost & Tokens'], ['sec-models', 'Models & Tools'], ['sec-agents', 'Agents'], ['sec-rhythm', 'Rhythm'], ['sec-skills', 'Skills & MCP'], ['sec-projects', 'Projects'], ['sec-sessions', 'Sessions']];
-    const nav = navDefs.map(([id, label], i) => {
+    const navDefs = [['sec-evidence', 'Evidence', '00'], ['sec-overview', 'Overview', '01'], ['sec-flow', 'Cost & Tokens', '02'], ['sec-models', 'Models & Tools', '03'], ['sec-agents', 'Agents', '04'], ['sec-rhythm', 'Rhythm', '05'], ['sec-skills', 'Skills & MCP', '06'], ['sec-projects', 'Projects', '07'], ['sec-sessions', 'Sessions', '08']];
+    const nav = navDefs.map(([id, label, num]) => {
       const active = state.activeSection === id;
       return `<a class="nav-item" data-sec="${id}" href="#${id}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;text-decoration:none;color:${active ? 'var(--ink)' : 'var(--ink2)'};background:${active ? 'var(--hover)' : 'transparent'};font-size:13px;font-weight:${active ? 600 : 450};transition:background .15s,color .15s;position:relative;">
-        <span class="nav-num" style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;color:${active ? 'var(--accent)' : 'var(--ink3)'};width:16px;">0${i + 1}</span>
+        <span class="nav-num" style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;color:${active ? 'var(--accent)' : 'var(--ink3)'};width:16px;">${num}</span>
         <span style="flex:1;">${esc(label)}</span>
         <span class="nav-dot" style="width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:${active ? 1 : 0};transition:opacity .2s;"></span>
       </a>`;
@@ -986,23 +1005,23 @@
         </div>
         <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:19px;letter-spacing:-0.02em;line-height:1;">Codelens <em style="font-style:normal;color:var(--amber-hi);">AI</em></div>
       </div>
-      <p style="margin:-6px 0 10px;padding:0 8px;font-size:11px;line-height:1.55;color:var(--ink2);text-wrap:pretty;">Correlates your AI coding agent's token spend with actual git output — see what shipped, what churned, and what it cost.</p>
+      <p class="brand-tagline" style="margin:-6px 0 10px;padding:0 8px;font-size:11px;line-height:1.55;color:var(--ink2);text-wrap:pretty;">Local-first evidence for coding agents — see what changed, what was checked, what shipped, and what remains unknown.</p>
 
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--ink3);padding:0 10px 8px;">Agent Source</div>
+      <div class="rail-label" style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--ink3);padding:0 10px 8px;">Agent Source</div>
       <div class="source-tabs" style="display:flex;flex-direction:column;gap:4px;">${tabs}</div>
 
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--ink3);padding:16px 10px 8px;">Console</div>
-      <nav style="display:flex;flex-direction:column;gap:2px;">${nav}</nav>
+      <div class="rail-label" style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--ink3);padding:16px 10px 8px;">Console</div>
+      <nav class="console-nav" style="display:flex;flex-direction:column;gap:2px;">${nav}</nav>
 
       <div class="rail-spacer" style="flex:1;"></div>
 
-      <button data-act="openCmd" style="display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:9px;border:1px solid var(--line2);background:var(--card);color:var(--ink2);cursor:pointer;font-size:12.5px;text-align:left;">
+      <button class="rail-command" data-act="openCmd" style="display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:9px;border:1px solid var(--line2);background:var(--card);color:var(--ink2);cursor:pointer;font-size:12.5px;text-align:left;">
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg>
         <span style="flex:1;">Command…</span>
         <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;color:var(--ink3);border:1px solid var(--line2);border-radius:5px;padding:2px 6px;background:var(--bg2);">⌘K</span>
       </button>
 
-      <div style="display:flex;gap:6px;margin-top:6px;">
+      <div class="rail-theme" style="display:flex;gap:6px;margin-top:6px;">
         <button data-act="toggleTheme" title="Toggle light / dark" style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 10px;border-radius:9px;border:1px solid var(--line2);background:var(--card);color:var(--ink2);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">
           <span style="width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,var(--amber-hi) 50%,var(--card2) 50%);border:1px solid var(--line);"></span>
           ${state.theme === 'dark' ? 'Dark' : 'Light'}
@@ -1061,7 +1080,7 @@
     const tzTitle = `Heatmap hours use this timezone${tzi.tz ? ` · ${tzi.tz}` : ''}`;
     $('topbar').innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding-bottom:22px;flex-wrap:wrap;">
       <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.26em;text-transform:uppercase;color:var(--accent);display:flex;align-items:center;gap:10px;">
-        Agent ROI · Mission Control
+        Agent Evidence · Local Control
         <span style="width:42px;height:1px;background:var(--accent);opacity:0.5;"></span>
       </div>
       <div style="flex:1;"></div>
@@ -1231,6 +1250,70 @@
     const insightFeed = `<div class="insight-list" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-top:14px;">${insights}</div>`;
 
     $('sec-overview').innerHTML = briefing + heroBento + periodStrip + insightFeed;
+  }
+
+  function renderEvidence() {
+    const e = view().evidence;
+    if (!e) {
+      $('sec-evidence').innerHTML = '';
+      return;
+    }
+    const coverageMeta = {
+      rich: ['Rich evidence', 'var(--green)'],
+      partial: ['Partial evidence', 'var(--amber-hi)'],
+      limited: ['Limited evidence', 'var(--red)'],
+    };
+    const [coverageLabel, coverageColor] = coverageMeta[e.coverage] || coverageMeta.limited;
+    const outcomeLabel = e.outcome.status === 'matched'
+      ? `${e.outcome.commitCount} matched commit${e.outcome.commitCount === 1 ? '' : 's'}`
+      : e.outcome.status === 'not_applicable' ? 'Not a repository task' : 'No matched commit';
+    const outcomeDetail = e.outcome.status === 'matched'
+      ? `${e.outcome.filesChanged} files · +${e.outcome.linesAdded}/−${e.outcome.linesDeleted}`
+      : e.outcome.note;
+    const attrLabel = e.attribution.status === 'matched'
+      ? `${e.attribution.confidence} confidence`
+      : e.attribution.status === 'not_applicable' ? 'Not applicable' : 'Not available';
+    const verificationLabel = e.verification.status === 'observed'
+      ? `${e.verification.commandCount} command${e.verification.commandCount === 1 ? '' : 's'} observed`
+      : 'No command observed';
+    const commands = e.verification.commands.length
+      ? e.verification.commands.slice(0, 3).map((command) => `<code style="display:block;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:5px;" title="${esc(command)}">$ ${esc(command)}</code>`).join('')
+      : '<span style="font-size:11px;color:var(--ink3);">No verification command captured.</span>';
+    const commits = e.outcome.commits.slice(0, 3).map((commit) => `<div style="display:flex;gap:9px;align-items:baseline;margin-top:6px;min-width:0;"><code style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--amber-hi);">${esc(commit.shortHash)}</code><span style="font-size:11.5px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(commit.subject || '(no subject)')}</span></div>`).join('');
+
+    $('sec-evidence').innerHTML = `
+      <div style="border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line2));border-radius:18px;background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 9%,var(--card)),var(--card) 52%);padding:24px 26px;box-shadow:var(--shadow);position:relative;overflow:hidden;animation:rise .55s cubic-bezier(0.22,1,0.36,1) both;">
+        <div style="position:absolute;inset:0 auto 0 0;width:3px;background:linear-gradient(var(--accent),var(--purple));"></div>
+        <div style="display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap;">
+          <div style="flex:1 1 430px;min-width:0;">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:var(--accent);">Latest session evidence</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;padding:4px 9px;border-radius:6px;color:${coverageColor};background:color-mix(in srgb,${coverageColor} 12%,transparent);">${esc(coverageLabel)}</span>
+            </div>
+            <h1 style="font-family:'Bricolage Grotesque',sans-serif;font-size:clamp(24px,3vw,34px);letter-spacing:-0.035em;line-height:1.12;margin:10px 0 7px;">Can you trust what the agent just did?</h1>
+            <div style="font-size:12.5px;line-height:1.6;color:var(--ink2);">${esc(e.session.sourceName)} · ${esc(e.context.name || 'Unknown context')} · ${e.session.costStatus === 'not_available' ? 'cost unavailable' : esc(fmtMoney(e.session.cost))}</div>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink3);border:1px solid var(--line2);border-radius:8px;padding:7px 10px;background:var(--bg2);">codelens-ai evidence --last</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-top:20px;">
+          <div style="border:1px solid var(--line2);border-radius:12px;background:color-mix(in srgb,var(--bg) 44%,transparent);padding:14px 15px;">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);">Git outcome</div>
+            <div style="font-size:15px;font-weight:650;margin-top:7px;">${esc(outcomeLabel)}</div>
+            <div style="font-size:10.5px;color:var(--ink3);margin-top:4px;line-height:1.45;">${esc(outcomeDetail)}</div>${commits}
+          </div>
+          <div style="border:1px solid var(--line2);border-radius:12px;background:color-mix(in srgb,var(--bg) 44%,transparent);padding:14px 15px;">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);">Attribution</div>
+            <div style="font-size:15px;font-weight:650;margin-top:7px;color:${e.attribution.confidence === 'high' ? 'var(--green)' : e.attribution.confidence === 'medium' ? 'var(--amber-hi)' : 'var(--ink)'};">${esc(attrLabel)}</div>
+            <div style="font-size:10.5px;color:var(--ink3);margin-top:4px;line-height:1.45;">${esc(e.attribution.note)}</div>
+          </div>
+          <div style="border:1px solid var(--line2);border-radius:12px;background:color-mix(in srgb,var(--bg) 44%,transparent);padding:14px 15px;">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);">Verification</div>
+            <div style="font-size:15px;font-weight:650;margin-top:7px;">${esc(verificationLabel)} <span style="font-size:10px;color:var(--amber-hi);">· result unknown</span></div>
+            <div style="margin-top:5px;">${commands}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-start;margin-top:14px;font-size:10.5px;line-height:1.5;color:var(--ink3);"><span style="color:var(--amber-hi);">◇</span><span>${esc(e.disclaimer)} Verification exit status and per-session durability stay explicitly unknown when the source logs cannot prove them.</span></div>
+      </div>`;
   }
 
   function renderFlow() {
@@ -1975,7 +2058,7 @@
   // ── Command palette ──
   function computeCmdItems() {
     const v = view();
-    const navDefs = [['sec-overview', 'Overview'], ['sec-flow', 'Cost & Tokens'], ['sec-models', 'Models & Tools'], ['sec-agents', 'Agents'], ['sec-rhythm', 'Rhythm'], ['sec-skills', 'Skills & MCP'], ['sec-projects', 'Projects'], ['sec-sessions', 'Sessions']];
+    const navDefs = [['sec-evidence', 'Evidence'], ['sec-overview', 'Overview'], ['sec-flow', 'Cost & Tokens'], ['sec-models', 'Models & Tools'], ['sec-agents', 'Agents'], ['sec-rhythm', 'Rhythm'], ['sec-skills', 'Skills & MCP'], ['sec-projects', 'Projects'], ['sec-sessions', 'Sessions']];
     const goTo = (id) => {
       state.cmdOpen = false; renderCmd();
       const el = $(id);
@@ -2040,6 +2123,7 @@
   function renderAll() {
     renderSidebar();
     renderTopbar();
+    renderEvidence();
     renderOverview();
     renderFlow();
     renderModels();
@@ -2168,7 +2252,7 @@
 
   // Scroll-spy — updates only nav styling (never rebuilds charts)
   function setupSpy() {
-    const ids = ['sec-overview', 'sec-flow', 'sec-models', 'sec-agents', 'sec-rhythm', 'sec-skills', 'sec-projects', 'sec-sessions'];
+    const ids = ['sec-evidence', 'sec-overview', 'sec-flow', 'sec-models', 'sec-agents', 'sec-rhythm', 'sec-skills', 'sec-projects', 'sec-sessions'];
     const spy = new IntersectionObserver((entries) => {
       entries.forEach((en) => {
         if (en.isIntersecting && state.activeSection !== en.target.id) {

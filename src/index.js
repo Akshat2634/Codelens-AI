@@ -11,6 +11,7 @@ import { parseCodexSessions } from './codex-parser.js';
 import { parseCopilotSessions } from './copilot-parser.js';
 import { parseCopilotVsCodeSessions } from './copilot-vscode-parser.js';
 import { correlateSessions } from './correlator.js';
+import { buildEvidence, renderEvidenceMarkdown, renderEvidenceText, selectEvidenceSession } from './evidence.js';
 import { analyzeGitRepo, findNestedGitRepos, getGitUser, resolveMovedRepoPaths } from './git-analyzer.js';
 import { serveMcpStdio } from './mcp.js';
 import { computeMetrics } from './metrics.js';
@@ -707,6 +708,42 @@ async function runReport(opts) {
   process.stdout.write(`${renderReportText(model)}\n`, () => process.exit(0));
 }
 
+// `codelens-ai evidence` — one provider-neutral, auditable session artifact.
+// The default and --last both select the latest session; --session selects an
+// exact id. Verification result remains unknown until every provider exposes a
+// reliable command exit status.
+async function runEvidence(opts) {
+  progress = console.error;
+  printBanner(' evidence');
+
+  const { payloads, days, claudeDir, codexDir, copilotDir, copilotVsCodeDirs, sourceFilter } = await runAnalysis(opts);
+  if (!payloads) {
+    printNoSessions(sourceFilter, days, claudeDir, codexDir, copilotDir, copilotVsCodeDirs);
+    if (opts.json) process.stdout.write('null', () => process.exit(0));
+    else process.exit(0);
+    return;
+  }
+
+  const selected = selectEvidenceSession(payloads.all.sessions, opts.session || null);
+  if (!selected) {
+    console.error(`  ${icon.err} ${c.red}Session not found:${c.reset} ${opts.session}`);
+    process.exit(1);
+  }
+  const evidence = buildEvidence(selected);
+
+  if (opts.json) {
+    process.stdout.write(JSON.stringify(evidence, null, 2), () => process.exit(0));
+    return;
+  }
+  if (opts.md !== undefined) {
+    const mdPath = typeof opts.md === 'string' ? opts.md : 'codelens-evidence.md';
+    writeFileSync(mdPath, renderEvidenceMarkdown(evidence));
+    progress(`  ${icon.ok} ${c.green}Evidence written:${c.reset} ${path.resolve(mdPath)}`);
+    process.exit(0);
+  }
+  process.stdout.write(`\n${renderEvidenceText(evidence, { color: process.stdout.isTTY === true })}\n\n`, () => process.exit(0));
+}
+
 // `codelens-ai daily|weekly|monthly` — ccusage-style usage tables over the
 // same analyzed window, with the ROI columns (commits, $/commit) on top.
 async function runTable(period, opts) {
@@ -868,7 +905,7 @@ async function main() {
   const program = new Command();
   program
     .name('codelens-ai')
-    .description('Correlate AI coding agent token usage with git output to measure ROI')
+    .description('Local-first evidence and ROI for AI coding agents')
     .version(VERSION)
     // Options after a subcommand name belong to that subcommand — without
     // this, the parent's identically-named analysis flags (--days, --source,
@@ -888,6 +925,16 @@ async function main() {
     .option('--html [path]', 'write a self-contained HTML report (default: codelens-report.html)');
   addAnalysisOptions(reportCmd);
   reportCmd.action(async (opts) => runReport(opts));
+
+  const evidenceCmd = program
+    .command('evidence')
+    .description('show auditable evidence for the latest coding-agent session')
+    .option('--last', 'show the latest session (default)')
+    .option('--session <id>', 'show one exact session id')
+    .option('--md [path]', 'write Markdown evidence (default: codelens-evidence.md)')
+    .option('-j, --json', 'output structured evidence as JSON');
+  addAnalysisOptions(evidenceCmd);
+  evidenceCmd.action(async (opts) => runEvidence(opts));
 
   // The usage tables: `daily`, `weekly`, `monthly`. Shared flags + renderer;
   // weekly additionally takes --start-of-week.
@@ -921,7 +968,7 @@ async function main() {
   // `codelens-ai mcp` — MCP server over stdio for Claude Code / Claude Desktop.
   const mcpCmd = program
     .command('mcp')
-    .description('serve usage & ROI reports as MCP tools over stdio (add with: claude mcp add codelens -- npx -y codelens-ai mcp)');
+    .description('serve evidence & ROI reports as MCP tools over stdio (add with: claude mcp add codelens -- npx -y codelens-ai mcp)');
   addAnalysisOptions(mcpCmd);
   mcpCmd.action(async (opts) => runMcp(opts));
 
@@ -929,7 +976,7 @@ async function main() {
   // positional options, they'd otherwise be parsed there and silently ignored
   // while report runs with defaults). Forward parent CLI values into the
   // subcommand before it parses its own flags — its own flags still win.
-  const ANALYSIS_SUBCOMMANDS = new Set(['report', 'daily', 'weekly', 'monthly', 'blocks', 'mcp']);
+  const ANALYSIS_SUBCOMMANDS = new Set(['report', 'evidence', 'daily', 'weekly', 'monthly', 'blocks', 'mcp']);
   program.hook('preSubcommand', (thisCommand, subcommand) => {
     if (!ANALYSIS_SUBCOMMANDS.has(subcommand.name())) return;
     for (const key of ['days', 'project', 'refresh', 'claudeDir', 'codexDir', 'copilotDir', 'copilotVscodeDir', 'source', 'offline', 'plan', 'planCost', 'codexPlan', 'codexPlanCost', 'copilotPlan', 'copilotPlanCost']) {

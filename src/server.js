@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { commitLinesForSession } from './correlator.js';
+import { buildEvidence, selectEvidenceSession } from './evidence.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -91,6 +92,14 @@ export function createServer(initialPayload, rebuildFn, opts = {}) {
   // Full payload (single fetch for dashboard)
   app.get('/api/all', (req, res) => {
     res.json(pick(req));
+  });
+
+  // Latest session evidence, or one exact id. This is derived from the same
+  // in-memory view as the dashboard so CLI, API, UI, and MCP agree.
+  app.get('/api/evidence', (req, res) => {
+    const selected = selectEvidenceSession(pick(req).sessions, req.query.session || null);
+    if (!selected) return res.status(404).json({ error: 'Session not found' });
+    res.json(buildEvidence(selected));
   });
 
   // Re-run the full pipeline: clear cache, re-parse sessions, re-analyze git, recompute metrics

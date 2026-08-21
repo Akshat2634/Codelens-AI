@@ -4,8 +4,8 @@ import { expect, test } from '@playwright/test';
 // The goal is to catch regressions that break rendering end-to-end; not to
 // exhaustively verify every component. Full coverage lives in tests/local/.
 //
-// The dashboard is the "Mission Control" redesign: a fixed left rail with agent
-// source tabs + section nav, a bento Overview (efficiency score ring + stat
+// The dashboard is evidence-first: a fixed left rail with agent source tabs,
+// latest-session evidence, and a bento Overview (efficiency score ring + stat
 // tiles), Cost & Token Flow, Models & Tools, Agents & Autonomy (with the
 // Claude-vs-Codex face-off), Shipping Rhythm, and a searchable Sessions table.
 // A ⌘K command palette replaces the old sticky command bar.
@@ -20,6 +20,21 @@ test.describe('Dashboard smoke (fixtures)', () => {
     expect(payload.sessions.length).toBeGreaterThan(0);
     expect(payload.summary.totalCost).toBeGreaterThan(0);
     expect(Array.isArray(payload.insights)).toBe(true);
+    expect(payload.evidence.verification.result).toBe('unknown');
+  });
+
+  test('latest session evidence is the dashboard front door', async ({ page, request }) => {
+    const evidenceResponse = await request.get('/api/evidence');
+    expect(evidenceResponse.status()).toBe(200);
+    const evidence = await evidenceResponse.json();
+    expect(evidence.schemaVersion).toBe(1);
+    expect(['rich', 'partial', 'limited']).toContain(evidence.coverage);
+    expect(evidence.verification.result).toBe('unknown');
+
+    await page.goto('/');
+    await expect(page.locator('#sec-evidence')).toContainText('Can you trust what the agent just did?');
+    await expect(page.locator('#sec-evidence')).toContainText('result unknown');
+    await expect(page.locator('.nav-item[data-sec="sec-evidence"]')).toHaveCount(1);
   });
 
   test('dashboard HTML loads and boots JS without errors', async ({ page }) => {
