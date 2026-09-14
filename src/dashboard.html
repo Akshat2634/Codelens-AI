@@ -133,6 +133,22 @@
   .share-download:hover { border-color: var(--glass-line) !important; background: var(--hover) !important; }
   .footer-link:hover { text-decoration: underline !important; color: var(--cyan) !important; }
 
+  /* Shared sizing prevents long labels from changing individual row tracks. */
+  .session-row > *, .session-header > * { min-width: 0; }
+  .session-row { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .session-context { overflow: hidden; }
+  #session-search, #cmd-input { min-width: 0; width: 100%; }
+  .session-filters button { white-space: nowrap; }
+  .model-legend-row { font-variant-numeric: tabular-nums; }
+  .stat-card > div:first-child { min-height: 26px; }
+  .stat-card > div:first-child > span:first-child { flex-shrink: 0; }
+  @media (max-width: 480px) {
+    .share-modal [data-act="shareStop"], .cli-modal [data-act="cliStop"] { padding: 20px 16px !important; }
+    .share-copy, .share-download { min-width: 0; }
+    .share-modal [data-act="shareStop"] > div:last-child { flex-direction: column; }
+    .command-palette [data-act="cmdStop"] { max-height: 80vh; overflow-y: auto !important; }
+  }
+
   /* ── Responsive: collapse the fixed rail into a stacked header on narrow viewports ── */
   @media (max-width: 900px) {
     .app { flex-direction: column; }
@@ -1120,7 +1136,7 @@
       <div class="narrative-headline" style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:clamp(20px,2.6vw,27px);letter-spacing:-0.02em;line-height:1.32;margin-top:10px;max-width:860px;text-wrap:pretty;">
         ${esc(narrativeLead)}${verdictText ? ` <span style="display:inline-block;padding:1px 12px;border-radius:8px;background:${verdictBg};color:${verdictColor};white-space:nowrap;">${esc(verdictText)}</span>` : ''}
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:20px;">${narrativeMetrics}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:10px;margin-top:20px;">${narrativeMetrics}</div>
     </div>`;
 
     // Score card
@@ -1180,7 +1196,7 @@
           <span style="width:8px;height:8px;border-radius:3px;background:${st.color};"></span>
           <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:var(--ink3);">${esc(st.label)}</span>
         </div>
-        <div style="display:flex;align-items:baseline;gap:6px;margin-top:10px;">
+        <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 6px;margin-top:10px;">
           ${valSpan}
           <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:500;color:var(--ink3);">${esc(st.unit)}</span>
         </div>
@@ -1192,7 +1208,7 @@
 
     const heroBento = `<div class="hero-stats" style="display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;align-items:stretch;">
       ${scoreCard}
-      <div style="flex:3 1 540px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));grid-auto-rows:1fr;gap:14px;">${statTiles}</div>
+      <div style="flex:3 1 540px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));grid-auto-rows:1fr;gap:14px;">${statTiles}</div>
     </div>`;
 
     // Period strip
@@ -1203,7 +1219,7 @@
       ['month', 'This month', p.month, 'var(--purple)', '0.25s'],
       ['all-time', 'Full window', p.allTime, 'var(--amber)', '0.3s'],
     ];
-    const periodStrip = `<div class="roi-headlines" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-top:14px;overflow:visible;">${periodDefs.map(([key, label, d, top, delay]) => `
+    const periodStrip = `<div class="roi-headlines" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr));gap:14px;margin-top:14px;overflow:visible;">${periodDefs.map(([key, label, d, top, delay]) => `
       <div class="period-card" data-period="${key}" style="border:1px solid var(--line2);border-radius:13px;background:linear-gradient(155deg,color-mix(in srgb,${top} 7%,var(--card)),var(--card) 58%);padding:15px 17px 14px;animation:riseSm .55s cubic-bezier(0.22,1,0.36,1) both;animation-delay:${delay};border-top:2px solid ${top};">
         <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:var(--ink3);">${esc(label)}</div>
         <div class="period-token-label" style="display:flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:${top};margin-top:11px;">
@@ -1228,7 +1244,7 @@
         <span style="font-size:12.5px;line-height:1.6;color:var(--ink2);text-wrap:pretty;">${esc(it.text)}</span>
       </div>`;
     }).join('');
-    const insightFeed = `<div class="insight-list" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-top:14px;">${insights}</div>`;
+    const insightFeed = `<div class="insight-list" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:12px;margin-top:14px;">${insights}</div>`;
 
     $('sec-overview').innerHTML = briefing + heroBento + periodStrip + insightFeed;
   }
@@ -1321,17 +1337,17 @@
     const fams = Object.keys(models).filter((k) => models[k].cost > 0).sort((a, b) => models[b].cost - models[a].cost);
     const famPcts = pctTo100(fams.map((fm) => models[fm].cost));
     const modelLegend = fams.map((fm, i) =>
-      `<div style="display:flex;align-items:center;gap:8px;font-size:12px;">
+      `<div class="model-legend-row" style="display:grid;grid-template-columns:8px minmax(0,1fr) 4ch 10ch;align-items:center;gap:8px;font-size:12px;">
         <span style="width:8px;height:8px;border-radius:3px;background:${famColorVar[models[fm].family || fm] || 'var(--ink3)'};"></span>
-        <span style="color:var(--ink2);flex:1;">${esc(famLabel(models, fm))}</span>
-        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink3);">${famPcts[i]}%</span>
-        <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;width:62px;text-align:right;">${esc(fmtMoney(models[fm].cost))}</span>
+        <span title="${esc(famLabel(models, fm))}" style="color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(famLabel(models, fm))}</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink3);text-align:right;">${famPcts[i]}%</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;text-align:right;white-space:nowrap;">${esc(fmtMoney(models[fm].cost))}</span>
       </div>`).join('');
 
     const toolEntries = Object.entries(v.toolBreakdown).sort((a, b) => b[1] - a[1]).slice(0, 9);
     const toolMax = Math.max(1, ...toolEntries.map(([, cnt]) => cnt));
     const toolRows = toolEntries.map(([name, cnt], i) =>
-      `<div style="display:grid;grid-template-columns:92px 1fr 44px;align-items:center;gap:10px;">
+      `<div style="display:grid;grid-template-columns:minmax(0,92px) minmax(0,1fr) 60px;align-items:center;gap:10px;">
         <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(name)}</span>
         <div style="height:8px;border-radius:5px;background:var(--hover);overflow:hidden;">
           <div style="height:100%;width:${Math.round(cnt / toolMax * 100)}%;border-radius:5px;background:linear-gradient(90deg, color-mix(in srgb, var(--blue) 70%, transparent), var(--blue));transform-origin:left;animation:growX .9s cubic-bezier(0.22,1,0.36,1) both;animation-delay:${(i * 0.05).toFixed(2)}s;"></div>
@@ -1345,7 +1361,7 @@
         <h2 style="font-family:'Bricolage Grotesque',sans-serif;font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0;">Models &amp; Tools</h2>
         <div style="flex:1;height:1px;background:var(--line2);"></div>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(290px,100%),1fr));gap:14px;">
         <div style="border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:20px 22px;box-shadow:var(--shadow);">
           <h3 style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink2);margin:0;">Spend by Model</h3>
           <div style="height:190px;margin-top:14px;position:relative;">
@@ -1399,7 +1415,7 @@
         { label: 'Repo $ / Commit', get: (p) => p.summary.avgCostPerCommit, fmt: fmtMoney, lowerBetter: true },
         { label: 'Line Survival', get: (p) => p.lineSurvival.survivalRate, fmt: pct, lowerBetter: false, max: 100 },
       ];
-      const cardOpen = `<div class="faceoff-section faceoff-card" style="border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:22px 26px;box-shadow:var(--shadow);margin-bottom:14px;position:relative;overflow:hidden;">`;
+      const cardOpen = `<div class="faceoff-scroll" style="overflow-x:auto;"><div class="faceoff-section faceoff-card" style="min-width:640px;border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:22px 26px;box-shadow:var(--shadow);margin-bottom:14px;position:relative;overflow:hidden;">`;
 
       if (faceAgents.length === 2) {
         const [A, B] = faceAgents;
@@ -1431,13 +1447,13 @@
         faceoff = `${cardOpen}
           ${bgMark(A, 'left')}
           ${bgMark(B, 'right')}
-          <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;position:relative;">
+          <div style="display:grid;grid-template-columns:1fr 150px 1fr;align-items:center;gap:14px;position:relative;">
             <div style="display:flex;align-items:center;gap:10px;">
               ${agentMark(A, 22)}
               <span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:16px;">${esc(A.label)}</span>
               ${gradeBadge(A.p.summary.overallGrade)}
             </div>
-            <span class="faceoff-vs" style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;letter-spacing:0.18em;color:var(--ink3);border:1px solid var(--line);border-radius:999px;padding:5px 13px;">VS</span>
+            <span class="faceoff-vs" style="justify-self:center;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;letter-spacing:0.18em;color:var(--ink3);border:1px solid var(--line);border-radius:999px;padding:5px 13px;">VS</span>
             <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;">
               ${gradeBadge(B.p.summary.overallGrade)}
               <span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:16px;">${esc(B.label)}</span>
@@ -1445,7 +1461,7 @@
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:13px;margin-top:20px;">${metrics.map(mk).join('')}</div>
-        </div>`;
+        </div></div>`;
       } else {
         // Three agents: label column + one column per agent. Bar length encodes
         // magnitude; the metric winner is bold + full-opacity.
@@ -1484,7 +1500,7 @@
             ${header}
           </div>
           <div style="display:flex;flex-direction:column;gap:13px;position:relative;">${rows}</div>
-        </div>`;
+        </div></div>`;
       }
     }
 
@@ -1568,7 +1584,7 @@
       <div style="display:flex;flex-wrap:wrap;gap:14px;">
         ${autoHub}
         <div style="flex:2.5 1 480px;min-width:0;display:flex;flex-direction:column;gap:14px;">
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;">${autoMetrics}</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr));gap:14px;">${autoMetrics}</div>
           ${attribution}
         </div>
       </div>`;
@@ -1613,13 +1629,13 @@
             <div style="flex:1;"></div>
             <span style="font-size:11px;color:var(--ink3);">peak: <span style="color:var(--green);font-family:'IBM Plex Mono',monospace;font-weight:600;">${esc(peakLabel)}</span></span>
           </div>
-          <div style="display:flex;flex-direction:column;gap:3px;margin-top:16px;">
+          <div class="heatmap-scroll" style="overflow-x:auto;margin-top:16px;"><div style="min-width:420px;display:flex;flex-direction:column;gap:3px;">
             ${heatRows}
             <div style="display:grid;grid-template-columns:30px 1fr;gap:8px;margin-top:2px;">
               <span></span>
               <div style="display:grid;grid-template-columns:repeat(24,1fr);gap:3px;">${hourLabels}</div>
             </div>
-          </div>
+          </div></div>
           <div style="display:flex;align-items:center;justify-content:flex-end;gap:7px;margin-top:12px;font-size:10.5px;color:var(--ink3);">
             Fewer
             <div style="display:flex;gap:2px;">
@@ -1641,7 +1657,7 @@
             <div style="height:10px;border-radius:6px;background:var(--hover);overflow:hidden;margin-top:13px;">
               <div style="height:100%;width:${(ls.survivalRate || 0)}%;border-radius:6px;background:linear-gradient(90deg,var(--purple),var(--blue));transform-origin:left;animation:growX 1.1s .25s cubic-bezier(0.22,1,0.36,1) both;"></div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:16px;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100px,100%),1fr));gap:10px;margin-top:16px;">
               <div><div style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:700;">${ls.totalAdded.toLocaleString()}</div><div style="font-size:10.5px;color:var(--ink3);margin-top:2px;">AI lines added</div></div>
               <div><div style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:700;color:var(--red);">${ls.totalChurned.toLocaleString()}</div><div style="font-size:10.5px;color:var(--ink3);margin-top:2px;">reworked &lt; 24h</div></div>
               <div><div style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:700;color:var(--ink2);">${ls.maturing.toLocaleString()}</div><div style="font-size:10.5px;color:var(--ink3);margin-top:2px;">still maturing</div></div>
@@ -1656,7 +1672,7 @@
             <div style="height:10px;border-radius:6px;background:var(--hover);overflow:hidden;margin-top:13px;">
               <div style="height:100%;width:${tk.cacheHitRate}%;border-radius:6px;background:linear-gradient(90deg,var(--blue),var(--cyan));transform-origin:left;animation:growX 1.1s .3s cubic-bezier(0.22,1,0.36,1) both;"></div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:16px;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100px,100%),1fr));gap:10px;margin-top:16px;">
               <div><div style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:700;">${esc(cacheFrom)}</div><div style="font-size:10.5px;color:var(--ink3);margin-top:2px;">tokens from cache</div></div>
               <div><div style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:700;color:var(--ink2);">${esc(cacheFresh)}</div><div style="font-size:10.5px;color:var(--ink3);margin-top:2px;">fresh input</div></div>
               <div><div style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:700;color:var(--cyan);">${esc(cacheSaved)}</div><div style="font-size:10.5px;color:var(--ink3);margin-top:2px;">vs uncached pricing</div></div>
@@ -1669,7 +1685,7 @@
   // ── Skills & MCP ──
   function rankedBarRows(entries, max, colorVar, emptyText) {
     if (!entries.length) return `<div style="font-size:12px;color:var(--ink3);padding:6px 0;">${esc(emptyText)}</div>`;
-    return entries.map(([name, cnt], i) => `<div style="display:grid;grid-template-columns:1fr 1fr 44px;align-items:center;gap:10px;">
+    return entries.map(([name, cnt], i) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 60px;align-items:center;gap:10px;">
       <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(name)}">${esc(name)}</span>
       <div style="height:8px;border-radius:5px;background:var(--hover);overflow:hidden;">
         <div style="height:100%;width:${Math.round(cnt / max * 100)}%;border-radius:5px;background:linear-gradient(90deg, color-mix(in srgb, ${colorVar} 70%, transparent), ${colorVar});transform-origin:left;animation:growX .9s cubic-bezier(0.22,1,0.36,1) both;animation-delay:${(i * 0.05).toFixed(2)}s;"></div>
@@ -1692,7 +1708,7 @@
     const adoptionExplanation = adoptionDenominator > 0
       ? `<strong style="color:var(--ink);font-weight:600;">How it’s calculated:</strong> matching sessions ÷ ${adoptionDenominator} total sessions in this window. Every row uses the same denominator. Categories overlap, so percentages do not add to 100%.`
       : 'No sessions in this window yet.';
-    const adoptionRows = adoptionDefs.length ? adoptionDefs.map((f, i) => `<div style="display:grid;grid-template-columns:1fr 1fr 84px;align-items:center;gap:10px;">
+    const adoptionRows = adoptionDefs.length ? adoptionDefs.map((f, i) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 100px;align-items:center;gap:10px;">
       <span style="font-size:12px;color:var(--ink2);">${esc(f.feature)}</span>
       <div style="height:8px;border-radius:5px;background:var(--hover);overflow:hidden;">
         <div style="height:100%;width:${f.pct}%;border-radius:5px;background:linear-gradient(90deg, color-mix(in srgb, var(--cyan) 70%, transparent), var(--cyan));transform-origin:left;animation:growX .9s cubic-bezier(0.22,1,0.36,1) both;animation-delay:${(i * 0.05).toFixed(2)}s;"></div>
@@ -1720,7 +1736,7 @@
         <h2 style="font-family:'Bricolage Grotesque',sans-serif;font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0;">Skills &amp; MCP</h2>
         <div style="flex:1;height:1px;background:var(--line2);"></div>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(290px,100%),1fr));gap:14px;">
         <div style="border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:20px 22px;box-shadow:var(--shadow);">
           <h3 style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink2);margin:0;">Top Skills</h3>
           <div style="display:flex;flex-direction:column;gap:9px;margin-top:16px;">${skillRows}</div>
@@ -1784,7 +1800,7 @@
       ? `${projects.length} repositor${projects.length === 1 ? 'y' : 'ies'}${projects.length > 1 ? ` · top repo is ${topShare}% of spend` : ''}`
       : 'No repositories correlated in this window.';
     const body = projects.length
-      ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px;">${rows}</div>`
+      ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(330px,100%),1fr));gap:12px;">${rows}</div>`
       : `<div style="border:1px solid var(--line2);border-radius:16px;background:var(--card);padding:24px;text-align:center;font-size:13px;color:var(--ink3);">No repositories correlated in this window.</div>`;
 
     $('sec-projects').innerHTML = `
@@ -1849,7 +1865,7 @@
       return `<button ${key ? `data-act="sort" data-arg="${key}"` : 'disabled'} title="${key ? 'Sort by ' + esc(label) : ''}" style="border:0;background:transparent;cursor:${key ? 'pointer' : 'default'};text-align:${align};font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:${color};padding:2px 0;">${esc(label)}${arrow}</button>`;
     }).join('');
 
-    const gridCols = '168px 1.1fr 1.15fr 64px 74px 84px 86px 110px 62px';
+    const gridCols = '160px minmax(0,1.1fr) minmax(0,1.15fr) 46px 62px 76px 68px 140px 48px';
     const rows = pageRows.map((x) => {
       const expanded = state.expanded === x.sessionId;
       const badge = srcBadge(x.source);
@@ -1882,26 +1898,26 @@
         expandBlock = `<div class="expand-row" style="padding:6px 18px 14px 44px;border-bottom:1px solid var(--line2);background:var(--bg2);animation:riseSm .25s ease both;">${commitRows}${noCommits}${taskNote}</div>`;
       }
       const contextCell = isRepository
-        ? `<span title="${esc(x.repoPath || '')}" style="font-size:13.5px;font-weight:500;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(x.projectName)}</span>`
+        ? `<span title="${esc(x.projectName)}${x.repoPath ? ' — ' + esc(x.repoPath) : ''}" style="display:block;font-size:13.5px;font-weight:500;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(x.projectName)}</span>`
         : `<div style="display:flex;align-items:center;gap:7px;min-width:0;">
-            <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:0.04em;padding:3px 7px;border-radius:5px;color:var(--ink2);background:var(--hover);white-space:nowrap;">Other task</span>
-            <span title="${esc(x.repoPath || '')}" style="font-size:12.5px;color:var(--ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(x.taskName || 'Unnamed task')}</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:0.04em;padding:3px 7px;border-radius:5px;color:var(--ink2);background:var(--hover);white-space:nowrap;flex-shrink:0;">Other task</span>
+            <span title="${esc(x.taskName || 'Unnamed task')}" style="font-size:12.5px;color:var(--ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(x.taskName || 'Unnamed task')}</span>
           </div>`;
       const commitsCell = isRepository
-        ? `<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;padding-right:14px;">
+        ? `<div style="display:flex;align-items:center;justify-content:flex-start;gap:6px;flex-direction:row-reverse;">
             <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;">${x.commitCount}</span>
             <span style="width:7px;height:7px;border-radius:50%;background:${confColor};" title="${esc(confLabel)}"></span>
           </div>`
-        : '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:12.5px;color:var(--ink3);text-align:right;padding-right:14px;">—</span>';
+        : '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:12.5px;color:var(--ink3);text-align:right;">—</span>';
       const linesCell = isRepository
-        ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:right;padding-right:14px;"><span style="color:var(--green);">+${x.linesAdded.toLocaleString()}</span> <span style="color:var(--ink3);">/</span> <span style="color:var(--red);">−${x.linesDeleted.toLocaleString()}</span></span>`
-        : '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:12.5px;color:var(--ink3);text-align:right;padding-right:14px;">—</span>';
+        ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:right;"><span style="color:var(--green);">+${x.linesAdded.toLocaleString()}</span> <span style="color:var(--ink3);">/</span> <span style="color:var(--red);">−${x.linesDeleted.toLocaleString()}</span></span>`
+        : '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:12.5px;color:var(--ink3);text-align:right;">—</span>';
       const gradeLabel = isRepository ? (x.grade || '—') : 'N/A';
       const gradeTitle = isRepository
         ? (x.grade ? '' : 'Cost booked to a sibling sub-repo session — not independently graded')
         : 'Commit ROI does not apply outside a Git repository';
       return `<div>
-        <div class="session-row${expanded ? ' expanded' : ''}" data-act="rowToggle" data-arg="${esc(x.sessionId)}" style="display:grid;grid-template-columns:${gridCols};align-items:center;padding:11px 18px;border-bottom:1px solid var(--line2);cursor:pointer;${expanded ? 'background:var(--bg2);' : ''}opacity:${x.isOrphaned ? 0.62 : 1};">
+        <div class="session-row${expanded ? ' expanded' : ''}" data-act="rowToggle" data-arg="${esc(x.sessionId)}" style="display:grid;grid-template-columns:${gridCols};column-gap:10px;align-items:center;padding:11px 18px;border-bottom:1px solid var(--line2);cursor:pointer;${expanded ? 'background:var(--bg2);' : ''}opacity:${x.isOrphaned ? 0.62 : 1};">
           <div style="display:flex;align-items:center;gap:8px;">
             <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--ink3);transform:rotate(${expanded ? '90deg' : '0deg'});transition:transform .2s;display:inline-block;">▶</span>
             <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--ink2);">${esc(date)}</span>
@@ -1909,11 +1925,11 @@
           <div class="session-context" style="min-width:0;">${contextCell}</div>
           <div style="display:flex;align-items:center;gap:7px;">
             <span title="${esc(srcLabel)}" style="display:inline-flex;flex-shrink:0;">${logoSvg(badge.logo, 12, srcColor, 'style="display:block"')}</span>
-            <span style="font-size:13px;color:var(--ink2);">${esc(fmtModel(x.model))}</span>
+            <span title="${esc(fmtModel(x.model))}" style="font-size:13px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(fmtModel(x.model))}</span>
           </div>
-          <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--ink2);text-align:right;padding-right:14px;">${x.userMessageCount + x.assistantMessageCount}</span>
-          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:var(--cyan);text-align:right;padding-right:14px;">${x.autopilotRatio > 0 ? x.autopilotRatio + '×' : '—'}</span>
-          <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;text-align:right;padding-right:14px;">${esc(fmtMoney(x.cost.totalCost))}</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--ink2);text-align:right;">${x.userMessageCount + x.assistantMessageCount}</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:var(--cyan);text-align:right;">${x.autopilotRatio > 0 ? x.autopilotRatio + '×' : '—'}</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;text-align:right;">${esc(fmtMoney(x.cost.totalCost))}</span>
           <div class="session-commits" style="text-align:right;">${commitsCell}</div>
           <div class="session-lines" style="text-align:right;">${linesCell}</div>
           <span style="display:inline-flex;justify-content:center;"><span class="session-grade" title="${esc(gradeTitle)}" style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;color:${gradeColor(x.grade)};background:${gradeBg(x.grade)};">${esc(gradeLabel)}</span></span>
@@ -1934,15 +1950,15 @@
       </div>
       <div style="border:1px solid var(--line2);border-radius:16px;background:var(--card);box-shadow:var(--shadow);overflow:hidden;">
         <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line2);flex-wrap:wrap;">
-          <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:220px;border:1px solid var(--line2);background:var(--bg2);border-radius:9px;padding:7px 12px;">
+          <div style="display:flex;align-items:center;gap:8px;flex:1 1 220px;min-width:0;border:1px solid var(--line2);background:var(--bg2);border-radius:9px;padding:7px 12px;">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="var(--ink3)" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg>
             <input id="session-search" value="${esc(state.q)}" placeholder="Search context, model, commit…" style="flex:1;border:0;outline:none;background:transparent;color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:12px;">
           </div>
-          <div style="display:flex;gap:4px;border:1px solid var(--line2);border-radius:9px;padding:3px;background:var(--bg2);">${filterChips}</div>
+          <div class="session-filters" style="display:flex;flex-wrap:wrap;gap:4px;border:1px solid var(--line2);border-radius:9px;padding:3px;background:var(--bg2);">${filterChips}</div>
         </div>
-        <div style="overflow-x:auto;overflow-y:hidden;">
-          <div style="min-width:960px;">
-            <div style="display:grid;grid-template-columns:${gridCols};gap:0;padding:10px 18px;border-bottom:1px solid var(--line2);background:var(--bg2);">${headers}</div>
+        <div class="session-scroll" style="overflow-x:auto;overflow-y:hidden;">
+          <div style="min-width:1100px;">
+            <div class="session-header" style="display:grid;grid-template-columns:${gridCols};column-gap:10px;padding:10px 18px;border-bottom:1px solid var(--line2);background:var(--bg2);">${headers}</div>
             ${rows}
           </div>
         </div>
